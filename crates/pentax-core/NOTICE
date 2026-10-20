@@ -390,7 +390,10 @@ retained original Kyty MIT grant continue to apply. PentaX modifications, 2026:
 transactional admission of the actual process-owned default JSON environment,
 live repeated readiness validation and eight append-only exact binding rows.
 Opaque initializer arguments remain unread. The source's void lifecycle bodies
-preserve live process-owned storage. Callback setup accepts only null; source
-logging-only success for a nonnull callback is not used as a registration or
-invocation implementation. No external allocator or official callback ABI is
-inferred. Existing markers and immutable default addresses remain unchanged.
+preserve live process-owned storage. Callback setup additionally retains one
+fixed process-owned receipt with complete opaque callback/context words; null
+clears it. Admission and owner checks precede replacement. The source's complete
+body only logs and returns zero; this bounded PentaX registration does not infer
+a callback trigger, invocation ABI or event delivery. No guest/host callback
+pointer is dereferenced or executed. No external allocator or official callback
+ABI is inferred. Existing markers and immutable default addresses are unchanged.

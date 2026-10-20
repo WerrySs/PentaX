@@ -28,13 +28,20 @@ pub(in super::super) fn service(
     match call.function {
         JsonFunction::InitializerTerminate | JsonFunction::InitializerDtor => Ok(0),
         JsonFunction::InitializerSetGlobalNullAccessCallback => {
-            if call.args[1] != 0 {
-                return Err(KernelStartupError::Kernel(Failure::Unsupported(
-                    "JSON null-access callback",
-                )));
+            // Fixed work and the caller's owner/source/site checks precede the
+            // only mutation. Store the complete opaque words; no guest read,
+            // allocation, target validation or callback execution occurs.
+            if call.args[1] == 0 {
+                let _ = state.null_access_registration.take();
+            } else {
+                let _ = state
+                    .null_access_registration
+                    .replace(NullAccessRegistration {
+                        callback: call.args[1],
+                        context: call.args[2],
+                    });
             }
-            // The supported null case stores no registration and never reads
-            // self/context. Nonnull ABI and invocation are not established.
+            state.owner = Some(memory.owner_id());
             Ok(0)
         }
         JsonFunction::InitializerInitializeV1 => {

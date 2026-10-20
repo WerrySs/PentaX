@@ -99,21 +99,41 @@ fn native_json_lifecycle_keeps_owned_defaults_and_values_in_both_exact_scopes() 
 }
 
 #[test]
-fn native_json_lifecycle_refuses_nonnull_callback_without_fetching_or_returning_success() {
+fn native_json_lifecycle_registers_opaque_callbacks_without_fetching_or_guest_mapping() {
     for (module, library) in [
         (b"Json2".as_slice(), b"Json2".as_slice()),
         (b"libSceJson".as_slice(), b"libSceJson2".as_slice()),
     ] {
         let mut program = Program::new();
-        opaque(&mut program, u64::MAX, u64::MAX);
-        program.call_nid(b"00oCq0RwSAY");
+        let mut calls = 0;
+        for offset in [0, 8, 16, 24, 32, 40, 48, 56] {
+            program.store(offset, 0x91a2_b3c4_d5e6_f708);
+        }
+        for (callback, context) in [
+            (u64::MAX, 0x9234_5678_9abc_def0),
+            (1_u64 << 63, 0),
+            (0, u64::MAX),
+        ] {
+            opaque(&mut program, u64::MAX, callback);
+            program.code.extend([0x48, 0xba]);
+            program.code.extend(context.to_le_bytes());
+            call(&mut program, &mut calls, b"00oCq0RwSAY");
+            program.result(0);
+            for function in [b"PR5k1penBLM", b"RujUxbr3haM"] {
+                opaque(&mut program, u64::MAX, u64::MAX);
+                call(&mut program, &mut calls, function);
+            }
+            for offset in [0, 8, 16, 24, 32, 40, 48, 56] {
+                program.word(offset, 0x91a2_b3c4_d5e6_f708);
+            }
+        }
         let image = program.finish(module, library);
         let (status, fields, text) = probe(&image);
-        assert_ne!(status, 0, "{text}");
-        assert_eq!(fields["code"], "runtime-service", "{text}");
-        assert_eq!(fields["runtime_failure"], "unsupported-service", "{text}");
+        assert_eq!(status, 0, "{text}");
+        assert_eq!(fields["value"], "42", "{text}");
+        assert_eq!(fields["service_stops"], calls.to_string(), "{text}");
         assert_eq!(fields["unavailable_functions"], "0", "{text}");
         assert_eq!(fields["kernel_handles_live"], "0", "{text}");
-        assert!(!fields.contains_key("value"), "{text}");
+        assert_eq!(fields["kernel_handles_accounted"], "0", "{text}");
     }
 }

@@ -91,18 +91,154 @@ fn initializer_admits_real_defaults_once_and_void_lifecycle_preserves_live_value
         ),
         Ok(0)
     );
-    assert!(matches!(
+    assert_eq!(
         lifecycle(
             &mut f,
             InitializerSetGlobalNullAccessCallback,
             [0, u64::MAX, 0],
             128 * 1024 * 1024
         ),
-        Err(KernelStartupError::Kernel(
-            pentax_kernel::Failure::Unsupported("JSON null-access callback")
-        ))
+        Ok(0)
+    );
+    assert!(matches!(
+        f.strings.null_access_registration,
+        Some(NullAccessRegistration {
+            callback: u64::MAX,
+            context: 0
+        })
     ));
     assert_eq!(f.kernel.usage().handles_live, handles);
+}
+
+#[test]
+fn null_access_registration_is_owner_bound_and_preserves_receipts_on_refusal() {
+    use JsonFunction::*;
+    let mut f = Fixture::new();
+    let mut other = Fixture::new();
+    let first = NullAccessRegistration {
+        callback: u64::MAX,
+        context: 0x9234_5678_9abc_def0,
+    };
+    assert!(f.strings.null_access_registration.is_none());
+    assert!(
+        lifecycle(
+            &mut f,
+            InitializerSetGlobalNullAccessCallback,
+            [u64::MAX, first.callback, first.context],
+            1023
+        )
+        .is_err()
+    );
+    assert!(f.strings.null_access_registration.is_none());
+    assert!(f.strings.owner.is_none());
+    assert_eq!(
+        lifecycle(
+            &mut f,
+            InitializerSetGlobalNullAccessCallback,
+            [u64::MAX, first.callback, first.context],
+            128 * 1024 * 1024
+        ),
+        Ok(0)
+    );
+    assert!(f.strings.null_access_registration == Some(first));
+    let owner = f.strings.owner;
+    assert_eq!(owner, Some(f.memory.pause().unwrap().owner_id()));
+    assert_eq!(f.kernel.usage().handles_live, 0);
+    assert_eq!(f.strings.guest_bytes, 0);
+    let work = f.work;
+    assert!(
+        lifecycle(
+            &mut f,
+            InitializerSetGlobalNullAccessCallback,
+            [0, 0, u64::MAX],
+            work + 1023
+        )
+        .is_err()
+    );
+    assert_eq!(f.work, work);
+    assert!(f.strings.null_access_registration == Some(first));
+    assert_eq!(f.strings.owner, owner);
+    // A separate actual native owner cannot overwrite or clear this receipt.
+    assert_eq!(
+        f.strings.service(
+            &mut other.memory.pause().unwrap(),
+            &mut other.kernel,
+            JsonCall {
+                function: InitializerSetGlobalNullAccessCallback,
+                args: [u64::MAX, 0, 0, 0, 0, 0],
+                vector_args: None,
+                defaults: ScalarDefaults {
+                    boolean: 0,
+                    integer: 0,
+                    real: 0
+                },
+                empty_string: 0,
+                empty_cstr: 0
+            },
+            &mut f.work,
+            128 * 1024 * 1024
+        ),
+        Err(KernelStartupError::NativeOwnerMismatch)
+    );
+    assert_eq!(f.work, work);
+    assert!(f.strings.null_access_registration == Some(first));
+    assert!(other.strings.null_access_registration.is_none());
+    let replacement = NullAccessRegistration {
+        callback: 1_u64 << 63,
+        context: u64::MAX,
+    };
+    assert_eq!(
+        lifecycle(
+            &mut f,
+            InitializerSetGlobalNullAccessCallback,
+            [0, replacement.callback, replacement.context],
+            128 * 1024 * 1024
+        ),
+        Ok(0)
+    );
+    assert!(f.strings.null_access_registration == Some(replacement));
+    for function in [InitializerTerminate, InitializerDtor] {
+        assert_eq!(
+            lifecycle(&mut f, function, [u64::MAX; 3], 128 * 1024 * 1024),
+            Ok(0)
+        );
+        assert!(f.strings.null_access_registration == Some(replacement));
+    }
+    // Container transactions swap their own staged registries, not this inline
+    // process receipt. Default initialization likewise must preserve it.
+    let array = f.base + 0x100;
+    f.call(ArrayCtor, array, 0).unwrap();
+    f.call(ArrayDtor, array, 0).unwrap();
+    assert!(f.strings.null_access_registration == Some(replacement));
+    assert_eq!(
+        lifecycle(&mut f, InitializerInitializeV1, [0; 3], 128 * 1024 * 1024),
+        Ok(0)
+    );
+    assert!(f.strings.null_access_registration == Some(replacement));
+    let handles = f.kernel.usage().handles_live;
+    assert_eq!(
+        lifecycle(
+            &mut f,
+            InitializerSetGlobalNullAccessCallback,
+            [u64::MAX, 0, u64::MAX],
+            128 * 1024 * 1024
+        ),
+        Ok(0)
+    );
+    assert!(f.strings.null_access_registration.is_none());
+    assert_eq!(f.kernel.usage().handles_live, handles);
+    assert_eq!(f.strings.owner, owner);
+    assert_eq!(
+        lifecycle(
+            &mut other,
+            InitializerSetGlobalNullAccessCallback,
+            [0, first.callback, first.context],
+            128 * 1024 * 1024
+        ),
+        Ok(0)
+    );
+    assert!(other.strings.null_access_registration == Some(first));
+    assert!(f.strings.null_access_registration.is_none());
 }
 
 #[test]

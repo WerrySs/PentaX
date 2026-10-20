@@ -1201,10 +1201,21 @@ argument is dereferenced, and no per-self ownership or custom allocator
 configuration is invented.
 
 Terminate and Dtor preserve process-owned live values/defaults, matching their
-complete empty-effect public bodies. Null callback setup returns zero with no
-registration and unread self/context; nonnull callback setup explicitly refuses
-until actual callback delivery can be implemented. This is a deliberate narrower
-policy than the source's logging-only return-zero branch. It does not claim
+complete empty-effect public bodies. Callback setup accepts all three opaque
+register words, matching the public body's return-zero acceptance. PentaX retains
+one fixed process-owned receipt containing the complete64-bit callback/context;
+null clears it and subsequent setup replaces it. The existing source/owner/site
+checks and fixed work admission precede the infallible inline mutation. No
+initializer-object layout or per-self lifetime is inferred; self is unread.
+No callback/context address is read, validated as code or invoked. No allocation
+or guest handle is needed, and low-work/foreign-owner refusal preserves the
+previous receipt. Ordinary container transactions and Terminate/Dtor preserve
+the registration; process teardown ends its ownership.
+
+The exact complete source body only logs these words and returns zero; it does
+not store a registration or define an invocation trigger. PentaX's retained
+receipt is an explicit bounded registration profile. Actual event delivery and
+callback invocation remain unimplemented; successful setup does not establish
 official firmware callback ABI, external allocator setup or full JSON lifecycle.
 
 `LibcInternalExt::LibcHeapGetTraceInfo` adapts the same pinned `libC.cpp` source:

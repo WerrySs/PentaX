@@ -45,12 +45,25 @@ struct WrapperRecord {
     live: bool,
 }
 
+// Setup is implemented as an owned receipt. No callback trigger or invocation
+// ABI is established by the complete pinned logging-only source body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "Opaque registration words are retained until a callback delivery contract exists"
+)]
+struct NullAccessRegistration {
+    callback: u64,
+    context: u64,
+}
+
 pub(super) struct JsonStrings {
     owner: Option<NativeOwnerId>,
     records: Vec<StringRecord>,
     wrappers: Vec<WrapperRecord>,
     guest_bytes: u64,
     containers: containers::Containers,
+    null_access_registration: Option<NullAccessRegistration>,
 }
 
 pub(super) struct JsonCall {
@@ -82,6 +95,7 @@ impl JsonStrings {
             wrappers: Vec::new(),
             guest_bytes: 0,
             containers: containers::Containers::new(),
+            null_access_registration: None,
         }
     }
 

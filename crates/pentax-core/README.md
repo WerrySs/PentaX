@@ -730,9 +730,14 @@ and late publication failures leave prior ownership and bytes intact.
 
 The complete pinned Terminate and Initializer destructor bodies have no object
 effects, so they preserve process-owned defaults and live Values. Null-access
-callback setup supports only a null callback, stores no registration and ignores
-opaque self/context words. A nonnull callback remains an explicit typed refusal
-until its actual invocation contract is implemented. These four roles append
+callback setup retains one owner-bound inline receipt containing the complete
+opaque64-bit callback/context words; null clears it and later setup replaces it.
+Fixed work admission precedes mutation. Setup ignores self and neither reads nor
+executes callback/context, allocates guest storage or consumes a handle. Low
+work and foreign-owner refusal preserve the previous receipt. Terminate and
+Dtor preserve this process-owned registration, whose lifetime ends with the
+process owner. Event delivery and callback invocation remain unimplemented.
+These four roles append
 only their canonical and independently observed exact scope pairs; the distinct
 Initialize ABI remains unavailable. Neither a complete allocator lifecycle nor
 official firmware callback behavior is claimed.
