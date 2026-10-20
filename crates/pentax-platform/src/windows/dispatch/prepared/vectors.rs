@@ -344,6 +344,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || packed_convert::form(instruction.code()).is_some()
         || precision_conversion(instruction.code()).is_some()
         || float_ops::form(instruction.code()).is_some()
+        || rounding::form(instruction.code()).is_some()
         || fused_float::form(instruction.code()).is_some()
         || mask_comparisons::form(instruction.code()).is_some()
         || float_ops::comparison_form(instruction.code()).is_some()
@@ -902,6 +903,74 @@ impl NativeBlockStepper<'_, '_, '_> {
             )?;
             next.rflags = (next.rflags & !0x8d5) | flags;
             next.mxcsr = control;
+        } else if let Some(form) = rounding::form(instruction.code()) {
+            let operand = form.source_operand();
+            if instruction.op_count() != operand + 2
+                || instruction.op_kind(operand + 1) != OpKind::Immediate8
+            {
+                return Err(NativeDispatchError::UnsupportedVectorInstruction);
+            }
+            if !mxcsr_control::valid(next.mxcsr) {
+                return Err(NativeDispatchError::InvalidState);
+            }
+            let destination = register_slot(instruction, 0, form.vector_bytes)?;
+            let width = if form.scalar {
+                form.element_bytes
+            } else {
+                form.vector_bytes
+            };
+            charge(
+                &mut self.machine.usage.work_units,
+                (width / form.element_bytes) as u64 * 128,
+                self.machine.limits.max_work_units,
+                "rounding work",
+            )?;
+            // Capture merge lanes and the complete operand before any result.
+            let mut output = if form.scalar {
+                vector_register(instruction, u32::from(!form.legacy), 16, &next)?
+            } else {
+                [0; 32]
+            };
+            let source = if instruction.op_kind(operand) == OpKind::Memory {
+                if instruction.memory_size().size() != width {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                let source_address = address(instruction, operand, &next)?;
+                // Legacy packed Type2 requires16-byte alignment. Scalar4/8B
+                // and all VEX sources permit unaligned ordinary-memory reads.
+                if form.legacy && !form.scalar && source_address & 15 != 0 {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                transferred = width as u64;
+                self.machine
+                    .usage
+                    .vector_bytes
+                    .checked_add(transferred)
+                    .ok_or(NativeDispatchError::Budget("vector bytes"))?;
+                let mut bytes = [0; 32];
+                memory.read(source_address, &mut bytes[..width])?;
+                bytes
+            } else {
+                vector_register(instruction, operand, form.vector_bytes, &next)?
+            };
+            for offset in (0..width).step_by(form.element_bytes) {
+                let mut bits = [0; 8];
+                bits[..form.element_bytes]
+                    .copy_from_slice(&source[offset..offset + form.element_bytes]);
+                let (result, control) = rounding::calculate(
+                    form.element_bytes == 8,
+                    u64::from_le_bytes(bits),
+                    instruction.immediate8(),
+                    next.mxcsr,
+                )?;
+                output[offset..offset + form.element_bytes]
+                    .copy_from_slice(&result.to_le_bytes()[..form.element_bytes]);
+                next.mxcsr = control;
+            }
+            next.xmm[destination..destination + 16].copy_from_slice(&output[..16]);
+            if !form.legacy {
+                next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
+            }
         } else if let Some(form) = fused_float::form(instruction.code()) {
             if instruction.op_count() != 3 {
                 return Err(NativeDispatchError::UnsupportedVectorInstruction);

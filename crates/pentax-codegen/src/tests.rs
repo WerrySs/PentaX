@@ -15,6 +15,7 @@ mod multiply_add_words;
 mod native_ymm;
 mod packed_convert;
 mod qword_comparisons;
+mod rounding;
 mod saturating_packs;
 mod source_window;
 mod timestamp_counter;

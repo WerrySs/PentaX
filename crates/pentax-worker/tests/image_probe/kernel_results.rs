@@ -75,6 +75,8 @@ mod native_ymm;
 mod packed_convert;
 #[path = "qword_comparisons.rs"]
 mod qword_comparisons;
+#[path = "rounding.rs"]
+mod rounding;
 #[path = "saturating_packs.rs"]
 mod saturating_packs;
 

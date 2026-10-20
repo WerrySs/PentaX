@@ -432,6 +432,8 @@ mod mxcsr_control;
 mod packed_convert;
 #[path = "prepared/packed_vectors.rs"]
 mod packed_vectors;
+#[path = "prepared/rounding.rs"]
+mod rounding;
 #[path = "prepared/saturating_packs.rs"]
 mod saturating_packs;
 #[path = "prepared/scalar_convert.rs"]

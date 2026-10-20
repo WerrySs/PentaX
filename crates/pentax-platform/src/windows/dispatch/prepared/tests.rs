@@ -30,6 +30,8 @@ mod float_arithmetic;
 mod float_comparisons;
 #[path = "tests/qword_comparisons.rs"]
 mod qword_comparisons;
+#[path = "tests/rounding.rs"]
+mod rounding_tests;
 #[path = "tests/saturating_packs.rs"]
 mod saturating_packs_tests;
 
