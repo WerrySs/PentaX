@@ -133,11 +133,12 @@ BMI support does not authorize vector state. Native consumers must check actual
 host BMI support before entry; no software BMI fallback is provided here.
 
 `with_native_ymm_registers()` explicitly requests a separate closed profile of
-26 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
+38 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
 VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
-128/256-bit vectors. Every operand must be a same-width XMM0–15 or YMM0–15;
-all memory encodings, GPR transfers, floating-point operations, vector-state
-control and EVEX remain excluded. Existing legacy SSE2 admission is unchanged.
+128/256-bit vectors, plus VADDPS/PD, VSUBPS/PD and VMULPS/PD at both widths.
+Every operand must be a same-width XMM0–15 or YMM0–15; all memory encodings,
+GPR transfers, scalar or other floating-point operations, vector-state control
+and EVEX remain excluded. Existing legacy SSE2 admission is unchanged.
 The request requires declared AVX plus each decoded instruction's exact feature
 requirements, including AVX2 for the 256-bit integer operations. Decoder
 reserved-field checks and existing prefix gates still apply.
@@ -150,6 +151,38 @@ without it, the default mediated path remains in use. Its closed aggregate
 `native_ymm_mode=sse2|avx|avx2` field reports that actual engine mode, not host
 identity or the guest CPUID profile. No guest feature advertisement is changed,
 and no performance gain is claimed without execution measurements.
+
+Packed native ADD/SUB/MUL uses the existing checked host-compatible MXCSR
+profile: all six numeric exceptions must be masked, reserved or unsupported
+control bits are refused, and only admitted DAZ/FTZ and rounding settings can
+reach the bridge. Logical source order is preserved, including NaN payload
+priority; instructions are neither commuted nor fused. The bridge captures
+sticky guest status and the full active vector state before restoring host
+control. These twelve forms need AVX, including the 256-bit forms; AVX2 is not
+required. Memory arithmetic retains exact live 16/32-byte software mediation.
+Default policies and hosts without the admitted full-YMM mode retain that
+fallback for register arithmetic too. No guest CPUID or control authority grows.
+
+Consecutive admitted register operations can share the existing finite native
+block. Every live source/cache/owner/operand/stack check remains in place, with
+the existing 256-instruction/4096-byte default block limits. The complete joined
+body's ordinary memory accesses are admitted before entry. Consequently a later
+denied native read can refuse the body before an earlier register operation;
+identical partial-fault state across former mediation boundaries is not claimed.
+This remains the existing fail-closed block model, without precise guest fault
+recovery or unchecked native chaining. Native instructions contribute to the
+actual `native_instructions` counter; `vector_ops` counts mediated operations
+and intentionally decreases for newly emitted forms. Actual-path work and
+memory checks remain charged; old aggregate counts are not fabricated.
+
+The ignored original worker test `native_packed_float_original_baseline_measurement`
+requires explicit `PENTAX_PACKED_FLOAT_BASELINE_WORKER` and `PENTAX_TEST_WORKER`
+artifacts, independently verified by the coordinating runner. It uses the same
+finite 50,000-iteration inputs for separated and coalesced arithmetic and the
+existing extended-startup profile, without changing any production limit.
+It checks results and intentional native/mediated counter differences, then
+records end-to-end process elapsed time, including startup/teardown, cache and
+work counters. There is no timing assertion or commercial-title extrapolation.
 Alignment NOPs retain ignored segment/address prefixes without computing or
 checking a memory operand that the instruction never accesses.
 LEA likewise ignores segment overrides without reading a segment base. Its

@@ -1,5 +1,21 @@
 # Upstream provenance
 
+The optional native packed-floating profile admits twelve exact register-only
+VEX ADDPS/PD, SUBPS/PD and MULPS/PD forms at 128/256 bits. Its instruction/AVX,
+logical operand and upper-vector contracts follow
+[Intel SDM Volume 2A](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf)
+and [Volume 2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf).
+[Volume 1](https://cdrdv2-public.intel.com/843827/253665-sdm-vol-1-dec-24.pdf)
+section 4.8.3.5/Table 4-7 explicitly gives SSE/AVX NaN source priority;
+sections 11.5.3.1 and 14.10 define per-lane masked exception aggregation and AVX
+numeric masks, while section 14.3 requires actual CPU and OS-enabled vector state.
+Original fixtures use literal encodings and copied bit patterns, comparing the
+admitted packed execution with the existing scalar SSE mediator under the same
+checked MXCSR. This extends no guest CPUID/control or memory access authority.
+No external emulator implementation, manual pseudocode or commercial guest
+content is copied. Hardware availability, actual execution and measured timing
+must be reported separately; source review alone establishes no speedup.
+
 The three non-MMX/non-EVEX PMADDWD forms use original Rust signed-word
 multiplication and wrapping dword addition following the
 [Intel Volume 2B PMADDWD contract](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)

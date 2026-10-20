@@ -239,7 +239,7 @@ fn twenty_six_register_forms_require_explicit_mode_and_exact_positive_cpu_featur
 }
 
 #[test]
-fn requested_native_ymm_profile_keeps_memory_fp_evex_prefix_and_reserved_forms_closed() {
+fn requested_native_ymm_profile_keeps_memory_other_fp_evex_prefix_and_reserved_forms_closed() {
     let policy = TranslationPolicy::new(
         CpuFeatures::x64_sse2()
             .with(CpuidFeature::AVX)
@@ -267,10 +267,10 @@ fn requested_native_ymm_profile_keeps_memory_fp_evex_prefix_and_reserved_forms_c
             });
         }
     }
-    // Valid neighboring operations retain mediation: FP arithmetic/logic/moves,
+    // Valid neighboring operations retain mediation: FP divide/logic/moves,
     // GPR-vector transfer, vector state control, and EVEX saturation with masking.
     for code in [
-        vec![0xc4, 0x41, 0x10, 0x58, 0xce, 0xc3],
+        vec![0xc4, 0x41, 0x10, 0x5e, 0xce, 0xc3],
         vec![0xc4, 0x41, 0x10, 0x54, 0xce, 0xc3],
         vec![0xc4, 0x41, 0x78, 0x10, 0xce, 0xc3],
         vec![0xc4, 0x61, 0x79, 0x6e, 0xc8, 0xc3],

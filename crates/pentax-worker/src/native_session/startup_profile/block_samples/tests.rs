@@ -220,19 +220,21 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
     let longest = Code::values()
         .max_by_key(|code| format!("{code:?}").len())
         .unwrap();
-    let mut observer = BlockSamples::default();
-    observer.planned = Some(longest);
-    observer.counts = [[u64::MAX; 2]; 12];
-    observer.completed = u64::MAX;
-    observer.records = u64::MAX;
-    observer.work = u64::MAX;
-    observer.maximum_work = u64::MAX;
-    observer.epoch_changes = u64::MAX;
-    observer.recent = 64;
-    observer.distinct = 64;
-    observer.max_repeat = 64;
-    observer.disabled = true;
-    observer.overflow = true;
+    let observer = BlockSamples {
+        planned: Some(longest),
+        counts: [[u64::MAX; 2]; 12],
+        completed: u64::MAX,
+        records: u64::MAX,
+        work: u64::MAX,
+        maximum_work: u64::MAX,
+        epoch_changes: u64::MAX,
+        recent: 64,
+        distinct: 64,
+        max_repeat: 64,
+        disabled: true,
+        overflow: true,
+        ..Default::default()
+    };
     let fields = observer.protocol_fields();
     assert!(fields.len() <= 2048, "{}", fields.len());
     assert_eq!(fields.matches("sample_fp_forms=").count(), 1);

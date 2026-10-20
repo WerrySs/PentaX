@@ -68,7 +68,9 @@ impl TranslationPolicy {
     pub const fn features(self) -> CpuFeatures {
         self.features
     }
-    /// Request the closed register-only VEX integer profile. This is not host
+    /// Request the closed register-only VEX profile, including twelve packed
+    /// ADD/SUB/MUL floating-point forms under the runtime's masked MXCSR policy.
+    /// This is not host
     /// detection or execution authority: the runtime must independently bind
     /// it to an admitted full-YMM entry/trailer mode and actual CPU/OS features.
     pub const fn with_native_ymm_registers(mut self) -> Self {
@@ -268,7 +270,9 @@ pub(crate) fn ordinary(
     Ok(())
 }
 
-/// Twenty-six exact decoded forms, all nonfloating and register-only. W/L,
+/// Thirty-eight exact decoded forms, all register-only. The twelve packed
+/// ADD/SUB/MUL floating-point forms require the runtime's checked masked MXCSR
+/// profile, just like already admitted legacy SSE arithmetic. W/L,
 /// mandatory prefixes and reserved fields remain the pinned decoder's contract.
 /// Memory encodings sharing a Code are explicitly excluded below.
 fn native_ymm_registers(instruction: &Instruction) -> bool {
@@ -290,7 +294,13 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vpacksswb_xmm_xmm_xmmm128
         | VEX_Vpackssdw_xmm_xmm_xmmm128
         | VEX_Vpackuswb_xmm_xmm_xmmm128
-        | VEX_Vpackusdw_xmm_xmm_xmmm128 => (16, 3),
+        | VEX_Vpackusdw_xmm_xmm_xmmm128
+        | VEX_Vaddps_xmm_xmm_xmmm128
+        | VEX_Vaddpd_xmm_xmm_xmmm128
+        | VEX_Vsubps_xmm_xmm_xmmm128
+        | VEX_Vsubpd_xmm_xmm_xmmm128
+        | VEX_Vmulps_xmm_xmm_xmmm128
+        | VEX_Vmulpd_xmm_xmm_xmmm128 => (16, 3),
         VEX_Vpand_ymm_ymm_ymmm256
         | VEX_Vpandn_ymm_ymm_ymmm256
         | VEX_Vpor_ymm_ymm_ymmm256
@@ -299,7 +309,13 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vpacksswb_ymm_ymm_ymmm256
         | VEX_Vpackssdw_ymm_ymm_ymmm256
         | VEX_Vpackuswb_ymm_ymm_ymmm256
-        | VEX_Vpackusdw_ymm_ymm_ymmm256 => (32, 3),
+        | VEX_Vpackusdw_ymm_ymm_ymmm256
+        | VEX_Vaddps_ymm_ymm_ymmm256
+        | VEX_Vaddpd_ymm_ymm_ymmm256
+        | VEX_Vsubps_ymm_ymm_ymmm256
+        | VEX_Vsubpd_ymm_ymm_ymmm256
+        | VEX_Vmulps_ymm_ymm_ymmm256
+        | VEX_Vmulpd_ymm_ymm_ymmm256 => (32, 3),
         _ => return false,
     };
     instruction.op_count() == operands

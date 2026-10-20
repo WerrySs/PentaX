@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Original owned-memory/metadata tests. No test calls `step`, enters the
-//! assembly bridge or executes native cache/guest code. Segment cases call the
-//! checked Rust memory semantics directly, without changing host FS/GS.
+//! Original owned-memory/metadata tests. Most cases call checked Rust semantics
+//! directly. Explicit native_packed_float cases enter the independently admitted
+//! bridge on original register-only code; segment cases never change host FS/GS.
 
 #[path = "tests/align_right.rs"]
 mod align_right_tests;
@@ -71,6 +71,8 @@ mod multiply_vectors;
 mod mxcsr_registers;
 #[path = "tests/native_cache.rs"]
 mod native_cache;
+#[path = "tests/native_packed_float.rs"]
+mod native_packed_float_tests;
 #[path = "tests/native_ymm.rs"]
 mod native_ymm_tests;
 #[path = "tests/packed_convert.rs"]
