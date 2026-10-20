@@ -7,6 +7,16 @@
 use super::{Driver, Failure, NativeRange, PausedNativeMemory, add, compute, draw};
 use std::mem::size_of;
 
+impl super::Limits {
+    fn graphics_backend_limits(self) -> pentax_platform::vulkan::GpuLimits {
+        let mut limits = self.gpu;
+        if let Some(work) = self.graphics_backend_work {
+            limits.max_work = work;
+        }
+        limits
+    }
+}
+
 impl Driver {
     #[cfg(test)]
     pub(super) fn submit_graphics(
@@ -304,11 +314,12 @@ impl Driver {
                     .ok_or(Failure::Limit)?,
             );
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
+            let gpu_limits = self.limits.graphics_backend_limits();
             let current = super::super::graphics::execute_draw_current(
                 cursor.into_pause(),
                 command,
                 &limits,
-                &self.limits.gpu,
+                &gpu_limits,
                 &sources,
                 |prepared, preflight, may_execute| {
                     let vertices = add(

@@ -111,6 +111,10 @@ pub struct Limits {
     pub commands: compute::CommandLimits,
     pub graphics: draw::Limits,
     pub graphics_commands: draw::CommandLimits,
+    /// Optional graphics-only backend work ceiling, in conservative work units,
+    /// not bytes or elapsed time. None preserves `gpu.max_work`; compute always
+    /// uses the unchanged `gpu` limits, including its original work ceiling.
+    pub graphics_backend_work: Option<u64>,
     pub gpu: GpuLimits,
 }
 impl Default for Limits {
@@ -134,6 +138,7 @@ impl Default for Limits {
             commands: compute::CommandLimits::default(),
             graphics: draw::Limits::default(),
             graphics_commands: draw::CommandLimits::default(),
+            graphics_backend_work: None,
             gpu: GpuLimits::default(),
         }
     }

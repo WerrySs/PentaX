@@ -596,6 +596,9 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
     let mut unavailable_functions = None;
     let result = (|| {
         let mut intake = intake(args, &limits)?;
+        let present_window = args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--present-window" && pair[1] == "yes");
         if args
             .chunks_exact(2)
             .any(|pair| pair[0] == "--memory-profile" && pair[1] == "runtime")
@@ -639,6 +642,15 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
             // allowance. Only this explicit supervised profile gets a larger
             // finite call count; memory, work, shader slots and GPU caps stay.
             limits.graphics.max_calls = 4096;
+        }
+        if present_window {
+            // Explicit presented-startup work profile. These are conservative
+            // work units, not RAM or a promise of throughput. A full-HD tiled
+            // LOAD/draw/retile needs more than the compact preparation ceiling;
+            // SPIR-V-word raster admission has a separate graphics-only bound.
+            // Compute, cumulative driver work, memory and time caps stay fixed.
+            limits.graphics.graphics.max_work = 256 * 1024 * 1024;
+            limits.graphics.graphics_backend_work = Some(64 * 1024 * 1024 * 1024);
         }
         limits.startup_libc = intake.startup_libc;
         limits.startup.system = intake.system;
@@ -724,10 +736,7 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 initial.gpr[5] = entry.frame_pointer;
                 initial.gpr[7] = entry.arguments;
                 initial.gpr[6] = entry.exit_handler;
-                let run = if args
-                    .chunks_exact(2)
-                    .any(|pair| pair[0] == "--present-window" && pair[1] == "yes")
-                {
+                let run = if present_window {
                     run_prepared_with_window
                 } else {
                     run_prepared_with_initializer

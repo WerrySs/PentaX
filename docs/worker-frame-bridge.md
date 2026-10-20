@@ -6,6 +6,11 @@ and capture policy. A consumer supplies bounded byte transport; transport
 acceptance, export, window creation and texture upload do not acknowledge a
 guest flip.
 
+The window option also selects the finite
+[presented-startup graphics work policy](presented-startup-graphics-work.md).
+It changes only per-draw preparation and graphics backend work ceilings;
+compute, memory, cumulative driver work and supervisor limits remain separate.
+
 The core exposes an allocation-free peek at the oldest READY request. An older
 incomplete or already handed-off request blocks later frames. The peek checks
 the actual native owner and returns dimensions, declared color/alpha intent,
