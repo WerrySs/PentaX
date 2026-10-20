@@ -232,7 +232,11 @@ pub(super) fn stop(
         &mut session.provider_work,
         session.plan.limits.max_provider_work,
     )?;
-    match marker.function {
+    // Attribute only a failure inside the already admitted public body. Keep
+    // every source/owner/site/ID/continuation/live-byte refusal above unlabeled,
+    // and leave successful JSON calls in their existing other-provider bucket.
+    // The closure also retains body-local `?` failures for this one epilogue.
+    let result = (|| match marker.function {
         JsonFunction::InitializerCtor => {
             // KytyPS5 f186 libJson2.cpp476-480 returns the complete self word
             // unchanged. It performs no member/base/vptr initialization and
@@ -313,8 +317,16 @@ pub(super) fn stop(
                 session.plan.limits.max_provider_work,
             )
         }
+    })();
+    if result.is_err() {
+        session.last_admitted_kernel_service = marker.function.public_name();
     }
+    result
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "json_runtime/attribution_tests.rs"]
+mod attribution_tests;

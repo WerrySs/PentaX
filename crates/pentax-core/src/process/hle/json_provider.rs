@@ -457,6 +457,83 @@ pub(crate) enum JsonFunction {
     InitializerSetGlobalNullAccessCallback,
 }
 
+impl JsonFunction {
+    /// Public source label for failure diagnostics only. Resolve through this
+    /// factory's actual exported NID, rather than formatting an internal enum.
+    /// Both scans are over fixed immutable tables; no guest input or allocation
+    /// participates. The private terminal marker has no export and no label.
+    pub(super) fn public_name(self) -> Option<&'static str> {
+        let marker = MARKERS.iter().position(|marker| marker.function == self)?;
+        let nid = EXPORTS.iter().find(|export| export.marker == marker)?.nid;
+        // PUBLIC KytyPS5 f186b357 libJson2.cpp registrations1072-1154,
+        // blob d6e968f019fa61e0adc5224cd20be1ecd3261487. These are exact
+        // function identities, not inferred names, scopes or new bindings.
+        Some(match nid {
+            b"-hJRce8wn1U" => "LibJson2::JsonMemAllocatorCtor",
+            b"qBMjqyBn3OM" => "LibJson2::JsonValueCtor",
+            b"UeuWT+yNdCQ" => "LibJson2::JsonValueBoolCtor",
+            b"0lLK8+kDqmE" => "LibJson2::JsonValueIntCtor",
+            b"CbrT3dwDILo" => "LibJson2::JsonValueTypeCtor",
+            b"5yHuiWXo2gg" => "LibJson2::JsonValueSetBool",
+            b"QxVVYhP-mvg" => "LibJson2::JsonValueSetInt",
+            b"SIe1ZmW7e7s" => "LibJson2::JsonValueSetUInt",
+            b"IKQimvG9Wqs" => "LibJson2::JsonValueSetType",
+            b"SHtAad20YYM" => "LibJson2::JsonValueGetType",
+            b"zTwZdI8AZ5Y" => "LibJson2::JsonValueGetBoolean",
+            b"DIxvoy7Ngvk" => "LibJson2::JsonValueGetInteger",
+            b"3qrge7L-AU4" => "LibJson2::JsonValueGetReal",
+            b"fSb2oQTNrgA" => "LibJson2::JsonValueCopyCtor",
+            b"4zrm6VrgIAw" => "LibJson2::JsonValueAssign",
+            b"WTtYf+cNnXI" => "LibJson2::JsonValueDtor",
+            b"FIjXN2TkuTs" => "LibJson2::JsonValueClearMethod",
+            b"RBw+4NukeGQ" => "LibJson2::JsonValueCount",
+            b"OcAgPxcq5Vk" => "LibJson2::JsonMemAllocatorDtor",
+            b"sOmU4vnx3s0" => "LibJson2::JsonValueDoubleCtor",
+            b"BSmWDIkV4w4" => "LibJson2::JsonValueSetDouble",
+            b"qSmqLXXCPas" => "LibJson2::JsonStringCtor",
+            b"9KUZFjI1IxA" => "LibJson2::JsonStringCStringCtor",
+            b"cG1VE2HMl6c" => "LibJson2::JsonStringDtor",
+            b"cn9svYGWKDQ" => "LibJson2::JsonStringAssign",
+            b"L1KAkYWml-M" => "LibJson2::JsonStringCStr",
+            b"EUH+EmT-v9E" => "LibJson2::JsonStringLength",
+            b"b9V6fmppLXY" => "LibJson2::JsonValueCStringCtor",
+            b"sZIoMRGO+jk" => "LibJson2::JsonValueStringCtor",
+            b"6l3Bv2gysNc" => "LibJson2::JsonValueSetString",
+            b"epJ6x2LV0kU" => "LibJson2::JsonValueGetString",
+            b"Ncel8t2Rrpc" => "LibJson2::JsonValueToString",
+            b"R7FDWtcN6f8" => "LibJson2::JsonValueSerialize",
+            b"cK6bYHf-Q5E" => "LibJson2::JsonInitializerCtor",
+            b"OJPTonqdg0I" => "LibJson2::JsonObjectCtor",
+            b"a+W7HHlwpBs" => "LibJson2::JsonObjectCopyCtor",
+            b"5JmzZt8twAo" => "LibJson2::JsonObjectDtor",
+            b"ERuf9y0DY84" => "LibJson2::JsonObjectIndex",
+            b"JP-PtKMiI1E" => "LibJson2::JsonArrayCtor",
+            b"HJ8GpRT1aiw" => "LibJson2::JsonArrayDtor",
+            b"zQtLRTqceMY" => "LibJson2::JsonArrayPushBack",
+            b"3xUXnmUkXfo" => "LibJson2::JsonValueObjectCtor",
+            b"iZeYfOxtMRg" => "LibJson2::JsonValueArrayCtor",
+            b"dFCphqnd+a4" => "LibJson2::JsonValueSetObject",
+            b"IlsmvBtMkak" => "LibJson2::JsonValueGetObject",
+            b"ONT8As5R1ug" => "LibJson2::JsonValueGetArray",
+            b"HwDt5lD9Bfo" => "LibJson2::JsonValueIndexString",
+            b"XlWbvieLj2M" => "LibJson2::JsonValueIndexUInt",
+            b"wLsJlmgEIaI" => "LibJson2::JsonValueReferValueKey",
+            b"bcH5EnFE2xY" => "LibJson2::JsonArrayBegin",
+            b"WXF2ihRF+B8" => "LibJson2::JsonArrayEnd",
+            b"5AZPp99ogrc" => "LibJson2::JsonArrayIteratorNotEqual",
+            b"wcgr5mte7T8" => "LibJson2::JsonArrayIteratorDereference",
+            b"w5+VCznos5E" => "LibJson2::JsonArrayIteratorIncrement",
+            b"9yLjn46Ypfs" => "LibJson2::JsonArrayIteratorDtor",
+            b"S5JxQnoGF3E" => "LibJson2::JsonParserParse",
+            b"Cxwy7wHq4J0" => "LibJson2::JsonInitializerInitializeV1",
+            b"PR5k1penBLM" => "LibJson2::JsonInitializerTerminate",
+            b"RujUxbr3haM" => "LibJson2::JsonInitializerDtor",
+            b"00oCq0RwSAY" => "LibJson2::JsonInitializerSetGlobalNullAccessCallback",
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct JsonMarker {
     pub function: JsonFunction,
