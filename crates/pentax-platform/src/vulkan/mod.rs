@@ -3,7 +3,7 @@
 // Modified 2026 for PentaX: bounded owned Rust Vulkan port; see NOTICE.
 
 //! Owned Vulkan resources ported from the pinned Kyty renderer. Public submission
-//! accepts closed original factories or opaque prepared compute compiler products.
+//! accepts closed original factories or opaque prepared compiler products.
 //! No caller supplies SPIR-V, Vulkan handles, guest addresses or host pointers.
 //! Driver calls are an unsafe boundary, not a shader or process sandbox.
 
@@ -17,6 +17,8 @@ mod commands;
 mod compute;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod device;
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+mod graphics;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod pipeline;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -55,6 +57,47 @@ pub fn run_compute(
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     {
         compute::run(prepared, *limits)
+    }
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+    {
+        let _ = (prepared, limits);
+        Err(VulkanError::UnsupportedHost)
+    }
+}
+
+/// Fenced RGBA8 result of an actual prepared guest draw. Construction is private:
+/// callers cannot substitute arbitrary pixels for a completed GPU submission.
+pub struct GraphicsReadback {
+    bytes: Vec<u8>,
+    usage: GpuUsage,
+}
+impl fmt::Debug for GraphicsReadback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GraphicsReadback")
+            .field("bytes", &self.bytes.len())
+            .field("usage", &self.usage)
+            .finish()
+    }
+}
+impl GraphicsReadback {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn usage(&self) -> GpuUsage {
+        self.usage
+    }
+}
+
+/// Upload the actual linear target, execute its prepared guest vertex/pixel
+/// shaders and return fenced pixels. This does not present a window or accept a
+/// tiled surface. Keep the original guest owner paused through writeback.
+pub fn run_graphics(
+    prepared: &pentax_gpu::graphics::PreparedDraw,
+    limits: &GpuLimits,
+) -> Result<GraphicsReadback, VulkanError> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        graphics::run(prepared, *limits)
     }
     #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     {
@@ -278,6 +321,9 @@ impl Budget {
         let mut out = Vec::new();
         out.try_reserve_exact(bytes)
             .map_err(|_| VulkanError::Allocation)?;
+        // Allocators may round reserve_exact upward. Retain and charge the
+        // actual capacity, including owned draw readback, rather than its len.
+        self.host((out.capacity() - bytes) as u64)?;
         out.resize(bytes, 0);
         Ok(out)
     }

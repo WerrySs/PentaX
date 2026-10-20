@@ -43,6 +43,31 @@ No source guest-pointer casting, unbounded caches, global renderer state,
 environment-controlled compatibility behavior or guest command parser is ported.
 This is a ported subsystem profile, not the complete renderer.
 
+The additional prepared-graphics execution slice uses these PUBLIC sources:
+KytyPS5/KytyPS5@7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3
+* src/graphics/guest_gpu/graphicsRun.cpp
+  Git blob 41aeee369b497769e0d62f27ad7df94e7d069bdd:
+  DrawIndexAuto forwarding to the retained renderer.
+* src/graphics/host_gpu/renderer/renderDraw.cpp
+  Git blob fada73b93e4f7c45f3bae23a653916d9445c4fc8:
+  DrawAuto and EmitDrawPrimitives use actual guest shader/target/draw state.
+* src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+  Git blob b54834970d9355fe26ecaee5b83199e0895ba967:
+  graphics pipeline state composition.
+The same retained InoriRus MIT grant and GPL-2.0-only port license apply.
+PentaX additions upload actual linear RGBA8 target contents, LOAD them, draw
+with the actual prepared compiler products, fence and read back every pixel,
+and issue a core completion only after same-owner transactional writeback.
+Stage push data is merged by manifest placement (normally VS dword 0 and PS
+dword 16); conflicting live overlaps are refused. This first profile excludes
+descriptor resources, interpolation, tiled/DCC targets, depth, blending, MSAA,
+indexed draws and presentation. It does not replace the registered tiled-video
+surface conversion or prove that any commercial title frame is presented.
+Vulkan load/store, transfer and push-constant requirements are from:
+https://docs.vulkan.org/spec/latest/chapters/renderpass.html
+https://docs.vulkan.org/spec/latest/chapters/synchronization.html
+https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPushConstants.html
+
 Vulkan binding dependency:
 ash 0.38.0+1.3.281, source revision
 b724b78dac8d83879ed7a1aad2b91bb9f2beb5cf (ash-rs/ash tag 0.38.0).

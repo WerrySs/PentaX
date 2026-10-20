@@ -14,6 +14,7 @@ use std::fmt;
 
 mod agc_defaults;
 pub mod driver;
+pub mod graphics;
 pub mod shaders;
 pub mod video;
 

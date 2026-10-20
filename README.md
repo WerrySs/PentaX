@@ -40,11 +40,19 @@ system-service contracts and reusable runtime components.
 | CPU execution | A bounded Windows x86-64 native worker with mediated instructions, checked memory access and explicit unsupported operations. |
 | System services | Stateful kernel/libc subsets, read-only game-data mounts and selected module-initialization paths. |
 | Memory | Owned guest mappings, shared physical backing, independent CPU/GPU access rights and bounded resource policies. |
-| Graphics | Shader decoding and a bounded compiler to SPIR-V; original compute and graphics diagnostics verified through Vulkan readback. A scoped guest compute bridge is available. |
+| Graphics | Shader compilation to SPIR-V, guest compute and a bounded nonindexed triangle-list draw profile for linear RGBA8 targets, with target LOAD, fenced readback and atomic guest writeback. |
+| Video output | An owner-bound CPU flip queue, bounded detiling of registered RenderTarget64KB surfaces, and frame hand-off and acknowledgement APIs. |
 | Desktop | A native game-library and diagnostics interface, global/per-title settings, and keyboard, mouse and controller navigation. |
 
-The work ahead includes broader game startup, guest-thread scheduling, missing
-system services, graphics draws, presentation and audio. Performance work needs a
+A verified original 64×64 Vulkan case executes two guest vertex/pixel shader
+draws with changed SGPR inputs and checks partial coverage, LOAD preservation,
+fenced writeback and boundary canaries. Desktop/IPC frame transport, real vblank
+timing, VideoOut equeue event delivery and GPU-EOP completion for registered tiled
+surfaces remain unfinished.
+
+The work ahead includes broader game startup, guest-thread scheduling and
+system-service coverage, additional draw/resource modes, presentation and audio.
+Performance work needs a
 working game path before meaningful frame-rate measurements are possible.
 
 The [architecture and milestones](docs/architecture.md) describe component

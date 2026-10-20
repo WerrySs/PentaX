@@ -1,10 +1,14 @@
 # pentax-gpu
 
-Bounded flat command inspection and a separate compute preparation path for PentaX.
+Bounded flat command inspection and separate compute/graphics preparation paths for PentaX.
 
 The `inspect` API below remains a flat input-validation foundation. Its records
 are not execution permissions. The separate `compute` path and native bridge are
-described below; commercial-game execution remains unfinished. Flat inspection does **not**:
+described below; [graphics draw planning](src/graphics/README.md) additionally
+prepares real guest nonindexed draws with actual compiled VS/PS and retained
+linear RGBA8 target contents. Its finite state/resource profile and native
+integration requirements are explicit; no title/frame result is implied.
+Commercial-game execution remains unfinished. Flat inspection does **not**:
 
 - keep GPU state, register reset values, predicate state, shader bindings or
   draw snapshots;

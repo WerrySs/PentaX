@@ -189,11 +189,31 @@ impl<'d> Image<'d> {
         height: u32,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
+        Self::rgba_target(device, width, height, false, budget)
+    }
+
+    pub fn rgba_uploaded(
+        device: &'d Device,
+        width: u32,
+        height: u32,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
+        Self::rgba_target(device, width, height, true, budget)
+    }
+
+    fn rgba_target(
+        device: &'d Device,
+        width: u32,
+        height: u32,
+        upload: bool,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
         if width == 0
             || height == 0
             || width > device.properties.limits.max_image_dimension2_d
             || height > device.properties.limits.max_image_dimension2_d
             || !device.rgba_supported()
+            || (upload && !device.rgba_upload_supported())
         {
             return Err(VulkanError::Unsupported(
                 "RGBA8 color attachment/transfer source",
@@ -216,7 +236,15 @@ impl<'d> Image<'d> {
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+            .usage(
+                vk::ImageUsageFlags::COLOR_ATTACHMENT
+                    | vk::ImageUsageFlags::TRANSFER_SRC
+                    | if upload {
+                        vk::ImageUsageFlags::TRANSFER_DST
+                    } else {
+                        vk::ImageUsageFlags::empty()
+                    },
+            )
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
         // SAFETY: Checked core format/dimensions, one layer/mip/sample, no alias,

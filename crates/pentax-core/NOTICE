@@ -253,3 +253,27 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+Additional bounded graphics execution and video presentation (2026)
+
+The graphics draw and queue routing adapt the PUBLIC KytyPS5/KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, graphicsRun.cpp DrawIndexAuto,
+renderDraw.cpp DrawAuto/EmitDrawPrimitives and graphics command-buffer routing.
+The platform Vulkan NOTICE records exact draw/pipeline source blobs.
+
+The video flip lifecycle and checked RenderTarget64KB addressing adapt
+KytyPS5-Performance revision 209dffe9032d72749257ce18680d506b891284de:
+  src/graphics/presentation/videoOut.cpp and src/libs/libVideoOut.cpp
+  src/graphics/guest_gpu/tile.cpp, blob 16d86b8cb6b2ac6248fe81ddbab3091c0763788e
+Original retained copyright: Copyright (c) 2021 InoriRus. GPL-2.0-only and the
+retained original MIT grant continue to apply; see LICENSES/Kyty-MIT.txt.
+
+PentaX additions use bounded Rust command/state admission, actual guest shaders
+and retained target LOAD, same-owner permission/alias checks, fenced Vulkan
+readback and transactional guest writeback. Video captures real registered
+surface pixels, checks explicit layouts, retains bounded opaque request/frame
+ownership, uses the existing kernel process clock and requires actual consumer
+acknowledgement. The current linear draw receipt does not attest a tiled video
+buffer. GPU-EOP, event delivery and desktop/worker frame transport remain
+explicit integration gaps. No commercial frame or FPS is established by these
+original fixtures. Detailed scope is in src/gpu/video/README.md.

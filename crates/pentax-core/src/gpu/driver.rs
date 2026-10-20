@@ -7,13 +7,18 @@
 //! Queue contexts and packets are guest data, never host pointers or handles.
 use super::{Error, execute_dispatch_admitted};
 use pentax_gpu::compute;
+use pentax_gpu::graphics as draw;
 use pentax_platform::{
     native_memory::{NativeMemoryWrite, NativeRange, NativeTransactionLimits, PausedNativeMemory},
     vulkan::GpuLimits,
 };
 
+#[path = "driver/graphics.rs"]
+mod graphics;
 #[path = "driver/interrupts.rs"]
 mod interrupts;
+#[path = "driver/presentation.rs"]
+mod presentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Function {
@@ -50,6 +55,9 @@ pub enum Function {
     VideoRegisterBuffers2,
     VideoChangeBufferAttribute2,
     VideoUnregisterBuffers,
+    VideoSubmitFlip,
+    VideoGetFlipStatus,
+    VideoIsFlipPending,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -73,9 +81,12 @@ pub struct Limits {
     /// proof that any vblank/flip has occurred.
     pub video_vblank_hz: u32,
     pub video_display: super::video::DisplayPolicy,
+    pub video_presentation: super::video::PresentationLimits,
     pub max_calls: u64,
     pub max_batch_buffers: u32,
     pub max_dispatches: u64,
+    pub max_draws: u64,
+    pub max_vertices: u64,
     pub max_command_buffers: u64,
     pub max_command_bytes: u64,
     pub max_invocations: u64,
@@ -84,6 +95,8 @@ pub struct Limits {
     pub max_shader_mappings: usize,
     pub compute: compute::Limits,
     pub commands: compute::CommandLimits,
+    pub graphics: draw::Limits,
+    pub graphics_commands: draw::CommandLimits,
     pub gpu: GpuLimits,
 }
 impl Default for Limits {
@@ -91,9 +104,12 @@ impl Default for Limits {
         Self {
             video_vblank_hz: 60,
             video_display: Default::default(),
+            video_presentation: Default::default(),
             max_calls: 256,
             max_batch_buffers: 32,
             max_dispatches: 128,
+            max_draws: 128,
+            max_vertices: 16 * 1024 * 1024,
             max_command_buffers: 256,
             max_command_bytes: 4 * 1024 * 1024,
             max_invocations: 16 * 1024 * 1024,
@@ -102,6 +118,8 @@ impl Default for Limits {
             max_shader_mappings: 4096,
             compute: compute::Limits::default(),
             commands: compute::CommandLimits::default(),
+            graphics: draw::Limits::default(),
+            graphics_commands: draw::CommandLimits::default(),
             gpu: GpuLimits::default(),
         }
     }
@@ -111,6 +129,8 @@ pub struct Usage {
     pub interrupts: u64,
     pub calls: u64,
     pub dispatches: u64,
+    pub draws: u64,
+    pub vertices: u64,
     pub command_buffers: u64,
     pub indirect_buffers: u64,
     pub command_bytes: u64,
@@ -133,6 +153,7 @@ pub enum Failure {
     Poisoned,
     Waiting,
     Preparation(compute::Error),
+    GraphicsPreparation(draw::Error),
     Vulkan(pentax_platform::vulkan::VulkanError),
     Kernel(pentax_kernel::Failure),
     Shader(super::shaders::ShaderFailure),
@@ -142,6 +163,8 @@ pub(crate) struct Driver {
     limits: Limits,
     usage: Usage,
     queues: [compute::ComputeState; 56],
+    graphics: draw::GraphicsState,
+    graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
     poisoned: bool,
     frame: FrameState,
     video: super::video::State,
@@ -154,6 +177,8 @@ impl Driver {
             limits,
             usage: Usage::default(),
             queues: [compute::ComputeState::empty(); 56],
+            graphics: draw::GraphicsState::empty(),
+            graphics_owner: None,
             poisoned: false,
             frame: FrameState::default(),
             video: super::video::State::default(),
@@ -252,6 +277,20 @@ impl Driver {
     ) -> Result<u64, Failure> {
         self.submit_impl(memory, function, args, stack, Some(kernel))
     }
+    /// The real HLE context supplies the process-relative clock lazily, after
+    /// source handle/mode/index/queue admission. No extra kernel call is minted.
+    pub(crate) fn submit_video_flip_with_clock(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        args: [u64; 6],
+        clock: impl FnOnce(&mut PausedNativeMemory<'_>) -> Result<u64, Failure>,
+    ) -> Result<u64, Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.video_submit_flip(memory, args, clock)
+    }
     fn submit_impl(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
@@ -264,6 +303,17 @@ impl Driver {
             return Err(Failure::Poisoned);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        if matches!(
+            function,
+            Function::VideoGetFlipStatus | Function::VideoIsFlipPending
+        ) {
+            return self.video_flip_query(memory, function, args);
+        }
+        if function == Function::VideoSubmitFlip {
+            return Err(Failure::Kernel(pentax_kernel::Failure::Unsupported(
+                "bound VideoOut process-counter context",
+            )));
+        }
         if matches!(
             function,
             Function::AgcAddEqEvent
@@ -388,9 +438,15 @@ impl Driver {
             return Ok(value);
         }
         let (queue, ranges) = self.ranges(memory, function, args)?;
-        // These are the source's ACB queues. Draw queues need the graphics
-        // interpreter; compute-only execution must not silently replace it.
+        // The pinned context submit routes every non-ACB queue selector to
+        // the single graphics processor. Explicit ACB calls remain compute-only.
         if ranges.iter().any(|r| r.address != 0 && r.size != 0) && !(0x20..0x58).contains(&queue) {
+            if matches!(
+                function,
+                Function::CommandBuffer | Function::MultiCommandBuffers
+            ) {
+                return self.submit_graphics(memory, &ranges);
+            }
             return Err(Failure::UnsupportedQueue);
         }
         for range in ranges.into_iter().filter(|r| r.address != 0 && r.size != 0) {
@@ -710,9 +766,18 @@ impl Driver {
             }
         }
         let mut bytes = 0_u64;
+        let maximum_range = if matches!(
+            function,
+            Function::CommandBuffer | Function::MultiCommandBuffers
+        ) && !(0x20..0x58).contains(&queue)
+        {
+            self.limits.graphics_commands.max_command_bytes
+        } else {
+            self.limits.commands.max_command_bytes
+        };
         for range in &ranges {
             if range.address != 0 && range.size != 0 {
-                if range.size > self.limits.commands.max_command_bytes as u64 {
+                if range.size > maximum_range as u64 {
                     return Err(Failure::Limit);
                 }
                 bytes = add(

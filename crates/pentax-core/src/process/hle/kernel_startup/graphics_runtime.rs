@@ -190,7 +190,24 @@ pub(super) fn stop(
         .ok_or(KernelStartupError::InvalidProvider(
             "missing graphics state",
         ))?;
-    if matches!(
+    if marker.function == driver::Function::VideoSubmitFlip {
+        driver.submit_video_flip_with_clock(&mut paused, request.args, |paused| {
+            let guest = super::super::kernel_adapter::KernelMemory {
+                paused,
+                source: None,
+                supplied_modules: 0,
+                lookup_limits: None,
+                lookup_work: None,
+                loaded_modules: None,
+                thread_tls: None,
+                initial_entry: None,
+            };
+            session
+                .kernel
+                .process_time_counter(&guest)
+                .map_err(driver::Failure::Kernel)
+        })
+    } else if matches!(
         marker.function,
         driver::Function::AgcGetRegisterDefaults | driver::Function::AgcGetRegisterDefaultsInternal
     ) {
@@ -248,6 +265,93 @@ impl PreparedNativeKernelStartup<'_, '_> {
             .as_ref()
             .and_then(|driver| driver.video_surface(handle, buffer))
     }
+
+    /// Inspect flip metadata through this session's actual paused memory owner.
+    /// This does not bind a fresh queue or grant access to surface bytes.
+    pub fn graphics_video_flip_status(
+        &mut self,
+        handle: i32,
+    ) -> Result<Option<crate::gpu::video::FlipStatus>, KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        self.graphics
+            .as_ref()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?
+            .video_flip_status(&paused, handle)
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Whether a registered buffer is retained by an unfinished flip.
+    pub fn graphics_video_buffer_pending(
+        &mut self,
+        handle: i32,
+        buffer: i32,
+    ) -> Result<bool, KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        self.graphics
+            .as_ref()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?
+            .video_buffer_pending(&paused, handle, buffer)
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Hand off real captured pixels at a caller-observed nonzero vblank tick.
+    /// The transport must bound retained frame capacities independently. Taking
+    /// a frame does not confirm presentation or deliver a kernel event.
+    pub fn graphics_video_take_frame(
+        &mut self,
+        vblank_count: u64,
+    ) -> Result<Option<crate::gpu::video::Frame>, KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        self.graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?
+            .video_take_frame(&paused, vblank_count)
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Confirm actual consumer presentation once using this session's opaque
+    /// frame. Exact owner, phase and generation admission precedes clock reads.
+    /// Clock fields share the kernel services' process epoch; this adds no HLE
+    /// call or quota after presentation. The returned receipt still requires
+    /// separate real equeue delivery; this method creates neither UI nor IPC.
+    pub fn graphics_video_acknowledge_frame(
+        &mut self,
+        frame: &crate::gpu::video::Frame,
+    ) -> Result<crate::gpu::video::FlipCompletion, KernelStartupError> {
+        let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let driver = self
+            .graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?;
+        driver
+            .video_acknowledge_frame(&mut paused, frame, |paused| {
+                let guest = super::super::kernel_adapter::KernelMemory {
+                    paused,
+                    source: None,
+                    supplied_modules: 0,
+                    lookup_limits: None,
+                    lookup_work: None,
+                    loaded_modules: None,
+                    thread_tls: None,
+                    initial_entry: None,
+                };
+                let clock = self
+                    .kernel
+                    .process_clock(&guest)
+                    .map_err(driver::Failure::Kernel)?;
+                Ok((clock.microseconds, clock.counter))
+            })
+            .map_err(KernelStartupError::Graphics)
+    }
+
     /// Retained guest-address metadata, not a memory or executable capability.
     pub fn graphics_shader_metadata(
         &self,
@@ -365,6 +469,18 @@ mod tests {
                 service_id: u64::from(open.id()),
                 args: [255, 0, 0, u64::MAX, 0, 0],
             };
+            let kernel_usage = session.kernel_usage();
+            assert_eq!(session.graphics_video_flip_status(1).unwrap(), None);
+            assert_eq!(
+                session.graphics_video_buffer_pending(1, 0),
+                Err(KernelStartupError::Graphics(
+                    driver::Failure::UnsupportedVideo
+                ))
+            );
+            assert!(session.graphics_video_take_frame(0).unwrap().is_none());
+            assert_eq!(session.graphics_video_port(1), None);
+            assert_eq!(session.graphics_usage().calls, 0);
+            assert_eq!(session.kernel_usage(), kernel_usage);
             let other = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
             let mut bad = request;
             bad.owner_id = other.owner_id();
@@ -382,6 +498,14 @@ mod tests {
             assert_eq!(session.graphics_video_port(1), None);
             assert_eq!(session.service_request(request).unwrap(), 1);
             assert_eq!(session.graphics_video_port(1).unwrap().generation, 1);
+            assert_eq!(
+                session.graphics_video_flip_status(1).unwrap(),
+                Some(Default::default())
+            );
+            assert!(!session.graphics_video_buffer_pending(1, 0).unwrap());
+            assert!(session.graphics_video_take_frame(1).unwrap().is_none());
+            assert_eq!(session.graphics_usage().calls, 1);
+            assert_eq!(session.kernel_usage(), kernel_usage);
             let close_request = NativeServiceRequest {
                 syscall_pc: binding.bias + close.rva() + 5,
                 next_pc: binding.bias + close.rva() + 7,
@@ -391,6 +515,13 @@ mod tests {
             };
             assert_eq!(session.service_request(close_request).unwrap(), 0);
             assert_eq!(session.graphics_video_port(1), None);
+            assert_eq!(session.graphics_video_flip_status(1).unwrap(), None);
+            assert_eq!(
+                session.graphics_video_buffer_pending(1, 0),
+                Err(KernelStartupError::Graphics(
+                    driver::Failure::UnsupportedVideo
+                ))
+            );
             assert_eq!(session.service_request(request).unwrap(), 1);
             assert_eq!(session.graphics_video_port(1).unwrap().generation, 3);
             assert_eq!(session.graphics_frame_state().unwrap().boundaries, 0);

@@ -275,6 +275,18 @@ impl Device {
             vk::FormatFeatureFlags::COLOR_ATTACHMENT | vk::FormatFeatureFlags::TRANSFER_SRC,
         )
     }
+
+    pub fn rgba_upload_supported(&self) -> bool {
+        // SAFETY: Fixed core format on the selected retained physical device.
+        let props = unsafe {
+            self.instance
+                .raw
+                .get_physical_device_format_properties(self.physical, vk::Format::R8G8B8A8_UNORM)
+        };
+        props
+            .optimal_tiling_features
+            .contains(vk::FormatFeatureFlags::TRANSFER_DST)
+    }
 }
 
 impl Drop for Device {

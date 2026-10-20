@@ -3,7 +3,8 @@
 // Modified 2026 for PentaX: bounded owned video ports and checked options.
 // Adapted from pinned graphics/presentation/videoOut.cpp; see NOTICE.
 
-//! Retained output-port lifecycle, not a presented image or a vblank clock.
+//! Owned ports, registered surfaces and checked CPU flip snapshots. Actual
+//! consumer acknowledgement advances flip completion; no vblank clock is invented.
 use super::driver::{Failure, Function};
 use pentax_platform::native_memory::{
     NativeMemoryWrite, NativeTransactionLimits, PausedNativeMemory,
@@ -11,6 +12,10 @@ use pentax_platform::native_memory::{
 
 mod buffers;
 pub use buffers::{Compression, PixelFormat, Surface};
+mod pixels;
+mod presentation;
+pub use pixels::{ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32};
+pub use presentation::{FlipCompletion, FlipSource, FlipStatus, FlipSubmission, FlipTicket, Frame};
 
 const INVALID_VALUE: u64 = 0x8029_0001;
 const INVALID_ADDRESS: u64 = 0x8029_0002;
@@ -70,6 +75,7 @@ struct Port {
 #[derive(Default)]
 pub(crate) struct State {
     ports: [Port; 3],
+    presentation: presentation::Queue,
 }
 fn index(handle: i32) -> Option<usize> {
     usize::try_from(handle.checked_sub(1)?)
@@ -97,6 +103,8 @@ impl State {
         stack: Option<u64>,
         memory: &mut PausedNativeMemory<'_>,
     ) -> Result<u64, Failure> {
+        // Port/registration metadata never migrates between native owners.
+        self.presentation.bind_owner(memory.owner_id())?;
         if matches!(
             function,
             Function::VideoSetBufferAttribute2 | Function::VideoAddBufferAttributeOption
@@ -168,6 +176,7 @@ impl State {
                 },
                 buffers: Default::default(),
             };
+            self.presentation.reset(slot);
             // The optional source parameter is ignored, never dereferenced.
             return Ok(slot as u64 + 1);
         }
@@ -191,6 +200,14 @@ impl State {
             }
             Function::VideoChangeBufferAttribute2 => self.ports[slot].buffers.change(args, memory),
             Function::VideoUnregisterBuffers => {
+                // The source waits for pending flips before retiring buffers.
+                // Cooperative callers retain the request until it completes.
+                if self
+                    .flip_status(first)
+                    .is_some_and(|status| status.pending != 0)
+                {
+                    return Err(Failure::Waiting);
+                }
                 Ok(self.ports[slot].buffers.unregister(args[1] as u32 as i32))
             }
             Function::VideoGetOutputStatus => {
@@ -229,8 +246,9 @@ impl State {
                 {
                     return Err(Failure::UnsupportedVideo);
                 }
-                // Registered groups and surfaces retire with this generation.
-                // Future event/flip owners must join this same transaction.
+                // Cancel retained requests and prepared pixels before the
+                // generation changes. Exported stale frames cannot acknowledge.
+                self.cancel_flips(first);
                 self.ports[slot] = Port {
                     open: false,
                     state: PortState {
@@ -263,6 +281,15 @@ impl State {
                     || self.ports[master].state.master_handle.is_some()
                 {
                     return Ok(UNSUPPORTED_OPERATION);
+                }
+                if self
+                    .flip_status(first)
+                    .is_some_and(|status| status.pending != 0)
+                    || self
+                        .flip_status(master_handle)
+                        .is_some_and(|status| status.pending != 0)
+                {
+                    return Ok(BUSY);
                 }
                 let slaves = self.ports[master]
                     .state
@@ -338,3 +365,7 @@ mod tests;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "video/buffer_tests.rs"]
 mod buffer_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "video/presentation_tests.rs"]
+mod presentation_tests;

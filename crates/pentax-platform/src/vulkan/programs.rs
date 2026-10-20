@@ -74,6 +74,39 @@ pub(super) fn check_contract(
     shader: &CompiledShader,
     stage: ShaderStage,
 ) -> Result<(), VulkanError> {
+    check_contract_inner(shader, stage, false)
+}
+
+/// The graphics preparer supplies actual user SGPR values in its stage payload.
+/// Descriptor resources are still deliberately unsupported by this draw slice.
+pub(super) fn check_graphics_contract(
+    shader: &CompiledShader,
+    stage: ShaderStage,
+) -> Result<(), VulkanError> {
+    if !matches!(stage, ShaderStage::Vertex | ShaderStage::Pixel) {
+        return Err(VulkanError::InvalidCompilerContract("graphics stage"));
+    }
+    check_contract_inner(shader, stage, true)?;
+    let manifest = shader.manifest();
+    if !manifest.buffers().is_empty()
+        || manifest.buffer_binding().is_some()
+        || manifest.required_features().subgroup_basic()
+        || manifest.required_features().subgroup_ballot()
+        || manifest.required_subgroup_size().is_some()
+        || manifest
+            .push_data()
+            .is_some_and(|push| push.memory_offset_count != 0)
+    {
+        return Err(VulkanError::InvalidCompilerContract("graphics resources"));
+    }
+    Ok(())
+}
+
+fn check_contract_inner(
+    shader: &CompiledShader,
+    stage: ShaderStage,
+    graphics_push: bool,
+) -> Result<(), VulkanError> {
     let manifest = shader.manifest();
     let required = manifest.required_features();
     if required.spirv_version() > 0x0001_0300
@@ -108,13 +141,19 @@ pub(super) fn check_contract(
     }
     if let Some(push) = manifest.push_data()
         && ((!push.user_sgprs.is_empty()
-            && (stage != ShaderStage::Compute || push.user_sgprs.iter().any(|r| *r >= 16)))
-            || push.memory_offset_count > 1
+            && ((!graphics_push && stage != ShaderStage::Compute)
+                || push.user_sgprs.iter().any(|r| *r >= 16)))
             || push
                 .start_dword
-                .checked_add(push.memory_offset_dword)
-                .and_then(|v| v.checked_add(1))
-                .is_none_or(|v| v > 32))
+                .checked_add(push.user_sgprs.len() as u32)
+                .is_none_or(|end| end > 32)
+            || push.memory_offset_count > 1
+            || (push.memory_offset_count != 0
+                && push
+                    .start_dword
+                    .checked_add(push.memory_offset_dword)
+                    .and_then(|v| v.checked_add(1))
+                    .is_none_or(|v| v > 32)))
     {
         return Err(VulkanError::InvalidCompilerContract("push data"));
     }

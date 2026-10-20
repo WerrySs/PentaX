@@ -86,6 +86,7 @@ pub use save::SaveStorage;
 pub use sync::{SemaphoreWait, SemaphoreWaitAction};
 pub use thread_exit::{AdmittedThreadExitCallback, ThreadExitAction};
 pub use thread_priority::ThreadPriorityClass;
+pub use time::ProcessClock;
 
 /// The six AMD64 SysV **library-call** integer register arguments, in order.
 ///
@@ -576,6 +577,22 @@ impl Kernel {
     #[must_use]
     pub const fn usage(&self) -> Usage {
         self.budget.usage()
+    }
+
+    /// Observe this kernel process's actual native counter relative to the same
+    /// lazy epoch used by ProcessTimeCounter and ProcessTime. Internal owners
+    /// must admit their operation before calling; this adds no synthetic HLE
+    /// attempt, guest I/O or independent clock domain. First use samples twice,
+    /// exactly as the guest counter service does, and propagates adapter errors.
+    pub fn process_time_counter(&mut self, guest: &impl GuestAccess) -> Result<u64, Failure> {
+        self.time.process_time_counter(guest)
+    }
+
+    /// Observe paired process ticks and microseconds from one validated sample
+    /// in the guest services' existing epoch. Trusted callers pre-admit their
+    /// operation; no HLE attempt, guest I/O or fresh work quota is consumed here.
+    pub fn process_clock(&mut self, guest: &impl GuestAccess) -> Result<ProcessClock, Failure> {
+        self.time.process_clock(guest)
     }
 
     /// Provenance of a memory-map refusal in the latest invocation; no guest data.

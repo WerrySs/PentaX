@@ -119,6 +119,14 @@ fn request_nanoseconds(seconds: i64, nanoseconds: i64) -> Result<u64, Failure> {
         .ok_or(Failure::Errno(Errno::Invalid))
 }
 
+/// One validated observation of the process counter and its microsecond value.
+/// Both fields share the same retained epoch and native counter sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessClock {
+    pub counter: u64,
+    pub microseconds: u64,
+}
+
 pub(crate) struct TimeState {
     epoch: Instant,
     counter_epoch: Option<TimeCounterSample>,
@@ -167,25 +175,7 @@ impl TimeState {
                 Ok(0)
             }
             Service::ProcessTime | Service::ProcessTimeCounter => {
-                let sample = counter_sample(guest)?;
-                let initial = self.counter_epoch.unwrap_or(sample);
-                let current = if self.counter_epoch.is_none() {
-                    counter_sample(guest)?
-                } else {
-                    sample
-                };
-                if current.frequency != initial.frequency {
-                    return Err(Failure::Unsupported("changed native TSC frequency"));
-                }
-                let elapsed = current.ticks.saturating_sub(initial.ticks);
-                let result = if service == Service::ProcessTime {
-                    u64::try_from(u128::from(elapsed) * 1_000_000 / u128::from(initial.frequency))
-                        .map_err(|_| Failure::Unsupported("process time exceeds 64-bit microseconds"))?
-                } else {
-                    elapsed
-                };
-                self.counter_epoch = Some(initial);
-                Ok(result)
+                self.process_counter(guest, service == Service::ProcessTime)
             }
             Service::ProcessTimeCounterFrequency | Service::TscFrequency => {
                 Ok(counter_sample(guest)?.frequency)
@@ -202,6 +192,64 @@ impl TimeState {
             Service::Nanosleep => nanosleep(args.0[0], args.0[1], guest, budget),
             _ => Err(Failure::Unsupported("service is not owned by time state")),
         }
+    }
+
+    /// Internal users such as validated video flips share the very same lazy
+    /// process epoch as the guest counter services, without invoking a service.
+    pub(crate) fn process_time_counter(
+        &mut self,
+        guest: &impl GuestAccess,
+    ) -> Result<u64, Failure> {
+        self.process_counter(guest, false)
+    }
+
+    pub(crate) fn process_clock(
+        &mut self,
+        guest: &impl GuestAccess,
+    ) -> Result<ProcessClock, Failure> {
+        let (initial, elapsed) = self.prepare_process_counter(guest)?;
+        let microseconds = process_microseconds(elapsed, initial.frequency)?;
+        // Conversion errors must not publish a first-use epoch either.
+        self.counter_epoch = Some(initial);
+        Ok(ProcessClock {
+            counter: elapsed,
+            microseconds,
+        })
+    }
+
+    fn process_counter(
+        &mut self,
+        guest: &impl GuestAccess,
+        microseconds: bool,
+    ) -> Result<u64, Failure> {
+        let (initial, elapsed) = self.prepare_process_counter(guest)?;
+        let result = if microseconds {
+            process_microseconds(elapsed, initial.frequency)?
+        } else {
+            elapsed
+        };
+        // Keep original service semantics: failed second samples, frequency
+        // changes and failed microsecond conversion never initialize an epoch.
+        self.counter_epoch = Some(initial);
+        Ok(result)
+    }
+
+    fn prepare_process_counter(
+        &self,
+        guest: &impl GuestAccess,
+    ) -> Result<(TimeCounterSample, u64), Failure> {
+        let sample = counter_sample(guest)?;
+        let initial = self.counter_epoch.unwrap_or(sample);
+        let current = if self.counter_epoch.is_none() {
+            counter_sample(guest)?
+        } else {
+            sample
+        };
+        if current.frequency != initial.frequency {
+            return Err(Failure::Unsupported("changed native TSC frequency"));
+        }
+        let elapsed = current.ticks.saturating_sub(initial.ticks);
+        Ok((initial, elapsed))
     }
 
     fn clock_gettime<G: GuestAccess>(
@@ -234,6 +282,11 @@ impl TimeState {
         )?;
         Ok(0)
     }
+}
+
+fn process_microseconds(elapsed: u64, frequency: u64) -> Result<u64, Failure> {
+    u64::try_from(u128::from(elapsed) * 1_000_000 / u128::from(frequency))
+        .map_err(|_| Failure::Unsupported("process time exceeds 64-bit microseconds"))
 }
 
 fn counter_sample(guest: &impl GuestAccess) -> Result<TimeCounterSample, Failure> {

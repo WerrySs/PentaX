@@ -42,6 +42,13 @@ pub struct Surface {
     pub options: u64,
     pub dcc_control: u32,
 }
+impl Surface {
+    /// The pinned registration profile admits one-level render-target tiling;
+    /// a registered surface must never be reinterpreted as linear row storage.
+    pub const fn layout(self) -> super::SurfaceLayout {
+        super::SurfaceLayout::RenderTarget64Kb
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Attribute([u8; 80]);

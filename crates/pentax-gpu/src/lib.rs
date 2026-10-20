@@ -23,6 +23,10 @@
 //! services retain per-queue state and exclusive ownership through Vulkan
 //! readback. Asynchronous scheduling, general coherence and presentation remain
 //! unfinished.
+//! [`graphics`] additionally prepares bounded nonindexed guest draw snapshots,
+//! real compiled VS/PS and initial target contents. Its strict linear RGBA8
+//! profile is documented separately; a prepared product grants no owner or
+//! execution authority and does not establish title or presentation support.
 //!
 //! Field positions follow AMD's published Gfx9+ packet definitions, with an
 //! independent public PS5 implementation used only as observation of the
@@ -35,6 +39,7 @@
 
 pub mod compute;
 mod error;
+pub mod graphics;
 mod inspect;
 mod limits;
 mod packet;

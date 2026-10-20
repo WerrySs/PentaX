@@ -197,6 +197,28 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         image: &'r Image<'d>,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
+        Self::graphics_target(device, vertex, pixel, image, false, budget)
+    }
+
+    /// Reuse the actual uploaded target instead of clearing diagnostic pixels.
+    pub fn graphics_loaded(
+        device: &'d Device,
+        vertex: &CompiledShader,
+        pixel: &CompiledShader,
+        image: &'r Image<'d>,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
+        Self::graphics_target(device, vertex, pixel, image, true, budget)
+    }
+
+    fn graphics_target(
+        device: &'d Device,
+        vertex: &CompiledShader,
+        pixel: &CompiledShader,
+        image: &'r Image<'d>,
+        load: bool,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
         let mut out = Self::empty(device, Resource::Image(image));
         out.layouts(
             &[],
@@ -206,11 +228,19 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         let attachments = [vk::AttachmentDescription::default()
             .format(vk::Format::R8G8B8A8_UNORM)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .load_op(if load {
+                vk::AttachmentLoadOp::LOAD
+            } else {
+                vk::AttachmentLoadOp::CLEAR
+            })
             .store_op(vk::AttachmentStoreOp::STORE)
             .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
             .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .initial_layout(if load {
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+            } else {
+                vk::ImageLayout::UNDEFINED
+            })
             .final_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)];
         let colors = [vk::AttachmentReference::default()
             .attachment(0)
@@ -222,9 +252,21 @@ impl<'d, 'r> Pipeline<'d, 'r> {
             vk::SubpassDependency::default()
                 .src_subpass(vk::SUBPASS_EXTERNAL)
                 .dst_subpass(0)
-                .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
+                .src_stage_mask(if load {
+                    vk::PipelineStageFlags::TRANSFER
+                } else {
+                    vk::PipelineStageFlags::TOP_OF_PIPE
+                })
                 .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
+                .src_access_mask(if load {
+                    vk::AccessFlags::TRANSFER_WRITE
+                } else {
+                    vk::AccessFlags::empty()
+                })
+                .dst_access_mask(
+                    vk::AccessFlags::COLOR_ATTACHMENT_READ
+                        | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                ),
             vk::SubpassDependency::default()
                 .src_subpass(0)
                 .dst_subpass(vk::SUBPASS_EXTERNAL)
@@ -252,7 +294,8 @@ impl<'d, 'r> Pipeline<'d, 'r> {
             .height(image.height)
             .layers(1);
         budget.object()?;
-        // SAFETY: Compatible4x4 RGBA8 image view, retained by resource borrow.
+        // SAFETY: Compatible RGBA8 image view and checked extent, retained by
+        // the resource borrow through framebuffer destruction.
         out.framebuffer = result(
             unsafe { device.raw.create_framebuffer(&info, None) },
             "vkCreateFramebuffer",

@@ -34,3 +34,31 @@ Acyclic wave32, raw single-buffer
 compute is admitted; shader loops, conditional packets, asynchronous scheduling
 and broader GPU state remain gaps. Tests are original, not game data.
 The original flat inspector remains separately scoped original PentaX code.
+
+PentaX graphics draw preparation, 2026
+
+The graphics module additionally adapts the same pinned source's direct context,
+SH and uconfig register writes, CpOpNumInstances and CpOpDrawIndexAuto; shader.cpp
+unmerged vertex/pixel profile and SGPR rules; hardwareContext.h/gpu_defs.h color
+state; and tile.cpp's256-byte linear row pitch. It retains the copyright and
+GPLv2-only terms above. No shader program, image, font, texture or game data is
+copied. All shader/packet programs in the new tests are original PentaX inputs.
+
+Public rendering contracts are independently pinned to KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/graphicsRun.cpp
+    Git blob41aeee369b497769e0d62f27ad7df94e7d069bdd
+  src/graphics/host_gpu/renderer/renderDraw.cpp
+    Git blobfada73b93e4f7c45f3bae23a653916d9445c4fc8
+DrawAuto/PrepareDrawRenderState/UpdateGraphicsDynamicState/EmitDrawPrimitives
+establish source count, target and viewport ordering. Existing AMD packet field
+sources remain listed in README.md. The source's asynchronous caches, broad
+resource support and title overrides are not included or represented as done.
+
+PentaX modifications: complete flat command admission before resource reads,
+private bounded known-state snapshots, explicit missing/unsupported state,
+bounded actual shader decoding/compilation, manifest-checked stage pushes,
+immutable original target contents and source extents for native alias checks.
+The initial profile is nonindexed triangle lists with one linear RGBA8 target
+and no descriptors/depth/blend/MSAA; its exact limitations are documented in
+src/graphics/README.md. These pure products grant no guest or GPU authority.
