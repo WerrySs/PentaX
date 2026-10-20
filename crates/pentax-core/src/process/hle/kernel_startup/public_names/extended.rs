@@ -39,7 +39,8 @@ pub(super) fn lookup(
 // Generated from the pinned registration macros, excluding the parent table.
 // Duplicate reference namespaces for the same export use the first sorted name.
 #[rustfmt::skip]
-const ENTRIES: &[Entry] = &[
+// Share the same immutable table across lookup and category observations.
+static ENTRIES: &[Entry] = &[
     Entry { identity: ("Acm", "Acm", "8fe55ktlNVo"), versions: (1, 1, 1), name: "Acm::AcmBatchStartBuffers" },
     Entry { identity: ("Acm", "Acm", "9nLbWmRDpa8"), versions: (1, 1, 1), name: "Acm::AcmConvReverbSharedIr" },
     Entry { identity: ("Acm", "Acm", "DR-ZCmvVR9Q"), versions: (1, 1, 1), name: "Acm::AcmIfft" },

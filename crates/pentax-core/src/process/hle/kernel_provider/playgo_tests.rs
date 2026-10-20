@@ -15,10 +15,10 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
         (1283, 66, 67)
     );
     assert_eq!(
-        &MODULES[62..],
+        &MODULES[62..64],
         &[("PlayGo", (1, 0)), ("libScePlayGo", (1, 0))]
     );
-    assert_eq!(&LIBRARIES[63..], &[("PlayGo", 1), ("libScePlayGo", 1)]);
+    assert_eq!(&LIBRARIES[63..65], &[("PlayGo", 1), ("libScePlayGo", 1)]);
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)

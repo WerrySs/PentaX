@@ -144,7 +144,7 @@ fn closed_string_fixture_publishes_only_completed_repeatable_diagnostics() {
             report.string_calls,
             report.memory_calls
         ),
-        (15, 10, 1)
+        (17, 10, 1)
     );
     assert_eq!(
         (
@@ -165,7 +165,8 @@ fn closed_string_fixture_publishes_only_completed_repeatable_diagnostics() {
     );
     assert_eq!(
         (report.work_units, report.string_scratch_peak_bytes),
-        (82402, 14)
+        // Exact string/memory work plus eleven full catalogue-site lookups.
+        (82_237 + 11 * SITE_LOOKUP_WORK, 14)
     );
     assert_eq!(
         (report.mapped_bytes, report.resident_bytes),

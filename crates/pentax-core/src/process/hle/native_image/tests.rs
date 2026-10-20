@@ -138,7 +138,8 @@ fn supplied_image_admission_keeps_typed_owner_entry_and_unavailable_manifest_ali
             assert_eq!(layout.supplied_modules, 1);
             assert_eq!(layout.unavailable_functions, count);
             assert_eq!(session.plan().unavailable_functions(), count);
-            assert_eq!(session.memory().module_count(), 5);
+            // Original image plus kernel, graphics, JSON, unavailable and libc.
+            assert_eq!(session.memory().module_count(), 6);
             assert_eq!(session.native_service_requests(), 0);
             let thread = session.prepare_main_thread().unwrap();
             assert_eq!(thread.owner_id(), session.owner_id());

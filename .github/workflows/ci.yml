@@ -86,6 +86,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build the desktop, CLI and worker
         run: cargo build --locked --release -p pentax-desktop -p pentax-cli -p pentax-worker
+      - name: Test core provider and startup contracts
+        run: cargo test --locked -p pentax-core --lib -- --test-threads=1
       - name: Test timestamp admission and state
         run: >-
           cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1

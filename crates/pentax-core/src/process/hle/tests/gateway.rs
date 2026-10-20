@@ -2,6 +2,7 @@
 
 //! Closed gateway, site authority, budget and end-to-end fixture tests.
 
+use super::super::dispatch::SITE_LOOKUP_WORK;
 use super::super::fixture::{
     Asm, DATA, FixtureLimits, Import, Launched, OPS, Program, STACK, STACK_SIZE, expected_data,
     launch, program,
@@ -54,7 +55,8 @@ fn closed_original_fixture_reports_exact_completed_evidence() {
             memcmp_calls: 3,
             service_attempts: 11,
             requested_bytes: 224,
-            work_units: 230_248,
+            // Exact service work plus eleven full catalogue-site lookups.
+            work_units: 230_083 + 11 * SITE_LOOKUP_WORK,
             retired: 90,
             provider_bindings: 4,
             applied_relocations: 4,

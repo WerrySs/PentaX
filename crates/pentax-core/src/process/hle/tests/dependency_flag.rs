@@ -29,7 +29,8 @@ fn dependency_flag_is_typed_writable_nx_data_preserves_writes_and_isolates_proce
     let provider = providers();
     let view = open_executable(provider.image()).unwrap();
     let metadata = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
-    assert_eq!(NEED_FLAG_SYMBOL, 17);
+    // Seventeen canonical function rows precede the typed data object.
+    assert_eq!(NEED_FLAG_SYMBOL, 18);
     let symbol = &metadata.metadata().unwrap().link().symbols()[NEED_FLAG_SYMBOL];
     assert_eq!(symbol.symbol_type(), SymbolType::OBJECT);
     assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);

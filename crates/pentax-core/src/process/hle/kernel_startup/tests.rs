@@ -22,6 +22,9 @@ const OUTPUT: u64 = 0x8000;
 const NAME: u64 = OUTPUT + 0x40;
 const TLS_OFFSET: u64 = 56;
 const ENTRY: usize = 0x400;
+// Three original consumer pages, five kernel provider pages (four RX plus
+// one RW), two libc pages and two independently placed static TLS pages.
+const INITIAL_MAPPED_BYTES: u64 = 12 * PAGE_SIZE;
 
 #[test]
 fn image_protection_tracks_actual_loaded_pages_without_allocating_or_reimporting() {
@@ -271,8 +274,10 @@ fn original_consumer() -> Vec<u8> {
 fn load_limits() -> NativeLoadLimits {
     NativeLoadLimits {
         session: SessionLoadLimits {
-            resident_limit: 13 * PAGE_SIZE,
-            mapped_limit: 13 * PAGE_SIZE,
+            // Exactly one runtime thread prefix plus the two-page mapping
+            // exercised below fit beyond the admitted initial image/TLS.
+            resident_limit: INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE,
+            mapped_limit: INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE,
         },
         reserved_limit: RESERVATION,
     }
@@ -550,7 +555,7 @@ fn six_original_arguments_and_outputs_use_same_native_tls_and_libc_pages() {
                 session.memory().source_plan(),
                 plan.link_plan()
             ));
-            assert_eq!(session.memory().mapped_bytes(), 10 * PAGE_SIZE);
+            assert_eq!(session.memory().mapped_bytes(), INITIAL_MAPPED_BYTES);
             let create = stop(
                 plan,
                 Service::CreateSema,
@@ -970,10 +975,7 @@ fn unrelated_relative_writes_do_not_multiply_provider_manifest_work() {
         put(&mut bytes, at + 16, &0x123_u64.to_le_bytes());
     }
     let before = bytes.clone();
-    let mut policy = KernelStartupLimits {
-        max_provider_work: 1024,
-        ..Default::default()
-    };
+    let mut policy = KernelStartupLimits::default();
     let kernel =
         build_kernel_provider(KernelStartupLimits::default().max_kernel_provider_bytes).unwrap();
     let libc =
@@ -982,6 +984,10 @@ fn unrelated_relative_writes_do_not_multiply_provider_manifest_work() {
         open_executable(&bytes).unwrap(),
         0x10_0000,
     )];
+    // One module visit each, one outer visit per patch, and exactly ONE
+    // manifest scan for the kernel binding. Relative writes must not scan it.
+    policy.max_provider_work =
+        (input.len() + 2) as u64 + 259 + (kernel.markers().len() + kernel.objects().len()) as u64;
     let check = |policy: &KernelStartupLimits| {
         plan_kernel_startup(
             &input,
@@ -1007,7 +1013,7 @@ fn unrelated_relative_writes_do_not_multiply_provider_manifest_work() {
             .count(),
         257
     );
-    policy.max_provider_work = 256;
+    policy.max_provider_work -= 1;
     assert!(matches!(
         check(&policy),
         Err(KernelStartupError::Budget("provider work"))
@@ -1218,8 +1224,9 @@ fn runtime_prefix_maps_obey_the_retained_total_eager_native_budget() {
         KernelStartupLimits::default(),
         |plan, owner, _, pointers| {
             let mut limits = load_limits();
-            limits.session.resident_limit = 10 * PAGE_SIZE;
-            limits.session.mapped_limit = 10 * PAGE_SIZE;
+            // Admit the complete image/TLS and no runtime prefix page.
+            limits.session.resident_limit = INITIAL_MAPPED_BYTES;
+            limits.session.mapped_limit = INITIAL_MAPPED_BYTES;
             let mut session = prepare_in(
                 plan,
                 &StaticTlsStorage {
@@ -1237,11 +1244,11 @@ fn runtime_prefix_maps_obey_the_retained_total_eager_native_budget() {
                     GuestError::BudgetExceeded
                 )))
             );
-            assert_eq!(session.memory().mapped_bytes(), 10 * PAGE_SIZE);
+            assert_eq!(session.memory().mapped_bytes(), INITIAL_MAPPED_BYTES);
             let statistics = session.memory().statistics();
-            assert_eq!(statistics.mapped_bytes, 10 * PAGE_SIZE);
-            assert_eq!(statistics.committed_bytes, 10 * PAGE_SIZE);
-            assert_eq!(statistics.limits.mapped_bytes, 10 * PAGE_SIZE);
+            assert_eq!(statistics.mapped_bytes, INITIAL_MAPPED_BYTES);
+            assert_eq!(statistics.committed_bytes, INITIAL_MAPPED_BYTES);
+            assert_eq!(statistics.limits.mapped_bytes, INITIAL_MAPPED_BYTES);
             assert_eq!(
                 (
                     session.kernel_usage().mapped_bytes,

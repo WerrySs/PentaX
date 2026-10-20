@@ -150,7 +150,9 @@ fn lookup(module: &[u8], library: &[u8], nid: &[u8]) -> Option<&'static str> {
 
 // Only pinned public identities and labels occur in this table. A miss returns
 // no label; input strings are never formatted into a diagnostic name.
-const NAMES: &[(&str, &str, &str, &str)] = &[
+// One retained immutable catalogue, including its diagnostic string storage.
+// A const slice may be promoted independently at different use sites.
+static NAMES: &[(&str, &str, &str, &str)] = &[
     (
         "Coredump",
         "Coredump",
