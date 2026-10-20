@@ -112,7 +112,7 @@ fn all_round_forms_snapshot_aliases_merge_scalar_lanes_and_preserve_complete_sta
             .unwrap();
             let (input, expected) = operands(layout.element_bytes == 8);
             let mut transfers = 0;
-            for (index, (destination, memory)) in [(1, false), (2, false), (3, false), (1, true)]
+            for (index, (destination, memory)) in [(1_u8, false), (2, false), (3, false), (1, true)]
                 .into_iter()
                 .enumerate()
             {
