@@ -1143,7 +1143,10 @@ fn flexible_mapping_query_and_protect_change_the_same_actual_native_pages() {
                 .read(mapped + PAGE_SIZE - 2, &mut tail)
                 .unwrap();
             assert_eq!(&tail, b"same-pages");
-            assert_eq!(session.memory().mapped_bytes(), 13 * PAGE_SIZE);
+            assert_eq!(
+                session.memory().mapped_bytes(),
+                INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE
+            );
             assert_eq!(
                 (
                     session.kernel_usage().handles_live,
