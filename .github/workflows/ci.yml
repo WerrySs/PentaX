@@ -163,3 +163,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_audio_out2_stateless_profiles_preserve_exact_sizes_aliases_and_paired_scopes -- --test-threads=1
+      - name: Test native AudioOut2 PCM ownership and cooperative queues
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_audio_out2_headless_pcm_lease_and_full_queue_preserve_real_thread_continuations -- --test-threads=1
