@@ -143,7 +143,7 @@ fn prepare_and_builder_failures_publish_nothing_and_builder_refusals_do_not_add_
             bytes[0] = 42;
             let mut outputs = RuntimeDataOutputs::new();
             assert_eq!(
-                outputs.push(ARG, &[0; 33]),
+                outputs.push(ARG, &[0; 257]),
                 Err(Failure::Limit("runtime data output bytes"))
             );
             assert_eq!(

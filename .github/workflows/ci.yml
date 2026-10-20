@@ -36,6 +36,15 @@ jobs:
         run: |
           printf 'CARGO_HOME=%s\n' "$CI_CARGO_HOME" >> "$GITHUB_ENV"
           printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
+      - name: Cache hosted-runner Cargo dependencies and build outputs
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ runner.temp }}/pentax-cargo/registry
+            ${{ runner.temp }}/pentax-cargo/git/db
+            target
+          key: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check formatting
@@ -62,6 +71,15 @@ jobs:
         run: |
           printf 'CARGO_HOME=%s\n' "$CI_CARGO_HOME" >> "$GITHUB_ENV"
           printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
+      - name: Cache hosted-runner Cargo dependencies and build outputs
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ runner.temp }}/pentax-cargo/registry
+            ${{ runner.temp }}/pentax-cargo/git/db
+            target
+          key: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check the complete Windows workspace with Clippy
@@ -73,8 +91,16 @@ jobs:
           cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1
       - name: Test live stack permissions
         run: cargo test --locked -p pentax-platform --lib combined_stack_preflight_checks_live_full_spans_cpu_rights_holes_and_poison -- --test-threads=1
+      - name: Test software CPU identification and atomic refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::cpu_identification_tests:: -- --test-threads=1
       - name: Test the native CPU and kernel counter boundary
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::timestamp_counter:: -- --test-threads=1
+      - name: Test native software CPU identification
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::cpu_identification:: -- --test-threads=1

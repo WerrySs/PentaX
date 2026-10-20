@@ -216,7 +216,7 @@ impl MemoryState {
         }; 4];
         let mut output_work = 0;
         for (destination, output) in writes.iter_mut().zip(outputs.writes()) {
-            output_work += output.bytes.len() as u64 + 1; // At most three fixed 32-byte slots.
+            output_work += output.bytes.len() as u64 + 1; // At most three fixed 256-byte slots.
             *destination = output;
         }
         budget.work(output_work)?;
