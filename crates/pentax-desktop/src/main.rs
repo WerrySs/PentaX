@@ -4,6 +4,7 @@
 mod app;
 mod brand;
 mod controller;
+mod launch;
 mod library;
 mod profile;
 

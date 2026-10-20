@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 use crate::controller::{Action, Controllers};
+use crate::launch::{self, Plan, Session, Summary};
 use crate::library::{self, Inspection, LibraryEntry};
 use crate::profile::ProfileEditor;
 use eframe::egui::{self, Color32, FontId, RichText, Stroke, Vec2};
@@ -73,6 +74,10 @@ enum Job {
         result: Result<Inspection, String>,
     },
     Demo(Result<String, String>),
+    LaunchPrepared {
+        path: PathBuf,
+        result: Result<Plan, launch::Error>,
+    },
 }
 
 pub struct Desktop {
@@ -95,6 +100,12 @@ pub struct Desktop {
     slider_focused: bool,
     last_demo: Option<String>,
     library_load_failed: bool,
+    session: Option<Session>,
+    session_path: Option<PathBuf>,
+    launch_preparing: bool,
+    launch_cancelled: bool,
+    exit_after_stop: bool,
+    restart_required: bool,
 }
 
 impl Desktop {
@@ -150,10 +161,39 @@ impl Desktop {
             slider_focused: false,
             last_demo: None,
             library_load_failed,
+            session: None,
+            session_path: None,
+            launch_preparing: false,
+            launch_cancelled: false,
+            exit_after_stop: false,
+            restart_required: false,
         }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.viewport().close_requested()) {
+            self.exit_after_stop = true;
+            self.launch_cancelled = true;
+            self.stop_session();
+        }
+        if let Some(session) = self.session.as_mut() {
+            let before = session.summary;
+            session.poll();
+            if session.summary != before {
+                self.status = Some((session.summary.message().into(), session.summary.is_error()));
+            }
+            self.restart_required |= session.summary == Summary::Restart;
+        }
+        if self.restart_required {
+            launch::poll_quarantined_cleanup();
+        }
+        if self.exit_after_stop {
+            if self.session_active() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
         self.activate = false;
         self.horizontal_step = 0;
         // Drain device events while unfocused, without navigating the launcher.
@@ -190,6 +230,13 @@ impl Desktop {
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.back(ctx);
         }
+        if ctx.input(|input| input.key_pressed(egui::Key::F5)) {
+            if ctx.input(|input| input.modifiers.shift) {
+                self.stop_session();
+            } else if self.can_play() {
+                self.play_selected();
+            }
+        }
         if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Num0)) {
             self.config.ui.scale = 1.0;
             apply_appearance(ctx, &self.config);
@@ -212,6 +259,7 @@ impl Desktop {
             Some(Ok(job)) => Some(job),
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.pending = None;
+                self.launch_preparing = false;
                 self.status = Some((
                     "The background operation stopped unexpectedly. You can try again.".into(),
                     true,
@@ -263,9 +311,87 @@ impl Desktop {
                         self.status = Some((error, true));
                     }
                 },
+                Job::LaunchPrepared { path, result } => {
+                    self.launch_preparing = false;
+                    if self.launch_cancelled || self.exit_after_stop {
+                        self.status = Some((Summary::Stopped.message().into(), false));
+                    } else {
+                        match result.and_then(Session::start) {
+                            Ok(session) => {
+                                self.session_path = Some(path);
+                                self.status = Some((session.summary.message().into(), false));
+                                self.session = Some(session);
+                            }
+                            Err(error) => {
+                                self.restart_required |= error == launch::Error::Restart;
+                                self.status = Some((error.message().into(), true));
+                            }
+                        }
+                    }
+                }
             }
         }
         ctx.request_repaint_after(Duration::from_millis(33));
+    }
+
+    fn session_active(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| !session.finished)
+    }
+    fn can_play(&self) -> bool {
+        cfg!(all(target_os = "windows", target_arch = "x86_64"))
+            && self.pending.is_none()
+            && !self.session_active()
+            && !self.exit_after_stop
+            && !self.restart_required
+            && self.store.is_some()
+            && self.global_load_error.is_none()
+            && self.selected.is_some()
+            && self.inspection.is_some()
+    }
+    fn play_selected(&mut self) {
+        if !self.can_play() {
+            return;
+        }
+        let Some(entry) = self
+            .selected
+            .and_then(|index| self.entries.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(store) = &self.store else {
+            return;
+        };
+        let directory = store.directory().to_owned();
+        let (sender, receiver) = mpsc::channel();
+        self.pending = Some(receiver);
+        self.launch_preparing = true;
+        self.launch_cancelled = false;
+        self.session = None;
+        self.session_path = Some(entry.path.clone());
+        self.status = Some(("Preparing session…".into(), false));
+        std::thread::spawn(move || {
+            let result = Plan::prepare(&entry, &directory);
+            let _ = sender.send(Job::LaunchPrepared {
+                path: entry.path,
+                result,
+            });
+        });
+    }
+    fn stop_session(&mut self) {
+        if self.launch_preparing {
+            self.launch_cancelled = true;
+        }
+        if let Some(session) = self.session.as_mut()
+            && !session.finished
+        {
+            session.stop();
+        }
+        if self.session_active() || self.launch_preparing {
+            self.status = Some((Summary::Stopping.message().into(), false));
+        }
     }
 
     fn back(&mut self, ctx: &egui::Context) {
@@ -534,8 +660,10 @@ impl Desktop {
                             "Run the included homebrew through the reference x86-64 interpreter.",
                         );
                         ui.label(
-                            RichText::new("Commercial games are not supported yet.")
-                                .color(warning_text(ui)),
+                            RichText::new(
+                                "Experimental startup; no verified commercial game boot.",
+                            )
+                            .color(warning_text(ui)),
                         );
                         ui.add_space(18.0);
                         ui.add_enabled_ui(!busy, |ui| {
@@ -601,7 +729,7 @@ impl Desktop {
             let mut selection = None;
             for (index, entry) in self.entries.iter().enumerate() {
                 ui.push_id(index, |ui| {
-                    let fallback = "Executable · not bootable yet";
+                    let fallback = "Local executable";
                     let label = format!(
                         "{}\n{}",
                         entry.name(),
@@ -695,9 +823,28 @@ impl Desktop {
                     });
                 }
                 ui.add_space(12.0);
-                ui.label(RichText::new("Headers inspected. This does not verify payloads or compatibility. Game boot, imports and graphics are not implemented yet.").color(warning_text(ui)).small());
+                ui.label(RichText::new("Inspection checks executable headers only. No commercial game boot has been verified.").color(muted_text(ui)).small());
             } else if let Some(error) = &self.inspection_error { ui.colored_label(warning_text(ui), error); }
             else { ui.label("Inspecting executable…"); }
+            ui.add_space(12.0);
+            let this_session = self.session_path.as_ref() == Some(&entry.path);
+            ui.horizontal(|ui| {
+                if this_session && (self.session_active() || self.launch_preparing) {
+                    if nav_button(ui, self.activate, "Stop", true, CORAL, [110.0, 36.0]) { self.stop_session(); }
+                } else {
+                    ui.add_enabled_ui(self.can_play(), |ui| {
+                        if nav_button(ui, self.activate, "Play", true, accent, [110.0, 36.0]) { self.play_selected(); }
+                    });
+                }
+                ui.label(RichText::new("F5 to play · Shift+F5 to stop").small().color(muted_text(ui)));
+            });
+            if this_session {
+                if self.launch_preparing { ui.label("Preparing session…"); }
+                else if let Some(session) = &self.session {
+                    ui.label(RichText::new(session.summary.message()).small().color(if session.summary.is_error() { warning_text(ui) } else { muted_text(ui) }));
+                }
+            }
+            if !cfg!(all(target_os = "windows", target_arch = "x86_64")) { ui.label("Play currently requires Windows x64."); }
             ui.add_space(12.0);
             if nav_button(ui, self.activate, "Title preferences  →", false, accent, [180.0, 32.0]) { self.page = Page::Settings; }
         });
@@ -857,7 +1004,11 @@ impl Desktop {
                 );
             });
         ui.add_space(19.0);
-        ui.label(RichText::new("Emulation graphics, audio and runtime tuning will appear as their backends become available.").color(muted_text(ui)).small());
+        ui.label(
+            RichText::new("Some preferences are not applied by the current runtime yet.")
+                .color(muted_text(ui))
+                .small(),
+        );
         apply_appearance(ui.ctx(), &self.config);
     }
 
@@ -875,8 +1026,11 @@ impl Desktop {
                 ("Guest memory", "Checked sparse memory, separate from host pointers", true),
                 ("Reference CPU", "Bounded subset · bundled synthetic homebrew only", true),
                 ("Module startup fixture", "Original interpreted two-module check", true),
-                ("Commercial game boot", "Not supported yet", false),
-                ("PS5 GPU / audio", "Not implemented yet", false),
+                ("Native sessions", "Checked native execution and bounded guest services", true),
+                ("Guest graphics", "Supported AMD draw profiles and real Vulkan output", true),
+                ("Display", "Supported frames use a supervised window", true),
+                ("Audio", "Logical headless output; no physical playback", false),
+                ("Commercial game boot", "Not verified; startup is experimental", false),
             ] {
                 ui.horizontal(|ui| { status_dot(ui, if ready { accent_text(ui, accent) } else { warning_text(ui) }, ready); ui.label(RichText::new(name).strong()); ui.label(RichText::new(state).color(muted_text(ui))); }); ui.add_space(10.0);
             }
@@ -1011,10 +1165,22 @@ impl eframe::App for Desktop {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("Experimental / commercial games not supported yet")
+                        RichText::new("Experimental startup / no verified commercial game boot")
                             .size(11.0)
                             .color(warning_text(ui)),
                     );
+                    if self.session_active() || self.launch_preparing {
+                        if nav_button(
+                            ui,
+                            self.activate,
+                            "Stop session",
+                            false,
+                            CORAL,
+                            [105.0, 27.0],
+                        ) {
+                            self.stop_session();
+                        }
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let connected = self.controllers.names().len();
                         let connection = if connected == 0 {

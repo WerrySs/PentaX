@@ -45,6 +45,7 @@ pub mod host_memory;
 pub mod native_memory;
 pub mod network;
 pub mod presenter;
+pub mod supervised_process;
 pub mod time_counter;
 pub mod vulkan;
 

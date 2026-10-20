@@ -2322,8 +2322,11 @@ dependencies = [
  "pentax-config",
  "pentax-core",
  "pentax-loader",
+ "pentax-platform",
  "rfd",
+ "same-file",
  "serde",
+ "sha2",
  "toml",
 ]
 

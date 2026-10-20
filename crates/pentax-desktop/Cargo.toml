@@ -18,6 +18,9 @@ rfd = "0.17.2"
 pentax-config.workspace = true
 pentax-core.workspace = true
 pentax-loader.workspace = true
+pentax-platform = { path = "../pentax-platform" }
+sha2 = "=0.10.9"
+same-file = "=1.0.6"
 serde.workspace = true
 toml.workspace = true
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
