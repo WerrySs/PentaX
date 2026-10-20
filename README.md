@@ -40,18 +40,21 @@ system-service contracts and reusable runtime components.
 | CPU execution | A bounded Windows x86-64 native worker with mediated instructions, checked memory access and explicit unsupported operations. |
 | System services | Stateful kernel/libc subsets, read-only game-data mounts and selected module-initialization paths. |
 | Memory | Owned guest mappings, shared physical backing, independent CPU/GPU access rights and bounded resource policies. |
-| Graphics | Shader compilation to SPIR-V, guest compute and a bounded nonindexed triangle-list draw profile for linear RGBA8 targets, with target LOAD, fenced readback and atomic guest writeback. |
-| Video output | An owner-bound CPU flip queue, bounded detiling of registered RenderTarget64KB surfaces, and frame hand-off and acknowledgement APIs. |
-| Desktop | A native game-library and diagnostics interface, global/per-title settings, and keyboard, mouse and controller navigation. |
+| Graphics | Shader compilation to SPIR-V, guest compute and bounded nonindexed triangle-list draws to linear or RenderTarget64KB RGBA8 targets, with LOAD preservation, fenced readback and atomic guest writeback. |
+| Video output | Owned CPU/GPU flip queues, retained flip/vblank events and a supervised Vulkan window with exact presentation acknowledgement. |
+| Desktop | A native library with supervised Play/Stop startup sessions, global/per-title preferences, and keyboard, mouse and controller navigation. |
 
-A verified original 64×64 Vulkan case executes two guest vertex/pixel shader
-draws with changed SGPR inputs and checks partial coverage, LOAD preservation,
-fenced writeback and boundary canaries. Desktop/IPC frame transport, real vblank
-timing, VideoOut equeue event delivery and GPU-EOP completion for registered tiled
-surfaces remain unfinished.
+A verified original 1920×1080 native program draws through Vulkan into a tiled
+target, queues its GPU flip and presents one frame through the worker-owned
+window. It checks drawn and preserved pixels, padding, guard bytes and exactly
+one presentation acknowledgement. Earlier original cases also cover two draws
+with changed SGPR inputs and retained LOAD contents. These results use original
+programs and shaders. Manual launcher interaction and commercial game boot
+remain unverified.
 
 The work ahead includes broader game startup, guest-thread scheduling and
-system-service coverage, additional draw/resource modes, presentation and audio.
+system-service coverage, additional draw/resource modes, sustained presentation
+and physical audio.
 Performance work needs a
 working game path before meaningful frame-rate measurements are possible.
 
@@ -66,10 +69,11 @@ toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml), Visual Studio C+
 Build Tools and the Windows SDK. Vulkan diagnostics also need a Vulkan-capable
 GPU and driver.
 
-From the repository root, launch the desktop interface:
+Build the desktop and both sibling executables together, then launch the interface:
 
 ```powershell
-cargo run --locked -p pentax-desktop
+cargo build --locked --release -p pentax-desktop -p pentax-cli -p pentax-worker
+.\target\release\pentax.exe
 ```
 
 Run the original reference diagnostic or inspect a selected executable:
@@ -81,6 +85,8 @@ cargo run --locked -p pentax-cli -- inspect "C:\Games\Example\eboot.bin"
 
 `inspect` opens the selected executable read-only and reads bounded header data;
 it does not execute it. The desktop interface is an early development tool.
+Play starts a finite supervised startup session; it does not imply that the
+selected commercial game can boot. Keep the desktop, CLI and worker together.
 No games, firmware, keys or proprietary SDK files are included.
 
 Native execution currently requires Windows x86-64. Build prerequisites for

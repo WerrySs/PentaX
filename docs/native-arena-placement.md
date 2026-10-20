@@ -8,7 +8,7 @@ when its backing and permissions are correct. This is a software placement
 profile, not a claim about host or console physical memory.
 
 The 4GiB lower bound also leaves addressable room below the arena for the
-separately owned native code cache. The prepared stepper's current 4096 bounded
+separately owned native code cache. The prepared stepper's default 4096 bounded
 attempts alternate 64KiB steps above/below the entry-point anchor, reaching at
 most 128MiB in each direction. A large arena placed at 64KiB could occupy every
 positive candidate while leaving insufficient space below for the runtime's
@@ -17,6 +17,10 @@ remain untouched, and every actual cache placement still requires successful
 independent reservation. This removes that bottom-of-address-space trap; it
 does not guarantee a free candidate or cache reach from an entry deep inside
 an unusually large arena. Existing bounded refusal remains explicit.
+
+The worker currently selects 16384 bounded attempts instead, reaching 512MiB
+on each side. The same lower-bound reasoning applies; neither setting grants
+ownership of an occupied candidate.
 
 `NativeAddressSpace::reserve_within` validates size, alignment, reservation
 quota, exclusive window end and overflow before asking Windows for one owned
