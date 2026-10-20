@@ -4,14 +4,14 @@
 // Public KytyPS5/KytyPS5@7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3
 // graphicsRun.cpp DrawIndexAuto and renderDraw.cpp DrawAuto/EmitDrawPrimitives.
 
-//! Actual linear-target guest draws. A draw completion is issued only after
+//! Actual declared-layout guest draws. A draw completion is issued only after
 //! its Vulkan fence AND transactional writeback on the original paused owner.
-//! Tiled registration/presentation, depth, blending and descriptor resources
-//! remain separate explicitly unsupported profiles, not successful no-ops.
+//! The one-level RenderTarget64KB path reuses VideoOut's exact pixel mapping.
+//! Presentation completion, depth, blending and descriptors remain separate.
 
 use pentax_gpu::{
     compute::CommandRange,
-    graphics::{self, Draw, Limits, Usage},
+    graphics::{self, DecodedTarget, Draw, Limits, TargetGeometry, Usage},
 };
 use pentax_platform::{
     native_memory::{
@@ -30,6 +30,10 @@ static NEXT_SUBMISSION: AtomicU64 = AtomicU64::new(1);
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "graphics/actual_draw_tests.rs"]
 mod actual_draw_tests;
+
+#[cfg(test)]
+#[path = "graphics/tiled_tests.rs"]
+mod tiled_tests;
 
 #[derive(Debug)]
 pub enum Error {
@@ -50,12 +54,8 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-/// The exact data representation written by this execution slice. It cannot be
-/// substituted for a registered RenderTarget64KB surface without real conversion.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TargetLayout {
-    LinearRgba8,
-}
+use super::video::{ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32_into};
+pub use pentax_gpu::graphics::TargetLayout;
 
 /// Nonforgeable within the public API. Numeric submission IDs and a public
 /// report alone are not completion authority. This attests a completed draw,
@@ -64,6 +64,7 @@ pub struct GraphicsCompletion {
     owner: NativeOwnerId,
     target: NativeRange,
     submission: u64,
+    geometry: TargetGeometry,
 }
 impl fmt::Debug for GraphicsCompletion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -81,7 +82,10 @@ impl GraphicsCompletion {
         self.target
     }
     pub fn layout(&self) -> TargetLayout {
-        TargetLayout::LinearRgba8
+        self.geometry.layout()
+    }
+    pub fn geometry(&self) -> TargetGeometry {
+        self.geometry
     }
     pub fn submission(&self) -> u64 {
         self.submission
@@ -127,12 +131,66 @@ pub(super) fn execute_draw_admitted(
     command_ranges: &[CommandRange],
     admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
 ) -> Result<Report, Error> {
-    let prepared =
-        graphics::prepare_draw(draw, &super::Memory(paused), limits).map_err(Error::Prepare)?;
-    let preparation = prepared.usage();
+    let prepared = graphics::prepare_draw_with_target(
+        draw,
+        &super::Memory(paused),
+        limits,
+        |snapshot, geometry, remaining| {
+            let mut work = 0;
+            let bytes = detile_32(
+                snapshot,
+                image_layout(geometry),
+                0,
+                &PresentationLimits {
+                    max_frame_bytes: limits.max_target_bytes,
+                    max_held_bytes: remaining.max_host_bytes,
+                    max_work: remaining.max_work,
+                },
+                &mut work,
+            )
+            .map_err(|error| match error {
+                super::driver::Failure::Limit => graphics::Error::Limit("target LOAD conversion"),
+                super::driver::Failure::Allocation => graphics::Error::Allocation,
+                _ => graphics::Error::Unsupported("target LOAD conversion"),
+            })?;
+            Ok(DecodedTarget { bytes, work })
+        },
+    )
+    .map_err(Error::Prepare)?;
+    let geometry = prepared.target_geometry();
+    let mut preparation = prepared.usage();
+    let reverse_work = if geometry.layout() == TargetLayout::RenderTarget64KbRgba8 {
+        (geometry.tight_bytes() as u64)
+            .checked_mul(4)
+            .ok_or(Error::Limit)?
+    } else {
+        0
+    };
+    // Reserve reverse-conversion work before GPU effects, including the full
+    // offset-validation pass. Publication never discovers a new work quota.
+    preparation.work = preparation
+        .work
+        .checked_add(reverse_work)
+        .filter(|n| *n <= limits.max_work)
+        .ok_or(Error::Limit)?;
+    // The platform separately charges its upload and completed Vec capacities.
+    // Clamp that entire budget to the shared remainder after retained padded
+    // LOAD, tight input, shaders and conservative compiler staging charges.
+    let remaining_host = limits
+        .max_host_bytes
+        .checked_sub(preparation.host_bytes)
+        .ok_or(Error::Limit)?;
+    let mut execution_limits = *gpu_limits;
+    execution_limits.max_host_bytes = execution_limits.max_host_bytes.min(remaining_host as u64);
+    if (geometry.tight_bytes() as u64)
+        .checked_mul(2)
+        .is_none_or(|n| n > execution_limits.max_host_bytes)
+    {
+        return Err(Error::Limit);
+    }
     let target = NativeRange {
         address: prepared.target_address(),
-        size: prepared.input().len() as u64,
+        size: geometry.guest_bytes() as u64,
     };
     let remaining = limits
         .max_work
@@ -148,18 +206,37 @@ pub(super) fn execute_draw_admitted(
         })
         .map_err(|_| Error::Limit)?;
     admit(preparation, work, true)?;
-    let completed =
-        pentax_platform::vulkan::run_graphics(&prepared, gpu_limits).map_err(Error::Vulkan)?;
-    if completed.bytes().len() != prepared.input().len() {
+    let completed = pentax_platform::vulkan::run_graphics(&prepared, &execution_limits)
+        .map_err(Error::Vulkan)?;
+    if completed.bytes().len() != geometry.tight_bytes() {
         return Err(Error::Limit);
     }
+    let mut baseline = prepared.into_target_snapshot();
+    let bytes = if geometry.layout() == TargetLayout::RenderTarget64KbRgba8 {
+        let mut work = 0;
+        retile_32_into(
+            completed.bytes(),
+            image_layout(geometry),
+            &mut baseline,
+            &PresentationLimits {
+                max_frame_bytes: limits.max_target_bytes,
+                max_held_bytes: limits.max_host_bytes,
+                max_work: reverse_work,
+            },
+            &mut work,
+        )
+        .map_err(|_| Error::Limit)?;
+        baseline.as_slice()
+    } else {
+        completed.bytes()
+    };
     // apply_gpu_writes performs its own complete permission/alias admission.
     // Metadata cannot change while this exact exclusive pause is retained.
     paused
         .apply_gpu_writes(
             &[NativeMemoryWrite {
                 address: target.address,
-                bytes: completed.bytes(),
+                bytes,
             }],
             &NativeTransactionLimits {
                 max_outputs: 1,
@@ -172,14 +249,27 @@ pub(super) fn execute_draw_admitted(
     Ok(Report {
         preparation,
         gpu: completed.usage(),
-        written_bytes: prepared.input().len(),
+        written_bytes: geometry.guest_bytes(),
         preflight_work: work,
         completion: GraphicsCompletion {
             owner: paused.owner_id(),
             target,
             submission,
+            geometry,
         },
     })
+}
+
+fn image_layout(geometry: TargetGeometry) -> ImageLayout {
+    ImageLayout {
+        kind: match geometry.layout() {
+            TargetLayout::LinearRgba8 => SurfaceLayout::Linear,
+            TargetLayout::RenderTarget64KbRgba8 => SurfaceLayout::RenderTarget64Kb,
+        },
+        width: geometry.width(),
+        height: geometry.height(),
+        pitch: geometry.pitch(),
+    }
 }
 
 fn preflight_target(

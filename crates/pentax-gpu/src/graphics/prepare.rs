@@ -3,7 +3,8 @@
 // Modified 2026 for PentaX: explicit register/profile admission and owned resources.
 
 use super::{
-    Budget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw, RegisterSpace, Usage,
+    Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw, RegisterSpace,
+    TargetDecodeLimits, TargetGeometry, TargetLayout, Usage,
 };
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
@@ -30,6 +31,7 @@ struct Configuration {
     width: u32,
     height: u32,
     bytes: usize,
+    geometry: TargetGeometry,
     vertex_address: u64,
     pixel_address: u64,
     vertex_users: u8,
@@ -86,7 +88,6 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
         // PAL's UNorm path sets BLEND_CLAMP and ROUND_BY_HALF (enum0).
         // CB RESOURCE_TYPE uses ImageType::Tex2d=1, not SQ image descriptor9.
         (0x31c, (10 << 2) | (1 << 15)),
-        (0x3b8, 1 << 24),
     ] {
         expected(state, register, value)?;
     }
@@ -99,11 +100,23 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
     if width > budget.limits.max_dimension || height > budget.limits.max_dimension {
         return Err(Error::Limit("render-target dimensions"));
     }
-    // Source linear rows align to256 bytes. No row padding is overwritten by
-    // treating a padded surface as a tight Vulkan upload/readback.
+    // Retain the existing Vulkan-visible width profile. Tiled pitch is a
+    // separate padded guest extent and never changes this logical viewport.
     if !width.is_multiple_of(64) {
-        return Err(Error::Unsupported("linear RGBA8 row pitch"));
+        return Err(Error::Unsupported("RGBA8 visible width profile"));
     }
+    // Public pm4.h CB_COLOR0_ATTRIB3 decodes COLOR_SW_MODE at14, type at24.
+    // kRenderTarget is0x1b. Exact words reject depth/layers, pipe flags and VRS;
+    // no unproved swizzle or compression bit is masked away.
+    let (layout, pitch, padded_height) = match context(state, 0x3b8)? {
+        0x0100_0000 => (TargetLayout::LinearRgba8, width, height),
+        0x0106_c000 => (
+            TargetLayout::RenderTarget64KbRgba8,
+            width.next_multiple_of(128),
+            height.next_multiple_of(128),
+        ),
+        _ => return Err(Error::Unsupported("render-target swizzle profile")),
+    };
     let extent = width | (height << 16);
     for (tl, br, top_left) in [
         (0x0c, 0x0d, 0),
@@ -124,15 +137,22 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
     ] {
         expected(state, register, value.to_bits())?;
     }
-    let bytes = usize::try_from(u64::from(width) * u64::from(height) * 4)
+    let tight_bytes = usize::try_from(u64::from(width) * u64::from(height) * 4)
         .ok()
         .filter(|n| *n <= budget.limits.max_target_bytes)
         .ok_or(Error::Limit("render-target bytes"))?;
+    let bytes = usize::try_from(u64::from(pitch) * u64::from(padded_height) * 4)
+        .ok()
+        .filter(|n| *n <= budget.limits.max_target_bytes)
+        .ok_or(Error::Limit("padded render-target bytes"))?;
     let high = context(state, 0x390)?;
     if high > 255 {
         return Err(Error::Unsupported("render-target address high bits"));
     }
     let address = (u64::from(context(state, 0x318)?) << 8) | (u64::from(high) << 40);
+    if layout == TargetLayout::RenderTarget64KbRgba8 && !address.is_multiple_of(65536) {
+        return Err(Error::Unsupported("render-target block alignment"));
+    }
     if address == 0
         || address
             .checked_add(bytes as u64)
@@ -164,6 +184,14 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
         width,
         height,
         bytes,
+        geometry: TargetGeometry {
+            layout,
+            width,
+            height,
+            pitch,
+            guest_bytes: bytes,
+            tight_bytes,
+        },
         vertex_address: shader_address(state, 0xc8)?,
         pixel_address: shader_address(state, 0x08)?,
         vertex_users,
@@ -311,6 +339,20 @@ pub fn prepare_draw(
     memory: &impl Memory,
     limits: &Limits,
 ) -> Result<PreparedDraw, Error> {
+    prepare_draw_with_target(draw, memory, limits, |_, _, _| {
+        Err(Error::Unsupported("tiled target decoder is not bound"))
+    })
+}
+
+/// Prepare real shaders and a full source-layout LOAD snapshot. A tiled target
+/// additionally requires the caller's bounded pure decoder; the native runtime
+/// binds its existing source-pinned conversion, never a guest-memory callback.
+pub fn prepare_draw_with_target(
+    draw: &Draw,
+    memory: &impl Memory,
+    limits: &Limits,
+    decode: impl FnOnce(&[u8], TargetGeometry, TargetDecodeLimits) -> Result<DecodedTarget, Error>,
+) -> Result<PreparedDraw, Error> {
     let mut budget = Budget {
         limits,
         usage: Usage::default(),
@@ -430,11 +472,35 @@ pub fn prepare_draw(
     memory
         .snapshot_buffer(config.address, &mut input, true, true)
         .map_err(Error::Memory)?;
+    let (input, target_snapshot) = if config.geometry.layout == TargetLayout::LinearRgba8 {
+        (input, None)
+    } else {
+        let remaining = TargetDecodeLimits {
+            max_host_bytes: limits
+                .max_host_bytes
+                .checked_sub(budget.usage.host_bytes)
+                .filter(|n| *n >= config.geometry.tight_bytes)
+                .ok_or(Error::Limit("target decode bytes"))?,
+            max_work: limits
+                .max_work
+                .checked_sub(budget.usage.work)
+                .ok_or(Error::Limit("target decode work"))?,
+        };
+        let decoded = decode(&input, config.geometry, remaining)?;
+        if decoded.bytes.len() != config.geometry.tight_bytes {
+            return Err(Error::Unsupported("target decode extent"));
+        }
+        budget.host(decoded.bytes.capacity())?;
+        budget.work(decoded.work)?;
+        (decoded.bytes, Some(input))
+    };
     budget.usage.target_bytes = config.bytes;
     Ok(PreparedDraw {
         vertex,
         pixel,
         input,
+        target_snapshot,
+        target_geometry: config.geometry,
         vertex_push,
         pixel_push,
         target_address: config.address,

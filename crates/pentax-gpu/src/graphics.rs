@@ -18,6 +18,7 @@ mod prepare;
 mod state;
 pub use commands::{CommandLimits, CommandPlan, CommandUsage, Draw, plan_commands};
 pub use prepare::prepare_draw;
+pub use prepare::prepare_draw_with_target;
 pub use state::GraphicsState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,12 +82,64 @@ pub struct Usage {
     pub target_bytes: usize,
 }
 
+/// Declared byte representation, not native memory or completion authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetLayout {
+    LinearRgba8,
+    RenderTarget64KbRgba8,
+}
+
+/// Immutable geometry validated from this draw's actual register snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TargetGeometry {
+    layout: TargetLayout,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    guest_bytes: usize,
+    tight_bytes: usize,
+}
+impl TargetGeometry {
+    pub const fn layout(self) -> TargetLayout {
+        self.layout
+    }
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+    pub const fn pitch(self) -> u32 {
+        self.pitch
+    }
+    pub const fn guest_bytes(self) -> usize {
+        self.guest_bytes
+    }
+    pub const fn tight_bytes(self) -> usize {
+        self.tight_bytes
+    }
+}
+
+/// Remaining conversion admission after all retained preparation allocations.
+/// The decoder has no guest or native memory authority.
+#[derive(Clone, Copy, Debug)]
+pub struct TargetDecodeLimits {
+    pub max_host_bytes: usize,
+    pub max_work: u64,
+}
+pub struct DecodedTarget {
+    pub bytes: Vec<u8>,
+    pub work: u64,
+}
+
 /// Real compiler products and retained target contents, never a canned shader.
 /// Private fields prohibit substituting unrelated SPIR-V or target snapshots.
 pub struct PreparedDraw {
     vertex: CompiledShader,
     pixel: CompiledShader,
     input: Vec<u8>,
+    target_snapshot: Option<Vec<u8>>,
+    target_geometry: TargetGeometry,
     vertex_push: [u8; 128],
     pixel_push: [u8; 128],
     target_address: u64,
@@ -126,6 +179,18 @@ impl PreparedDraw {
     }
     pub fn input(&self) -> &[u8] {
         &self.input
+    }
+    pub fn target_geometry(&self) -> TargetGeometry {
+        self.target_geometry
+    }
+    /// The original full padded LOAD snapshot. Linear targets reuse input.
+    pub fn target_snapshot(&self) -> &[u8] {
+        self.target_snapshot.as_deref().unwrap_or(&self.input)
+    }
+    /// Consume preparation after the backend fence to recover owned padded
+    /// storage for an in-place checked reverse conversion. No allocation.
+    pub fn into_target_snapshot(self) -> Vec<u8> {
+        self.target_snapshot.unwrap_or(self.input)
     }
     pub fn vertex_count(&self) -> u32 {
         self.vertex_count

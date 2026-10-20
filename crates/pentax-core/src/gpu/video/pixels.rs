@@ -169,6 +169,45 @@ pub fn retile_32(
         limits,
     )?;
     let mut output = allocate(source, held, limits)?;
+    retile_pixels(input, layout, &mut output)?;
+    Ok(output)
+}
+
+/// Overlay active tight pixels onto an existing complete source-layout image.
+/// All padding is preserved. Exact geometry, both spans, conversion work and
+/// every destination offset are admitted before the first output mutation.
+/// This function allocates nothing and grants no native-memory authority.
+pub fn retile_32_into(
+    input: &[u8],
+    layout: ImageLayout,
+    output: &mut [u8],
+    limits: &PresentationLimits,
+    work: &mut u64,
+) -> Result<(), Failure> {
+    let (source, tight) = layout.sizes()?;
+    if input.len() != tight || output.len() != source {
+        return Err(Failure::UnsupportedVideo);
+    }
+    if source > limits.max_frame_bytes || tight > limits.max_frame_bytes {
+        return Err(Failure::Limit);
+    }
+    charge(
+        work,
+        (tight as u64).checked_mul(4).ok_or(Failure::Limit)?,
+        limits,
+    )?;
+    retile_pixels(input, layout, output)
+}
+
+fn retile_pixels(input: &[u8], layout: ImageLayout, output: &mut [u8]) -> Result<(), Failure> {
+    for y in 0..layout.height {
+        for x in 0..layout.width {
+            let to = layout.offset(x, y);
+            if output.get(to..to + 4).is_none() {
+                return Err(Failure::UnsupportedVideo);
+            }
+        }
+    }
     for y in 0..layout.height {
         for x in 0..layout.width {
             let from = ((u64::from(y) * u64::from(layout.width) + u64::from(x)) * 4) as usize;
@@ -179,7 +218,7 @@ pub fn retile_32(
                 .copy_from_slice(&input[from..from + 4]);
         }
     }
-    Ok(output)
+    Ok(())
 }
 
 pub(super) fn snapshot(

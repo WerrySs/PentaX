@@ -14,7 +14,9 @@ mod buffers;
 pub use buffers::{Compression, PixelFormat, Surface};
 mod pixels;
 mod presentation;
-pub use pixels::{ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32};
+pub use pixels::{
+    ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32, retile_32_into,
+};
 pub use presentation::{FlipCompletion, FlipSource, FlipStatus, FlipSubmission, FlipTicket, Frame};
 
 const INVALID_VALUE: u64 = 0x8029_0001;

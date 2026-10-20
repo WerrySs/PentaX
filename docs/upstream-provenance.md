@@ -1492,3 +1492,38 @@ This explicit headless profile does not provide physical playback or mastering.
 Its finite grain/PCM policies, refusal of blocking unknown contexts and stronger
 whole-operation serialization are documented compatibility limits. Additional
 aliases, device success, DSP operations and host race equivalence are not inferred.
+
+### Declared RenderTarget64KB draw conversion
+
+The one-level32bpp draw target extension independently verifies PUBLIC
+KytyPS5/KytyPS5 revision `7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3`:
+
+- `src/graphics/guest_gpu/pm4.h`, blob
+  `186c8844ce8a6575b72172dd43c83e949d3dfb81`: CB_COLOR0_ATTRIB3 field decoding.
+- `src/graphics/guest_gpu/gpu_defs.h`, blob
+  `507ff702d41580c6a2ed200b9c2313dab2f5b02e`: kRenderTarget0x1b.
+- `src/graphics/guest_gpu/tile.cpp`, blob
+  `7043ca40c275473631beb5b37bf1f3729b7671e9`: one-level32bpp128-pixel
+  pitch/height alignment and RenderTarget64KB coordinate/block XOR mapping.
+
+The existing retained AMD PAL pin
+`c5e800072a32f68b6ccc4422936d96167c6e0728` names the corresponding mode
+`SW_64KB_R_X`. Exact `CB_COLOR0_ATTRIB3=0x0106c000` selects the admitted2D
+one-level profile. A64KiB-aligned base is an explicit zero-address-swizzle
+restriction; visible width divisible by64 is an existing Vulkan backend limit,
+not a universal tiled-image rule. Other compression, metadata, base-swizzle,
+layer/sample/depth/descriptor and indexed profiles remain unsupported.
+
+PentaX reuses its existing VideoOut conversion math for real LOAD detiling and
+an allocation-free reverse overlay. Original padded bytes survive outside
+visible pixels. Preparation retains immutable actual geometry and both padded
+and tight storage; native preflight covers the whole padded same-owner range
+and its command/shader physical aliases. Reverse work and shared upload/readback
+allowance are admitted before GPU effects. Backend readback actual capacity is
+checked within that allowance; failures after GPU effects remain terminal.
+A private geometry/layout receipt is created only after the actual fence and
+atomic guest writeback. It attests RGBA8_UNORM draw bytes, not a VideoOut sRGB
+transfer conversion, GPU-EOP event, flip acknowledgement or game frame.
+
+Copyright(c)2021 InoriRus, GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. The packet/shader/pixel fixtures are original PentaX data.

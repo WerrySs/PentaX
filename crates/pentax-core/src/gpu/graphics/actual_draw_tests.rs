@@ -80,6 +80,9 @@ fn set(words: &mut Vec<u32>, opcode: u32, register: u32, values: &[u32]) {
 }
 
 fn commands(vertex: u64, pixel: u64, target: u64) -> Vec<u32> {
+    commands_with_layout(vertex, pixel, target, 1 << 24)
+}
+fn commands_with_layout(vertex: u64, pixel: u64, target: u64, layout: u32) -> Vec<u32> {
     let mut words = Vec::new();
     for register in [
         0x80, 0x1b1, 0x1b3, 0x1b4, 0x1b8, 0x1c4, 0x1e0, 0x200, 0x203, 0x205, 0x207, 0x293, 0x2f8,
@@ -102,7 +105,7 @@ fn commands(vertex: u64, pixel: u64, target: u64) -> Vec<u32> {
         (0x31c, (10 << 2) | (1 << 15)),
         (0x390, (target >> 40) as u32),
         (0x3b0, (63 << 14) | 63),
-        (0x3b8, 1 << 24),
+        (0x3b8, layout),
     ] {
         set(&mut words, 0x69, register, &[value]);
     }
@@ -282,4 +285,258 @@ fn actual_guest_draw_64x64_load_and_writeback_preserve_prior_pixels_and_live_sta
     );
     assert_eq!(read(&memory, target - 16, 16), [0x9b; 16]);
     assert_eq!(read(&memory, target + TARGET_BYTES as u64, 16), [0xe7; 16]);
+}
+
+#[test]
+fn declared_tiled_draw_refuses_padding_overlap_late_gpu_rights_and_shared_host_quota_before_gpu() {
+    use super::execute_draw_admitted;
+    use std::cell::Cell;
+    let mut owner = NativeAddressSpace::reserve_any(Default::default(), 0x40000).unwrap();
+    let base = owner.reserved_ranges().next().unwrap().address;
+    owner
+        .map_at(
+            base,
+            0x40000,
+            NativePermissions::READ_WRITE.with_gpu(true, true),
+        )
+        .unwrap();
+    let target = base + 0x10000;
+    let encoded = bytes(&commands_with_layout(
+        base + 0x4000,
+        base + 0x5000,
+        target,
+        0x0106_c000,
+    ));
+    let plan = plan_commands(
+        &[&encoded],
+        GraphicsState::empty(),
+        &CommandLimits::default(),
+    )
+    .unwrap();
+    {
+        let mut memory = owner.pause().unwrap();
+        memory
+            .write(base + 0x4000, &bytes(&vertex_shader()))
+            .unwrap();
+        memory
+            .write(base + 0x5000, &bytes(&pixel_shader()))
+            .unwrap();
+        memory.write(target, &[0x9b; 65536]).unwrap();
+        let admitted = Cell::new(false);
+        let overlap = execute_draw_admitted(
+            &mut memory,
+            &plan.draws()[0],
+            &Limits::default(),
+            &GpuLimits::default(),
+            &[CommandRange {
+                address: target + 65520,
+                size: 16,
+            }],
+            |_, _, _| {
+                admitted.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(overlap, Err(super::Error::Memory(_))));
+        assert!(!admitted.get());
+        assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
+        // Exact retained source/compiler charge leaves less than the upload +
+        // completed tight result. The admission hook must not be reached.
+        let prepared = pentax_gpu::graphics::prepare_draw_with_target(
+            &plan.draws()[0],
+            &crate::gpu::Memory(&memory),
+            &Limits::default(),
+            |snapshot, geometry, remaining| {
+                let mut work = 0;
+                let bytes = crate::gpu::video::detile_32(
+                    snapshot,
+                    super::image_layout(geometry),
+                    0,
+                    &crate::gpu::video::PresentationLimits {
+                        max_frame_bytes: 65536,
+                        max_held_bytes: remaining.max_host_bytes,
+                        max_work: remaining.max_work,
+                    },
+                    &mut work,
+                )
+                .unwrap();
+                Ok(pentax_gpu::graphics::DecodedTarget { bytes, work })
+            },
+        )
+        .unwrap();
+        let held = prepared.usage().host_bytes;
+        drop(prepared);
+        let quota = execute_draw_admitted(
+            &mut memory,
+            &plan.draws()[0],
+            &Limits {
+                max_host_bytes: held + 32767,
+                ..Default::default()
+            },
+            &GpuLimits::default(),
+            &[],
+            |_, _, _| {
+                admitted.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(quota, Err(super::Error::Limit)));
+        assert!(!admitted.get());
+        assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
+    }
+    // Rights revoked on the final padded page after command planning must
+    // refuse the complete current target snapshot, including invisible bytes.
+    owner
+        .protect(
+            target + 0xc000,
+            0x4000,
+            NativePermissions::READ_WRITE.with_gpu(true, false),
+        )
+        .unwrap();
+    let mut memory = owner.pause().unwrap();
+    let admitted = Cell::new(false);
+    assert!(
+        execute_draw_admitted(
+            &mut memory,
+            &plan.draws()[0],
+            &Limits::default(),
+            &GpuLimits::default(),
+            &[],
+            |_, _, _| {
+                admitted.set(true);
+                Ok(())
+            }
+        )
+        .is_err()
+    );
+    assert!(!admitted.get());
+    assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
+}
+
+#[test]
+#[ignore = "requires a local Vulkan device"]
+fn actual_declared_tiled_draws_load_retire_and_preserve_full_padded_source_geometry() {
+    use crate::gpu::video::{
+        ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32, retile_32_into,
+    };
+    let mut owner = NativeAddressSpace::reserve_any(Default::default(), 0x40000).unwrap();
+    let base = owner.reserved_ranges().next().unwrap().address;
+    owner
+        .map_at(
+            base,
+            0x40000,
+            NativePermissions::READ_WRITE.with_gpu(true, true),
+        )
+        .unwrap();
+    let mut memory = owner.pause().unwrap();
+    let target = base + 0x10000;
+    let layout = ImageLayout {
+        kind: SurfaceLayout::RenderTarget64Kb,
+        width: 64,
+        height: 64,
+        pitch: 128,
+    };
+    let conversion = PresentationLimits::default();
+    let mut work = 0;
+    let mut initial = vec![0x9b; 65536];
+    retile_32_into(
+        &SENTINEL.repeat(WIDTH * HEIGHT),
+        layout,
+        &mut initial,
+        &conversion,
+        &mut work,
+    )
+    .unwrap();
+    let active = retile_32(
+        &vec![255; TARGET_BYTES],
+        layout,
+        initial.capacity(),
+        &conversion,
+        &mut work,
+    )
+    .unwrap();
+    memory.write(target, &initial).unwrap();
+    memory.write(target - 16, &[0x67; 16]).unwrap();
+    memory.write(target + 65536, &[0xe7; 16]).unwrap();
+    memory
+        .write(base + 0x4000, &bytes(&vertex_shader()))
+        .unwrap();
+    memory
+        .write(base + 0x5000, &bytes(&pixel_shader()))
+        .unwrap();
+    let encoded = bytes(&commands_with_layout(
+        base + 0x4000,
+        base + 0x5000,
+        target,
+        0x0106_c000,
+    ));
+    memory.write(base + 0x1000, &encoded).unwrap();
+    let plan = plan_commands(
+        &[&encoded],
+        GraphicsState::empty(),
+        &CommandLimits::default(),
+    )
+    .unwrap();
+    let commands = [CommandRange {
+        address: base + 0x1000,
+        size: encoded.len() as u64,
+    }];
+    assert_eq!(plan.draws().len(), 2);
+    let mut previous = 0;
+    for (index, draw) in plan.draws().iter().enumerate() {
+        let report = execute_draw(
+            &mut memory,
+            draw,
+            &Limits::default(),
+            &GpuLimits::default(),
+            &commands,
+        )
+        .unwrap();
+        assert!(
+            report.gpu.commands > 0 && report.gpu.shader_words > 0 && report.gpu.device_bytes > 0
+        );
+        assert_eq!(report.written_bytes, 65536);
+        assert_eq!(report.completion.owner(), memory.owner_id());
+        assert_eq!(
+            report.completion.target(),
+            NativeRange {
+                address: target,
+                size: 65536
+            }
+        );
+        assert_eq!(
+            report.completion.layout(),
+            TargetLayout::RenderTarget64KbRgba8
+        );
+        let geometry = report.completion.geometry();
+        assert_eq!(
+            (geometry.width(), geometry.height(), geometry.pitch()),
+            (64, 64, 128)
+        );
+        assert_eq!(
+            (geometry.guest_bytes(), geometry.tight_bytes()),
+            (65536, TARGET_BYTES)
+        );
+        assert!(report.completion.submission() > previous);
+        previous = report.completion.submission();
+        let tiled = read(&memory, target, 65536);
+        for (n, value) in tiled.iter().enumerate() {
+            if active[n] == 0 {
+                assert_eq!(*value, initial[n]);
+            }
+        }
+        let visible = detile_32(&tiled, layout, tiled.capacity(), &conversion, &mut work).unwrap();
+        assert_eq!(pixel(&visible, 24, 24), RED);
+        assert_eq!(
+            pixel(&visible, 36, 20),
+            if index == 0 { RED } else { GREEN }
+        );
+        assert_eq!(
+            pixel(&visible, 52, 20),
+            if index == 0 { SENTINEL } else { GREEN }
+        );
+        assert_eq!(pixel(&visible, 56, 56), SENTINEL);
+        assert_eq!(read(&memory, target - 16, 16), [0x67; 16]);
+        assert_eq!(read(&memory, target + 65536, 16), [0xe7; 16]);
+    }
 }

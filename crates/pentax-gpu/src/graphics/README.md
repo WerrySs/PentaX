@@ -15,7 +15,11 @@ only after execution; a failed plan returns no executable prefix.
 instruction boundaries with the existing shader decoder, refuses backward
 branches and compiles both guest programs through the existing Rust compiler.
 It returns private `PreparedDraw` products, manifests, stage push data and a
-snapshot of the actual target. It never substitutes a host shader or writes
+snapshot of the actual target. `prepare_draw` retains its linear-only contract;
+`prepare_draw_with_target` additionally binds a bounded pure layout decoder.
+The decoder receives immutable captured bytes, exact validated geometry and
+remaining host/work limits, with no guest-memory authority. The native core
+uses the existing VideoOut pixel conversion. It never substitutes a host shader or writes
 guest memory. A numeric plan or range grants no owner, mapping or execution
 authority. Native execution must check live GPU access and aliases, retain
 exclusive ownership, submit/fence the actual draw, and atomically publish its
@@ -43,7 +47,14 @@ The first profile is deliberately finite:
   Target geometry comes from `CB_COLOR0_ATTRIB2`, base from low/ext registers.
 - Linear source rows align to256 bytes. Width must be a multiple of64 pixels,
   making its guest stride equal to the tight RGBA8 upload/readback stride.
-  Other widths need a future explicit row-pitch scatter preserving padding.
+- One-level32bpp RenderTarget64KB is a separate admitted representation:
+  exact `CB_COLOR0_ATTRIB3=0x0106c000` selects2D, zero depth and swizzle0x1b
+  (`SW_64KB_R_X`). The base must be64KiB-aligned. Guest pitch and height align
+  to128 pixels; the actual padded range is retained independently of the tight
+  Vulkan input. Unknown mode/metadata/pipe flags, mip/layer/sample/compression
+  profiles remain unsupported. Width must still be a multiple of64 as an
+  explicit existing backend restriction, not a hardware tiling requirement.
+  The viewport always uses the original visible dimensions.
 - Known scale/offset viewport and screen/window/generic/viewport0 scissors
   must equal the complete target. DX clip space, enabled scale/offset transforms,
   depth0..1, normal clipping and no culling/discard are explicitly required.
@@ -87,6 +98,24 @@ defines Tex2d1; and
 [gfx9_plus_merged_enum.h](https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/chip/gfx9_plus_merged_enum.h)
 defines round-by-half0. These are checked field facts; no PAL implementation or
 generated header is transplanted into the Rust planner.
+
+The tiled extension independently verifies public KytyPS5 revision
+`7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3`:
+`src/graphics/guest_gpu/pm4.h` (blob
+`186c8844ce8a6575b72172dd43c83e949d3dfb81`) defines the COLOR_SW_MODE shift14
+and RESOURCE_TYPE shift24; `gpu_defs.h` (blob
+`507ff702d41580c6a2ed200b9c2313dab2f5b02e`) defines kRenderTarget0x1b;
+`tile.cpp` (blob `7043ca40c275473631beb5b37bf1f3729b7671e9`) defines
+the one-level32bpp128-pixel block geometry and XOR pixel mapping. Core reuses
+its existing detile/retile implementation rather than maintaining a second
+address equation. Full padded LOAD, tight input and actual capacities count
+together; reverse-conversion work and a shared upload/readback allowance are
+admitted before effects. Backend readback actual capacity remains bounded by
+that allowance. Active pixels overlay the retained original padded
+snapshot, preserving every unused byte. The private completion carries actual
+layout, geometry and padded range only after fenced same-owner atomic writeback.
+That RGBA8_UNORM receipt is not a VideoOut sRGB transfer conversion, GPU-EOP
+event or presentation acknowledgement.
 
 Public execution ordering is independently anchored to
 [KytyPS5 at7b7f9a70](https://github.com/KytyPS5/KytyPS5/tree/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3):

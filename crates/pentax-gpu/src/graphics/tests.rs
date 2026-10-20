@@ -4,6 +4,8 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
+mod tiled;
+
 const VS: u64 = 0x10000;
 const PS: u64 = 0x11000;
 const TARGET: u64 = 0x20000;

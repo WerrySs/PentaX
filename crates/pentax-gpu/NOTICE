@@ -62,3 +62,14 @@ immutable original target contents and source extents for native alias checks.
 The initial profile is nonindexed triangle lists with one linear RGBA8 target
 and no descriptors/depth/blend/MSAA; its exact limitations are documented in
 src/graphics/README.md. These pure products grant no guest or GPU authority.
+
+PentaX one-level RenderTarget64KB target planning additionally adapts PUBLIC
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/pm4.h, blob186c8844ce8a6575b72172dd43c83e949d3dfb81
+  src/graphics/guest_gpu/gpu_defs.h, blob507ff702d41580c6a2ed200b9c2313dab2f5b02e
+  src/graphics/guest_gpu/tile.cpp, blob7043ca40c275473631beb5b37bf1f3729b7671e9
+Copyright(c)2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Modified2026: finite exact swizzle/geometry admission,
+immutable padded LOAD ownership and a bounded pure decode hook for the native
+core's existing conversion. No game/image/shader asset is copied. No hardware
+tiling support beyond the declared one-level32bpp profile is implied.

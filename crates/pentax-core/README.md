@@ -545,7 +545,20 @@ allocation/work and sequence capacity before the label store. Failed stores
 discard it without a notification. Reference-clock labels use the source's
 checked host-TSC scaling to100MHz. Successful prefixes across multiple buffers
 remain terminal after a later refusal, preventing replay or duplicate events.
-General GDS releases, graphics draw queues and video presentation remain work.
+General GDS releases and full graphics/presentation compatibility remain work.
+
+The synchronous nonindexed draw path additionally accepts one declared32bpp
+RenderTarget64KB target: exact2D swizzle0x1b, zero metadata/compression flags,
+64KiB base alignment and128-pixel padded pitch/height. The current backend still
+requires visible widths divisible by64. Core reuses VideoOut's pixel mapping
+to detile the actual full LOAD snapshot, executes the real guest VS/PS in Vulkan,
+waits its fence and overlays active output pixels back into the original padded
+snapshot. Invisible bytes remain unchanged. Whole padded permissions and physical
+disjointness from command/shader sources are checked on the same paused owner;
+host storage budgets and reverse work are admitted before GPU effects. Atomic
+writeback then produces a private receipt with actual layout/geometry/range.
+This RGBA8_UNORM byte receipt does not perform VideoOut sRGB transfer conversion,
+acknowledge a flip, emit GPU-EOP or establish a rendered game frame.
 The provider keeps its8KiB file and one RX guest page, with dynamic metadata at
 0x7c0 and string/symbol tables at0x900/0x1100. These positions derive from the
 fixed export count and exact name bytes under the same image bound; appending
