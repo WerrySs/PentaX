@@ -53,7 +53,7 @@ impl ProbeError {
                 }
                 NativeSessionError::Core(_) => "runtime-service",
                 NativeSessionError::UnsupportedExit { .. } => "unsupported-instruction",
-                NativeSessionError::Dispatch(NativeDispatchError::MemoryFootprint(_)) => {
+                NativeSessionError::Dispatch(NativeDispatchError::MemoryFootprint { .. }) => {
                     "unsupported-memory-footprint"
                 }
                 NativeSessionError::Dispatch(_) => "native-dispatch",

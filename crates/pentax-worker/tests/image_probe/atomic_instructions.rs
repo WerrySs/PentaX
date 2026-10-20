@@ -224,6 +224,15 @@ fn native_atomic_refusals_do_not_execute_unaligned_foreign_or_read_only_operands
         let (status, fields, text) = probe(&input(&code, false));
         assert_ne!(status, 0, "{text}");
         assert_eq!(fields["code"], category);
+        if category == "unsupported-memory-footprint" {
+            assert_eq!(fields["runtime_failure"], "footprint-atomic-alignment");
+            assert_eq!(fields["dispatch_body_ran"], "0");
+            assert!(matches!(
+                fields["planned_form"].as_str(),
+                "Add_rm64_r64" | "Xchg_rm64_r64"
+            ));
+            assert_eq!(fields["planned_memory"], "destination");
+        }
         assert!(!fields.contains_key("value"));
     }
     for readonly in [false, true] {

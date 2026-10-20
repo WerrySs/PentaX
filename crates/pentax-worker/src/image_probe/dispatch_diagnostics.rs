@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //! Closed failure categories only; never reflect error payloads or Debug text.
+use pentax_codegen::MemoryAccessError;
 use pentax_platform::{
     PlatformError, native_dispatch::NativeDispatchError as D, native_memory::NativeMemoryError as M,
 };
@@ -31,7 +32,15 @@ pub(super) fn classify(error: &D) -> &'static str {
         D::InvalidTarget(_) => "invalid-target",
         D::EmissionMismatch => "dispatch-emission",
         D::Allocation => "dispatch-allocation",
-        D::MemoryFootprint(_) => "memory-footprint",
+        D::MemoryFootprint { reason, .. } => match reason {
+            MemoryAccessError::NotEmitted => "footprint-not-emitted",
+            MemoryAccessError::UnsupportedAddress => "footprint-address",
+            MemoryAccessError::UnsupportedSize => "footprint-size",
+            MemoryAccessError::UnsupportedBitString => "footprint-bit-string",
+            MemoryAccessError::TooManyAccesses => "footprint-access-count",
+            MemoryAccessError::InvalidRange => "footprint-range",
+            MemoryAccessError::UnalignedAtomic => "footprint-atomic-alignment",
+        },
         D::MemoryIsolationRequired => "memory-isolation",
         D::UnsupportedSegmentInstruction => "segment-form",
         D::UnconfiguredSegment => "segment-base",
@@ -72,6 +81,30 @@ mod tests {
             (D::UnsupportedCpuInstruction, "cpu-form"),
         ] {
             assert_eq!(classify(&error), expected);
+        }
+        for (reason, expected) in [
+            (MemoryAccessError::NotEmitted, "footprint-not-emitted"),
+            (MemoryAccessError::UnsupportedAddress, "footprint-address"),
+            (MemoryAccessError::UnsupportedSize, "footprint-size"),
+            (
+                MemoryAccessError::UnsupportedBitString,
+                "footprint-bit-string",
+            ),
+            (MemoryAccessError::TooManyAccesses, "footprint-access-count"),
+            (MemoryAccessError::InvalidRange, "footprint-range"),
+            (
+                MemoryAccessError::UnalignedAtomic,
+                "footprint-atomic-alignment",
+            ),
+        ] {
+            assert_eq!(
+                classify(&D::MemoryFootprint {
+                    reason,
+                    form: pentax_codegen::Code::INVALID,
+                    instruction_index: 0,
+                }),
+                expected
+            );
         }
     }
 }

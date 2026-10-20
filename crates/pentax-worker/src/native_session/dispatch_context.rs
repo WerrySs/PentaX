@@ -49,6 +49,30 @@ impl DispatchContext {
                 "none"
             };
         }
+        if let NativeDispatchError::MemoryFootprint {
+            form,
+            instruction_index,
+            ..
+        } = error
+        {
+            // The analyzer stopped in an emitted body instruction. Reporting
+            // the block's later exit would identify an unrelated instruction.
+            self.form = Some(*form);
+            if let Some(record) = block
+                .instructions()
+                .get(*instruction_index)
+                .filter(|record| record.emitted_len() != 0 && record.instruction().code() == *form)
+            {
+                let instruction = record.instruction();
+                self.planned_memory = if instruction.op0_kind() == OpKind::Memory {
+                    "destination"
+                } else if instruction.op_kinds().any(|kind| kind == OpKind::Memory) {
+                    "source"
+                } else {
+                    "implicit"
+                };
+            }
+        }
         let NativeDispatchError::Memory(
             NativeMemoryError::PermissionDenied(address) | NativeMemoryError::Unmapped(address),
         ) = error

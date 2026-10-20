@@ -188,7 +188,12 @@ pub enum NativeDispatchError {
     SourceMismatch,
     EmissionMismatch,
     Allocation,
-    MemoryFootprint(MemoryAccessError),
+    /// Closed analyzer reason and decoded instruction class; no guest operands.
+    MemoryFootprint {
+        reason: MemoryAccessError,
+        form: pentax_codegen::Code,
+        instruction_index: usize,
+    },
     MemoryIsolationRequired,
     UnsupportedSegmentInstruction,
     UnconfiguredSegment,
@@ -1373,16 +1378,21 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             .iter()
             .filter(|record| record.emitted_len() != 0)
             .count();
-        for record in block
+        for (instruction_index, record) in block
             .instructions()
             .iter()
-            .filter(|record| record.emitted_len() != 0)
+            .enumerate()
+            .filter(|(_, record)| record.emitted_len() != 0)
         {
             let accesses = self
                 .machine
                 .memory_analyzer
                 .analyze(record, &self.machine.state.gpr)
-                .map_err(NativeDispatchError::MemoryFootprint)?;
+                .map_err(|reason| NativeDispatchError::MemoryFootprint {
+                    reason,
+                    form: record.instruction().code(),
+                    instruction_index,
+                })?;
             let dependencies = accesses.register_dependencies();
             if dependencies.address & written_registers != 0
                 || (record.has_atomic_memory() && emitted != 1)

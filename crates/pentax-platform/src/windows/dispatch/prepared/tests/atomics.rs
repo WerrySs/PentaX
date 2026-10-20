@@ -103,9 +103,11 @@ fn both_atomic_gates_refuse_unaligned_or_foreign_backing_and_budget_before_publi
                     assert!(match refusal {
                         0 => matches!(
                             result,
-                            Err(NativeDispatchError::MemoryFootprint(
-                                MemoryAccessError::UnalignedAtomic
-                            ))
+                            Err(NativeDispatchError::MemoryFootprint {
+                                reason: MemoryAccessError::UnalignedAtomic,
+                                form,
+                                instruction_index: 0,
+                            }) if form == planned.instructions()[0].instruction().code()
                         ),
                         1 => matches!(result, Err(NativeDispatchError::Memory(_))),
                         _ => matches!(result, Err(NativeDispatchError::Budget(_))),
