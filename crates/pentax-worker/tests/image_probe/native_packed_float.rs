@@ -201,7 +201,7 @@ fn consumer(iterations: u64, dense: bool, all_forms: bool) -> Vec<u8> {
     p.code
 }
 
-fn original(code: &[u8]) -> Input {
+pub(super) fn original(code: &[u8]) -> Input {
     let nid = pentax_kernel::Service::registrations()
         .iter()
         .find(|r| r.service == pentax_kernel::Service::PthreadGetthreadid)
@@ -232,16 +232,20 @@ fn check_counts(
     profiles: u64,
     register_ops: u64,
     native: bool,
+    native_memory: bool,
 ) {
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], "1");
     assert_eq!(
         count(fields, "vector_ops"),
-        34 + 3 * profiles + profiles * iterations * (4 + if native { 0 } else { register_ops })
+        34 + 3 * profiles
+            + profiles
+                * iterations
+                * (4 - u64::from(native_memory) + if native { 0 } else { register_ops })
     );
     assert_eq!(
         count(fields, "vector_bytes"),
-        1032 + 96 * profiles + 128 * profiles * iterations
+        1032 + 96 * profiles + (128 - 32 * u64::from(native_memory)) * profiles * iterations
     );
     assert_eq!(count(fields, "integer_ops"), 0);
     assert_eq!(count(fields, "fp_status"), 4);
@@ -254,7 +258,14 @@ fn native_packed_float_family_proves_memory_continuations_full_context_and_real_
         let source = original(&consumer(iterations, true, true));
         let (status, fields, text) = probe(&source);
         assert_eq!(status, 0, "{text}");
-        check_counts(&fields, iterations, 6, 3, admitted(&fields));
+        check_counts(
+            &fields,
+            iterations,
+            6,
+            3,
+            admitted(&fields),
+            admitted(&fields),
+        );
         observations.push(fields);
     }
     assert_eq!(
@@ -264,15 +275,16 @@ fn native_packed_float_family_proves_memory_continuations_full_context_and_real_
     let native = admitted(&observations[0]);
     for key in ["native_instructions", "primary_native_instructions"] {
         // Six profiles, two extra iterations; each has MOV/MOV/CMP/DEC and,
-        // only under actual admitted execution, three packed FP instructions.
+        // only under actual admitted execution, three register FP instructions
+        // plus the separately requested read-only packed memory instruction.
         assert_eq!(
             count(&observations[1], key) - count(&observations[0], key),
-            if native { 84 } else { 48 }
+            if native { 96 } else { 48 }
         );
     }
     assert_eq!(
         count(&observations[1], "vector_ops") - count(&observations[0], "vector_ops"),
-        if native { 48 } else { 84 }
+        if native { 36 } else { 84 }
     );
     println!(
         "native_packed_float_worker_mode={} native_packed_float_worker_forms=12 native_packed_float_worker_programs=2",
@@ -303,7 +315,10 @@ fn drain_diagnostics(mut reader: impl std::io::Read) -> (Vec<u8>, bool) {
     (output, overflow)
 }
 
-fn measured(worker: &std::ffi::OsStr, source: &Input) -> (HashMap<String, String>, u128) {
+pub(super) fn measured(
+    worker: &std::ffi::OsStr,
+    source: &Input,
+) -> (HashMap<String, String>, u128) {
     let started = Instant::now();
     let mut child = Command::new(worker)
         .args(["probe-entry", "--image"])
@@ -380,10 +395,17 @@ fn native_packed_float_original_baseline_measurement() {
         let (after, after_ns) = measured(&candidate, &source);
         assert_eq!(before["native_ymm_mode"], after["native_ymm_mode"]);
         let registers = if dense { 3 } else { 1 };
-        check_counts(&before, ITERATIONS, 1, registers, false);
-        check_counts(&after, ITERATIONS, 1, registers, admitted(&after));
+        check_counts(&before, ITERATIONS, 1, registers, false, false);
+        check_counts(
+            &after,
+            ITERATIONS,
+            1,
+            registers,
+            admitted(&after),
+            admitted(&after),
+        );
         let promoted = if admitted(&after) {
-            ITERATIONS * registers
+            ITERATIONS * (registers + 1)
         } else {
             0
         };

@@ -144,7 +144,15 @@ captures its sticky status and restores host MXCSR before returning to Rust.
 There are no guest pointers, dynamic instructions or calls inside that block.
 Scalar merges, aliasing, upper-half clearing and full memory-width checks remain
 explicit; packed elements accumulate status before publishing the complete result.
-No host AVX state or new dependency is required.
+This fallback requires no host AVX state or new dependency. When the actual
+executor admits its full-YMM bridge, the worker separately requests native
+packed ADD/SUB/MUL PS/PD register forms and exactly twelve memory-source forms.
+The latter retain complete read-only 16/32-byte live spans, ordinary 64-bit
+addresses, dependency splits, owner/source checks and masked guest MXCSR.
+The default register-only policy acquires no memory authority. Other arithmetic
+families retain mediation. Native instructions increase and mediated vector
+operation/byte counts decrease only for operations that actually move to the
+checked native body; these counters are not comparable as identical work.
 
 Startup progress also reports bounded aggregate timing diagnostics. One block
 in 4093 samples source-window preparation, plan lookup/translation and checked
@@ -187,6 +195,16 @@ providers. `service_last` is the latest successful action's public kernel label,
 or `other-provider`. Labels are selected only after live provider admission; no
 guest-supplied name is emitted. These counts diagnose repeated startup activity,
 not completion or time spent in each function.
+The final result also snapshots the bounded cooperative queue after an execution
+epoch returns, including before propagating a typed stop. `scheduling_threads`,
+`scheduling_pending_waits` and `scheduling_returned` count retained queue entries;
+`scheduling_main_state` is `unparked`, `pending-wait`, `returned` or `unobserved`.
+`scheduling_main_wait` retains only the admitted public service label, or `none`,
+and `scheduling_active_role` is `main`, `child` or `unobserved`. A pending ticket
+may already be ready; observing it neither polls readiness nor proves deadlock.
+These fields expose no thread identity or guest data, allocate no queue storage,
+visit at most 4096 retained entries once per epoch stop and leave `PROGRESS`
+unchanged. They do not establish game boot or change scheduler behavior.
 `service_nonzero_top` counts nonzero returns for the same four labels. Nonzero
 does not generally mean failure: identity and pointer results can be nonzero.
 

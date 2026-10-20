@@ -54,6 +54,7 @@ pub struct TranslationPolicy {
     independent_memory: bool,
     split_partial_windows: bool,
     native_ymm_registers: bool,
+    native_packed_float_memory: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -63,6 +64,7 @@ impl TranslationPolicy {
             independent_memory: false,
             split_partial_windows: false,
             native_ymm_registers: false,
+            native_packed_float_memory: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -79,6 +81,15 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_ymm_registers(self) -> bool {
         self.native_ymm_registers
+    }
+    /// Separately request the twelve exact packed VEX ADD/SUB/MUL reads.
+    /// This does not imply the full-YMM request or prove live memory authority.
+    pub const fn with_native_packed_float_memory(mut self) -> Self {
+        self.native_packed_float_memory = true;
+        self
+    }
+    pub const fn requests_native_packed_float_memory(self) -> bool {
+        self.native_packed_float_memory
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -199,9 +210,13 @@ pub(crate) fn ordinary(
     // BMI's VEX encoding addresses GPRs only. It does not authorize AVX or
     // extended vector state; declared features and actual host checks still apply.
     let vex_gpr = opcode.encoding() == EncodingKind::VEX && bmi(instruction.mnemonic());
+    let vex_memory = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_packed_float_memory()
+        && native_packed_float_memory_width(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
-        && native_ymm_registers(instruction);
+        && (native_ymm_registers(instruction) || vex_memory);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -217,8 +232,9 @@ pub(crate) fn ordinary(
         }
     }
     if vex_vector {
-        // The exact-code gate already proved every operand is a same-width
-        // vector register0..15. No memory/immediate/implicit authority follows.
+        // Exact gates prove either same-width registers only, or two such
+        // registers plus the separately requested ordinary64-bit read. No other
+        // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
     // Multi-byte NOP's apparent memory operand is only an encoding field:
@@ -268,6 +284,63 @@ pub(crate) fn ordinary(
         }
     }
     Ok(())
+}
+
+/// Exact decoded read shape shared with the immutable footprint evaluator.
+/// Returning a size grants no live address, ownership or permission authority.
+pub(crate) fn native_packed_float_memory_width(instruction: &Instruction) -> Option<usize> {
+    use Code::*;
+    let width = match instruction.code() {
+        VEX_Vaddps_xmm_xmm_xmmm128
+        | VEX_Vaddpd_xmm_xmm_xmmm128
+        | VEX_Vsubps_xmm_xmm_xmmm128
+        | VEX_Vsubpd_xmm_xmm_xmmm128
+        | VEX_Vmulps_xmm_xmm_xmmm128
+        | VEX_Vmulpd_xmm_xmm_xmmm128 => 16,
+        VEX_Vaddps_ymm_ymm_ymmm256
+        | VEX_Vaddpd_ymm_ymm_ymmm256
+        | VEX_Vsubps_ymm_ymm_ymmm256
+        | VEX_Vsubpd_ymm_ymm_ymmm256
+        | VEX_Vmulps_ymm_ymm_ymmm256
+        | VEX_Vmulpd_ymm_ymm_ymmm256 => 32,
+        _ => return None,
+    };
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 3
+        || instruction.op2_kind() != OpKind::Memory
+        || instruction.memory_size().size() != width
+        || instruction.is_vsib()
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+    {
+        return None;
+    }
+    for operand in 0..2 {
+        let register = instruction.op_register(operand);
+        if instruction.op_kind(operand) != OpKind::Register
+            || register.size() != width
+            || !(if width == 16 {
+                register.is_xmm() && register <= Register::XMM15
+            } else {
+                register.is_ymm() && register <= Register::YMM15
+            })
+        {
+            return None;
+        }
+    }
+    let base = instruction.memory_base();
+    let index = instruction.memory_index();
+    if !(base == Register::None || base == Register::RIP || base.is_gpr64())
+        || !(index == Register::None || index.is_gpr64())
+        || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+        // Iced represents a displacement-only64-bit address with displ_size8;
+        // addr32 absolute SIB has no GPR to reveal its width and uses size4.
+        || (base == Register::None && index == Register::None && instruction.memory_displ_size() != 8)
+    {
+        return None;
+    }
+    Some(width)
 }
 
 /// Thirty-eight exact decoded forms, all register-only. The twelve packed

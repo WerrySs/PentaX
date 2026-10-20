@@ -259,7 +259,11 @@ impl MemoryAccessAnalyzer {
                 return Err(MemoryAccessError::UnsupportedAddress);
             }
             let size = used.memory_size().size() as u64;
-            if size == 0 || size > 16 {
+            let packed_read = size == 32
+                && info.memory_count == 1
+                && used.access() == OpAccess::Read
+                && crate::policy::native_packed_float_memory_width(instruction) == Some(32);
+            if size == 0 || (size > 16 && !packed_read) {
                 return Err(MemoryAccessError::UnsupportedSize);
             }
             let kind = match used.access() {

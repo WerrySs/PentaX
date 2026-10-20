@@ -242,5 +242,7 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
     // New observer fields are final-only; old progress text remains unchanged.
     let progress = crate::native_session::NativeSessionProgress::default();
     assert!(!progress.progress_fields().contains("sample_completed="));
+    assert!(!progress.progress_fields().contains("scheduling_threads="));
     assert!(progress.protocol_fields().contains("sample_completed=0"));
+    assert!(progress.protocol_fields().contains("scheduling_threads=0"));
 }

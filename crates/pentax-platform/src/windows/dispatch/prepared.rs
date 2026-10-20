@@ -1671,8 +1671,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         memory: &PausedNativeMemory<'_>,
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<bool, NativeDispatchError> {
-        if block.policy().requests_native_ymm_registers()
-            && self.machine.vector_mode.features().is_none()
+        if (block.policy().requests_native_packed_float_memory()
+            && !block.policy().requests_native_ymm_registers())
+            || ((block.policy().requests_native_ymm_registers()
+                || block.policy().requests_native_packed_float_memory())
+                && self.machine.vector_mode.features().is_none())
         {
             return Err(NativeDispatchError::InvalidState);
         }

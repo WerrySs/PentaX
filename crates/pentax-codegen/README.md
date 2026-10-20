@@ -136,9 +136,9 @@ host BMI support before entry; no software BMI fallback is provided here.
 38 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
 VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
 128/256-bit vectors, plus VADDPS/PD, VSUBPS/PD and VMULPS/PD at both widths.
-Every operand must be a same-width XMM0–15 or YMM0–15; all memory encodings,
-GPR transfers, scalar or other floating-point operations, vector-state control
-and EVEX remain excluded. Existing legacy SSE2 admission is unchanged.
+Every operand must be a same-width XMM0–15 or YMM0–15. This request alone excludes
+memory encodings, GPR transfers, scalar or other floating-point operations,
+vector-state control and EVEX. Existing legacy SSE2 admission is unchanged.
 The request requires declared AVX plus each decoded instruction's exact feature
 requirements, including AVX2 for the 256-bit integer operations. Decoder
 reserved-field checks and existing prefix gates still apply.
@@ -159,9 +159,37 @@ reach the bridge. Logical source order is preserved, including NaN payload
 priority; instructions are neither commuted nor fused. The bridge captures
 sticky guest status and the full active vector state before restoring host
 control. These twelve forms need AVX, including the 256-bit forms; AVX2 is not
-required. Memory arithmetic retains exact live 16/32-byte software mediation.
+required. Without the separate memory request below, memory arithmetic retains
+exact live 16/32-byte software mediation.
 Default policies and hosts without the admitted full-YMM mode retain that
 fallback for register arithmetic too. No guest CPUID or control authority grows.
+
+`with_native_packed_float_memory()` separately requests only the twelve VEX
+ADDPS/PD, SUBPS/PD and MULPS/PD reads at 128/256 bits. It requires the full-YMM
+request as well as declared and independently admitted actual AVX. Exactly three
+operands are accepted: same-width XMM0–15/YMM0–15 destination and logical source,
+then one ordinary 64-bit memory operand of exactly 16/32 bytes. Source order and
+the existing masked MXCSR profile remain unchanged. Segment overrides, addr32
+(including displacement-only absolute SIB), VSIB, writes and other vector
+families remain excluded. The worker enables this policy only from its retained
+engine's admitted vector mode. It adds no guest CPUID or control authority and
+requires no new host ISA feature.
+
+The immutable memory template still holds only decoded address expressions.
+Every execution evaluates current GPRs, checks the complete live read and retains
+owner, source, stack, cache and permission admission. The 32-byte footprint
+exception applies only to one exact unconditional read from these twelve forms;
+it is not a general increase of the ordinary memory-size ceiling. Existing
+isolation and independent-address dependency splits remain unchanged. Native
+memory arithmetic contributes to `native_instructions` and ordinary checked
+memory bytes; mediated `vector_ops` and `vector_bytes` intentionally decrease.
+The ignored `native_packed_float_memory_original_baseline_measurement` uses
+explicit `PENTAX_PACKED_FLOAT_MEMORY_BASELINE_WORKER` (the independently verified
+register-only reference artifact) and `PENTAX_TEST_WORKER`. Its separated and
+coalesced 50,000-iteration original inputs retain literal results and exact
+counter checks. Concurrent bounded diagnostic drains are shared with the prior
+measurement helper. Timings include process startup/teardown; no title speedup
+or whole-run instruction-frequency inference is made.
 
 Consecutive admitted register operations can share the existing finite native
 block. Every live source/cache/owner/operand/stack check remains in place, with
@@ -309,8 +337,10 @@ PRE-SYSCALL services. The sparse `GuestMemory` Vec backend cannot be paired with
 a detached native snapshot. The composed path executes an original kernel/TLS
 program in debug and release; this establishes no supplied-binary compatibility.
 
-The stepper republishes one block at a time. Persistent caching, writable-code
-support, broader context state and cancellation remain unfinished. Native
+The stepper executes checked blocks with source-bound publication and reuse of
+an immutable native cache. Writable guest code, state outside the admitted
+GPR/SIMD/control profile and interruption within a live native block remain
+outside this interface. Native
 identity addressing is not a sandbox: ordinary runtime memory operands are not
 instrumented here. The manual native entry requires caller-established bounds; the checked
 entry derives live spans from address-independent instructions and validates permissions.

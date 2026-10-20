@@ -342,5 +342,13 @@ fn native_mutex_finite_deadlines_preserve_owner_and_indefinite_cycle_stops() {
     assert_eq!(status, 2, "{text}");
     assert_eq!(fields["code"], "thread-deadlock");
     assert_eq!(fields["service_stops"], (calls + 2).to_string());
+    // Capture the retained queue before propagating the typed stop, without
+    // polling readiness or confusing a pending ticket with a completed wait.
+    assert_eq!(fields["scheduling_threads"], "2", "{text}");
+    assert_eq!(fields["scheduling_pending_waits"], "2", "{text}");
+    assert_eq!(fields["scheduling_returned"], "0", "{text}");
+    assert_eq!(fields["scheduling_main_state"], "pending-wait", "{text}");
+    assert_eq!(fields["scheduling_main_wait"], "PthreadMutexLock", "{text}");
+    assert_eq!(fields["scheduling_active_role"], "main", "{text}");
     assert!(!fields.contains_key("value"));
 }

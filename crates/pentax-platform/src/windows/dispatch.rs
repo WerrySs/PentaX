@@ -911,7 +911,12 @@ fn publish_block_with_mode(
 ) -> Result<(), PlatformError> {
     // The closed diagnostic wrapper above always selects the SSE2 mode.
     // A declared vector request cannot override that immutable entry/tail pair.
-    if plan.policy().requests_native_ymm_registers() && mode.features().is_none() {
+    if (plan.policy().requests_native_packed_float_memory()
+        && !plan.policy().requests_native_ymm_registers())
+        || ((plan.policy().requests_native_ymm_registers()
+            || plan.policy().requests_native_packed_float_memory())
+            && mode.features().is_none())
+    {
         return Err(PlatformError::UnsupportedHostFeature {
             feature: "native YMM context",
         });

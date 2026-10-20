@@ -71,6 +71,8 @@ mod minimum_position;
 mod multiply_add_words;
 #[path = "native_packed_float.rs"]
 mod native_packed_float;
+#[path = "native_packed_float_memory.rs"]
+mod native_packed_float_memory;
 #[path = "native_ymm.rs"]
 mod native_ymm;
 #[path = "packed_convert.rs"]

@@ -170,6 +170,7 @@ pub(super) struct NativeSessionProgress {
     dispatch_exit: Option<Mnemonic>,
     dispatch_context: dispatch_context::DispatchContext,
     profile: StartupProfile,
+    scheduling: scheduling::Observations,
     native_ymm_mode: Option<NativeYmmMode>,
 }
 
@@ -184,9 +185,10 @@ impl NativeSessionProgress {
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
         format!(
-            "{}{}",
+            "{}{}{}",
             self.progress_fields(),
-            self.profile.final_sample_fields()
+            self.profile.final_sample_fields(),
+            self.scheduling.protocol_fields(),
         )
     }
 
@@ -592,7 +594,7 @@ fn run_prepared_consumer_inner<'plan, 'image>(
     loop {
         let active = current.as_ref().unwrap_or(base);
         let epoch = session.prepare_epoch_native_source(active, &limits.block)?;
-        match execute_epoch(
+        let outcome = execute_epoch(
             session,
             &epoch,
             &mut machine,
@@ -602,7 +604,11 @@ fn run_prepared_consumer_inner<'plan, 'image>(
             limits,
             progress,
             consumer.as_deref_mut(),
-        )? {
+        );
+        // Preserve a terminal queue observation before propagating typed stops.
+        // This bounded snapshot never probes readiness or changes scheduling.
+        progress.scheduling = state.scheduling.observations();
+        match outcome? {
             None => {
                 return state
                     .report
@@ -800,7 +806,9 @@ fn execute_epoch<'plan, 'image>(
     }
     let mut policy = TranslationPolicy::new(native_features);
     if native_ymm_features.is_some() {
-        policy = policy.with_native_ymm_registers();
+        policy = policy
+            .with_native_ymm_registers()
+            .with_native_packed_float_memory();
     }
     let plans = plan_cache::PlanCache::new(
         source,

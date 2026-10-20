@@ -1,5 +1,20 @@
 # Upstream provenance
 
+The separate native packed-floating memory request admits only the same twelve
+VEX ADDPS/PD, SUBPS/PD and MULPS/PD forms with one exact 16/32-byte ordinary read.
+[Intel SDM Volume 2A](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf)
+and [Volume 2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)
+define operand encoding, widths and VEX unaligned-memory behavior. Numeric
+semantics retain the masked MXCSR/NaN contracts documented below. Original Rust
+adds explicit profile/EA checks and a narrow immutable-footprint exception;
+current guest addresses and live permissions are never cached as authority.
+Pinned Iced 1.21 decoded displacement sizes distinguish displacement-only
+64-bit addresses from addr32 SIB; no decoder or dependency version changes.
+Original literal fixtures compare actual execution and checked fallback with
+intentional native/mediated counter differences. No external implementation,
+manual pseudocode or proprietary guest content is copied, and no measured
+commercial-title performance claim follows from source or sampled counts.
+
 The optional native packed-floating profile admits twelve exact register-only
 VEX ADDPS/PD, SUBPS/PD and MULPS/PD forms at 128/256 bits. Its instruction/AVX,
 logical operand and upper-vector contracts follow

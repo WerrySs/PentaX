@@ -9,8 +9,10 @@ use pentax_core::process::hle::{
 use pentax_kernel::ThreadPriorityClass;
 use pentax_platform::native_dispatch::NativeThreadContext;
 
+mod observations;
 #[cfg(test)]
 mod tests;
+pub(super) use observations::Observations;
 
 /// A consumer deadline can make a completely parked machine externally
 /// wakeable. It neither satisfies a guest wait nor consumes its sleep quota.
@@ -57,6 +59,7 @@ struct Thread<'plan, 'image> {
     phase: NativeSessionPhase,
     returned: bool,
     waiting: Option<(PendingThreadWait, PreSyscallToken)>,
+    waiting_service: Option<&'static str>,
 }
 pub(super) struct Scheduling<'plan, 'image> {
     threads: Vec<Thread<'plan, 'image>>,
@@ -86,6 +89,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             phase: NativeSessionPhase::MainEntry,
             returned: false,
             waiting: None,
+            waiting_service: None,
         });
         Ok(Self {
             threads,
@@ -165,6 +169,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             phase: NativeSessionPhase::ThreadEntry,
             returned: false,
             waiting: None,
+            waiting_service: None,
         });
         engine.complete_syscall(token, value)?;
         self.force_switch = true;
@@ -292,6 +297,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             };
             engine.complete_syscall(*token, value)?;
             self.threads[self.active].waiting = None;
+            self.threads[self.active].waiting_service = None;
         }
         Ok(true)
     }
@@ -308,6 +314,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             return Err(NativeSessionError::FixtureInvariant("thread park phase"));
         }
         thread.waiting = Some((pending, token));
+        thread.waiting_service = session.last_admitted_kernel_service();
         self.force_switch = true;
         Ok(())
     }

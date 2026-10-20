@@ -214,6 +214,11 @@ fn native_event_flag_wait_parks_both_threads_and_restores_all_ymm_with_real_clea
     assert_eq!(fields["value"], "42", "{text}");
     assert_eq!(fields["service_stops"], "8", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");
+    assert_eq!(fields["scheduling_threads"], "2", "{text}");
+    assert_eq!(fields["scheduling_pending_waits"], "0", "{text}");
+    assert_eq!(fields["scheduling_main_state"], "unparked", "{text}");
+    assert_eq!(fields["scheduling_main_wait"], "none", "{text}");
+    assert_eq!(fields["scheduling_active_role"], "main", "{text}");
     assert_eq!(fields["unavailable_functions"], "0", "{text}");
     // Both contexts independently load/check all16 complete vectors and access
     // MXCSR each way. Memory forms remain mediated in every engine mode.
