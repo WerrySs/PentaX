@@ -270,7 +270,7 @@ fn defaults_foreign_tokens_depth_work_and_guest_budget_are_controlled_before_pub
     f.put(root, &0x8000_0000_0000_0000_u64.to_le_bytes());
     assert!(f.call(ArrayPushBack, root, 0).is_err());
     let mut deep = vec![b'['; 66];
-    deep.extend([b'0']);
+    deep.push(b'0');
     deep.extend([b']'; 66]);
     f.put(source, &deep);
     let before = f.read::<32>(root);
