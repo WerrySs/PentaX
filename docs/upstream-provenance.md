@@ -1114,10 +1114,10 @@ two rows are appended: the source `Json2` module/library1.1/1 identity and the
 independently observed `libSceJson` module / `libSceJson2` library1.1/1 identity.
 No prefix-family expansion follows from that observation. All earlier markers,
 service IDs, export ordinals and immutable defaults remain unchanged.
-The source's adjacent return-zero Initialize/InitializeV1 placeholders do not
-establish real configuration or allocator initialization; those operations and
-Initializer termination/destruction remain unavailable. This constructor does
-not grant a complete JSON lifecycle or an executable module capability.
+The source's adjacent return-zero Initialize/InitializeV1 bodies do not establish
+external allocator configuration. The later bounded default-engine profile
+below separately implements the observed InitializeV1 identity. This constructor
+does not grant a complete JSON lifecycle or an executable module capability.
 
 The owning container/parser batch follows this same exact pinned public
 `libJson2.cpp`: Array/Object helper overloads95-144, allocation/destruction
@@ -1159,8 +1159,8 @@ transaction. Metadata commits only after success; input/permission/alias/work
 or quota failures retain the prior destination and live ownership. Failed
 staging work remains consumed. Retired mappings stay accounted until process
 teardown; these policies deliberately strengthen the source's host-allocation
-failure behavior. They do not infer external allocator callbacks, Initializer
-readiness or unimplemented initialization/termination/destruction semantics.
+failure behavior. They do not infer external allocator readiness or
+unimplemented callback semantics.
 Serde/serde_json MIT OR Apache-2.0 attribution is retained in the core NOTICE
 and generated dependency notices.
 
@@ -1172,6 +1172,40 @@ treats an unquoted raw NUL as end-of-input, while a raw NUL inside a quoted
 string is invalid. A bounded quote-aware prefix pass retains that sized-buffer
 convention before the mature Rust lexer; escaped Unicode NUL remains string
 data and incomplete container prefixes still fail.
+
+The same pinned public `libJson2.cpp` supplies complete InitializeV1493-501,
+Terminate503-507, InitializerDtor509-513 and global-null-access setup1036-1047.
+InitializeV1 takes two opaque pointer words and returns zero without reading
+either pointee; Terminate and Dtor take opaque self and have void bodies with
+logging only. Callback setup takes self/callback/context words and likewise
+logs without establishing callback ABI, storage or invocation behavior.
+
+Four exact NIDs append after the previous216 rows and57 markers:
+`Cxwy7wHq4J0`, `PR5k1penBLM`, `RujUxbr3haM` and `00oCq0RwSAY`. Each gains
+only the source `Json2` module/library1.1/1 pair and the independently observed
+`libSceJson` module / `libSceJson2` library1.1/1 pair. Their new markers occupy
+RVAs0x490-0x4c0 and IDs0x50584a3a-0x50584a3d. Every earlier ordinal, marker,
+allocator table and immutable scalar/String default remains unchanged. The
+distinct unobserved Initialize entry is not exported.
+
+PentaX's explicit default-engine profile makes InitializeV1 success depend on
+actual admitted process-owned Null/Array/Object storage. The first successful
+call stages the existing64-byte default blob and ownership registries before
+one MapZeroed+write transaction; readiness commits only with that publication.
+Existing defaults and every repeat receive a complete current-backing RW/NX,
+byte, implementation-token and exact live-empty-registry check. Healthy repeats
+do not clone metadata or allocate another mapping. Modified default contents,
+lost permissions, work/handle limits and late publication failures refuse
+without repair or partial readiness/ownership publication. Neither opaque
+argument is dereferenced, and no per-self ownership or custom allocator
+configuration is invented.
+
+Terminate and Dtor preserve process-owned live values/defaults, matching their
+complete empty-effect public bodies. Null callback setup returns zero with no
+registration and unread self/context; nonnull callback setup explicitly refuses
+until actual callback delivery can be implemented. This is a deliberate narrower
+policy than the source's logging-only return-zero branch. It does not claim
+official firmware callback ABI, external allocator setup or full JSON lifecycle.
 
 `LibcInternalExt::LibcHeapGetTraceInfo` adapts the same pinned `libC.cpp` source:
 the exact extension-library registration, 32-byte Info record, 64-bit mask and

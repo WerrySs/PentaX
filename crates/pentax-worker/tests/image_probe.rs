@@ -49,6 +49,9 @@ mod json_initializer;
 #[path = "image_probe/json_containers.rs"]
 mod json_containers;
 
+#[path = "image_probe/json_lifecycle.rs"]
+mod json_lifecycle;
+
 #[path = "image_probe/game_intent.rs"]
 mod game_intent;
 #[path = "image_probe/libc_mspace.rs"]

@@ -18,6 +18,7 @@ use pentax_platform::native_memory::{
 };
 use std::mem::size_of;
 
+pub(super) mod lifecycle;
 mod parser;
 mod storage;
 
@@ -58,6 +59,7 @@ pub(super) struct Containers {
     records: Vec<Container>,
     nodes: Vec<OwnedNode>,
     defaults: Option<Defaults>,
+    ready: bool,
 }
 impl Containers {
     pub(super) const fn new() -> Self {
@@ -65,7 +67,16 @@ impl Containers {
             records: Vec::new(),
             nodes: Vec::new(),
             defaults: None,
+            ready: false,
         }
+    }
+    #[cfg(test)]
+    pub(super) fn readiness_for_test(&self) -> (bool, Option<[u64; 3]>, usize) {
+        (
+            self.ready,
+            self.defaults.map(|d| [d.null, d.array, d.object]),
+            self.records.capacity(),
+        )
     }
 }
 

@@ -64,6 +64,7 @@ impl Transaction {
                 records: Vec::new(),
                 nodes: Vec::new(),
                 defaults: state.containers.defaults,
+                ready: state.containers.ready,
             },
             blob: Vec::new(),
             fixups: Vec::new(),

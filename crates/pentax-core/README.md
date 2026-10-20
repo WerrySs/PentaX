@@ -644,7 +644,7 @@ Array/Object values use the process-owned storage described below.
 
 The JSON primitive batch adds boolean/integer/type construction, scalar setters,
 reference getters, copy/assignment, cleanup, count and allocator destruction.
-The provider has57 private markers and216 exact export rows. Existing rows and
+The provider has61 private markers and224 exact export rows. Existing rows and
 marker addresses remain stable; metadata moves within its original code page.
 Three separate read-only zero words back the boolean, integer and real default
 references. GetBoolean/GetInteger/GetReal return actual guest addresses; GetReal
@@ -676,8 +676,8 @@ unchanged, including null, exactly as the pinned public body specifies. It reads
 or writes no guest object bytes and does not initialize an allocator. Only the
 source `Json2` module/library pair and the independently observed `libSceJson`
 module / `libSceJson2` library pair are exported for this NID, at module1.1/lib1.
-Initialization, termination and destruction remain separate unsupported calls;
-the constructor does not stand in for those lifecycle effects.
+The constructor does not stand in for the separate supported default-engine
+initialization profile described below.
 
 String growth publishes its new allocation and all caller fields atomically.
 Impl identities remain stable during assignment, while Value copies own
@@ -715,5 +715,24 @@ publish the new blob and caller fields in one transaction, then commit private
 metadata without further fallible work. Failed reads, writes, ownership checks,
 quotas or staging leave previous bytes and ownership intact. Retired mappings
 remain quarantined and accounted until process teardown. This container/parser
-support does not initialize an external allocator or implement Initializer
-initialization, termination, destruction or user callbacks.
+support does not initialize an external allocator or invoke user callbacks.
+
+The separately bound InitializeV1 admits actual process-owned Null, empty Array
+and empty Object storage before returning zero. It does not dereference its
+opaque self/parameter arguments or infer an allocator configuration. When the
+defaults already exist, including every healthy repeat, initialization checks
+their actual current64-byte backing, RW/NX permissions, exact live empty
+container identities, implementation words and Null bytes without allocating
+another mapping. Changed bytes, permissions or container contents refuse;
+initialization does not silently repair them. Readiness commits only after the
+first atomic publication or a complete successful live validation. Work/quota
+and late publication failures leave prior ownership and bytes intact.
+
+The complete pinned Terminate and Initializer destructor bodies have no object
+effects, so they preserve process-owned defaults and live Values. Null-access
+callback setup supports only a null callback, stores no registration and ignores
+opaque self/context words. A nonnull callback remains an explicit typed refusal
+until its actual invocation contract is implemented. These four roles append
+only their canonical and independently observed exact scope pairs; the distinct
+Initialize ABI remains unavailable. Neither a complete allocator lifecycle nor
+official firmware callback behavior is claimed.

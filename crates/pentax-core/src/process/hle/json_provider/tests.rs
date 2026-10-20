@@ -89,7 +89,7 @@ fn link<'a>(
 #[test]
 fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
     let provider = factory(BIAS);
-    assert_eq!(provider.function_count(), 216);
+    assert_eq!(provider.function_count(), 224);
     assert_eq!(provider.mapped_bytes(), 2 * PAGE_SIZE);
     assert_eq!(provider.load_bias(), BIAS);
     let view = open_executable(provider.image()).unwrap();
@@ -157,7 +157,7 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
         );
     }
     let symbols = metadata.link().symbols();
-    assert_eq!(symbols.len(), 217);
+    assert_eq!(symbols.len(), 225);
     assert_eq!(
         (symbols[0].info, symbols[0].value, symbols[0].size),
         (0, 0, 0)
@@ -177,13 +177,13 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
     for symbol in 6..=14 {
         assert_eq!(provider.export_marker(symbol), Some(provider.markers()[2]));
     }
-    for symbol in [0, 217, usize::MAX] {
+    for symbol in [0, 225, usize::MAX] {
         assert!(provider.export_marker(symbol).is_none());
     }
     assert!(!symbols.iter().any(|symbol| symbol.value == 0x110));
     assert!(metadata.link().rela().is_empty());
     assert!(metadata.link().plt_rela().is_empty());
-    assert_eq!(provider.markers().len(), 57);
+    assert_eq!(provider.markers().len(), 61);
     for marker in provider.markers() {
         assert_eq!(
             &provider.image()[marker.rva as usize..marker.rva as usize + 8],
@@ -219,8 +219,8 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
         (0x3800, 0x1800, 0x3868)
     );
     assert_eq!((DYNAMIC_AT, STRINGS_AT), (0x600, 0x800));
-    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x159e);
-    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2c58);
+    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x161e);
+    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2d18);
     for (row, symbol) in symbols.iter().enumerate().skip(1) {
         let marker = provider.export_marker(row).unwrap();
         assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);
@@ -232,7 +232,7 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
 }
 
 #[test]
-fn json_initializer_constructor_appends_only_two_exact_scopes_without_lifecycle_authority() {
+fn json_initializer_constructor_preserves_exact_scopes_and_separate_lifecycle_identity() {
     let provider = factory(BIAS);
     let marker = provider.markers()[34];
     assert_eq!(
@@ -290,19 +290,12 @@ fn json_initializer_constructor_appends_only_two_exact_scopes_without_lifecycle_
                 ..
             })
         ));
-        for nid in [
-            b"Cxwy7wHq4J0",
-            b"IXW-z8pggfg",
-            b"PR5k1penBLM",
-            b"RujUxbr3haM",
-        ] {
-            let mut lifecycle = original.clone();
-            lifecycle.imports[0].nid = *nid;
-            assert!(matches!(
-                link(&lifecycle.build().unwrap(), &provider),
-                Err(SymbolicError::MissingProvider { .. })
-            ));
-        }
+        let mut unported = original.clone();
+        unported.imports[0].nid = *b"IXW-z8pggfg";
+        assert!(matches!(
+            link(&unported.build().unwrap(), &provider),
+            Err(SymbolicError::MissingProvider { .. })
+        ));
     }
     for (module, library) in [
         (b"libSceJson2".as_slice(), b"libSceJson2".as_slice()),
@@ -820,6 +813,85 @@ fn json_primitive_fifth_scope_is_per_nid_and_wrong_types_or_versions_refuse() {
         link(&version.build().unwrap(), &provider),
         Err(SymbolicError::VersionMismatch { .. })
     ));
+}
+
+#[test]
+fn json_lifecycle_manifest_preserves_old_sites_and_adds_only_exact_reviewed_scopes() {
+    let provider = factory(BIAS);
+    for (index, (nid, function)) in [
+        (b"Cxwy7wHq4J0", JsonFunction::InitializerInitializeV1),
+        (b"PR5k1penBLM", JsonFunction::InitializerTerminate),
+        (b"RujUxbr3haM", JsonFunction::InitializerDtor),
+        (
+            b"00oCq0RwSAY",
+            JsonFunction::InitializerSetGlobalNullAccessCallback,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let marker = provider.markers()[57 + index];
+        assert_eq!(
+            (marker.function, marker.rva, marker.service_id),
+            (
+                function,
+                0x490 + index as u64 * 16,
+                0x5058_4a3a + index as u32
+            )
+        );
+        for (scope, module, library) in [
+            (0, b"Json2".as_slice(), b"Json2".as_slice()),
+            (1, b"libSceJson".as_slice(), b"libSceJson2".as_slice()),
+        ] {
+            let mut original = consumer(module, library);
+            original.imports[0].nid = *nid;
+            let bytes = original.build().unwrap();
+            let source = link(&bytes, &provider).unwrap();
+            assert_eq!(source.patches()[0].value(), BIAS + marker.rva);
+            assert!(
+                matches!(source.patches()[0].resolution(), Resolution::Definition(reference)
+                if reference.module.index() == 1 && reference.symbol == 217 + 2 * index + scope)
+            );
+            original.minor = 2;
+            assert!(matches!(
+                link(&original.build().unwrap(), &provider),
+                Err(SymbolicError::VersionMismatch { .. })
+            ));
+            original.minor = 1;
+            original.imports[0].symbol_type = 1;
+            original.imports[0].relocation = 6;
+            assert!(matches!(
+                link(&original.build().unwrap(), &provider),
+                Err(SymbolicError::UnsupportedSymbol {
+                    reason: UnsupportedSymbol::TypeMismatch,
+                    ..
+                })
+            ));
+        }
+        let mut unobserved = consumer(b"libSceJson2", b"libSceJson2");
+        unobserved.imports[0].nid = *nid;
+        assert!(matches!(
+            link(&unobserved.build().unwrap(), &provider),
+            Err(SymbolicError::MissingProvider { .. })
+        ));
+    }
+    assert_eq!(
+        provider.export_marker(216).unwrap(),
+        JsonMarker {
+            function: JsonFunction::ParserParse,
+            rva: 0x480,
+            service_id: 0x5058_4a39,
+        }
+    );
+    assert_eq!(provider.markers()[34].rva, 0x320);
+    assert_eq!(
+        (
+            provider.table_rva(),
+            provider.empty_string_rva(),
+            provider.empty_cstr_rva()
+        ),
+        (0x4000, 0x4058, 0x4060)
+    );
 }
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]

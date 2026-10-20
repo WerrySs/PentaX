@@ -380,3 +380,17 @@ under MIT OR Apache-2.0. Their retained upstream licenses are supplied through
 the project's dependency notices. Custom deserialize seeds bound and allocate
 the PentaX tree fallibly; the pinned parser's private scratch is pre-admitted
 under a conservative envelope, retaining its infallible allocator boundary.
+
+The JSON default-engine lifecycle additionally adapts the complete PUBLIC
+KytyPS5/KytyPS5 f186b35706ddbc3faf5513f326e2335d224802f7
+src/libs/libJson2.cpp, blob d6e968f019fa61e0adc5224cd20be1ecd3261487,
+InitializeV1493-501, Terminate503-507, InitializerDtor509-513 and null-access
+callback setup1036-1047. Copyright (c) 2021 InoriRus; GPL-2.0-only and the
+retained original Kyty MIT grant continue to apply. PentaX modifications, 2026:
+transactional admission of the actual process-owned default JSON environment,
+live repeated readiness validation and eight append-only exact binding rows.
+Opaque initializer arguments remain unread. The source's void lifecycle bodies
+preserve live process-owned storage. Callback setup accepts only null; source
+logging-only success for a nonnull callback is not used as a registration or
+invocation implementation. No external allocator or official callback ABI is
+inferred. Existing markers and immutable default addresses remain unchanged.

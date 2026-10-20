@@ -11,8 +11,8 @@
 //! Partial overlaps requiring a not-yet-selected allocation address refuse;
 //! exact String aliases and the existing Value overlay remain supported.
 //! Raw aliases into a retired or logically replaced String buffer also refuse
-//! instead of reading a detached pre-mutation snapshot. Real/container output
-//! formatting is explicitly unavailable in this slice.
+//! instead of reading a detached pre-mutation snapshot. The container child
+//! supplies bounded real/tree formatting and the default engine lifecycle.
 
 use super::json_values::{self, ScalarDefaults, StagedValue, ValueAction, ValueStorage};
 use super::{KernelStartupError, charge};
@@ -95,6 +95,9 @@ impl JsonStrings {
     ) -> Result<u64, KernelStartupError> {
         if self.owner.is_some_and(|owner| owner != memory.owner_id()) {
             return Err(KernelStartupError::NativeOwnerMismatch);
+        }
+        if containers::lifecycle::handles(call.function) {
+            return containers::lifecycle::service(self, memory, kernel, call, work, maximum);
         }
         if containers::handles(memory, &call, work, maximum)? {
             return containers::service(self, memory, kernel, call, work, maximum);

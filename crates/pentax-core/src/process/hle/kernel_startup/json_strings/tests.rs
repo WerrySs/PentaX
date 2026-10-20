@@ -9,6 +9,9 @@ use pentax_platform::native_memory::{NativeAddressSpace, NativePermissions};
 #[path = "containers/tests.rs"]
 mod containers;
 
+#[path = "containers/lifecycle/tests.rs"]
+mod lifecycle;
+
 struct Fixture {
     memory: NativeAddressSpace,
     kernel: Kernel,
