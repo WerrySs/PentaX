@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 mod bmi;
+mod cpu_identification;
 mod element_permutations;
 mod fixture;
 mod immediate_permutations;

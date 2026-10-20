@@ -66,6 +66,8 @@ mod pthread_rwlock;
 #[path = "pthread_semaphore.rs"]
 mod pthread_semaphore;
 
+#[path = "cpu_identification.rs"]
+mod cpu_identification;
 #[path = "pthread_affinity.rs"]
 mod pthread_affinity;
 #[path = "pthread_create.rs"]

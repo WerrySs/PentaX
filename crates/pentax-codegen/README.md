@@ -128,6 +128,36 @@ far/non-64-bit transfers, loop-counter branches,
 privileged/state-control operations, x87/MMX, AVX/extended state and other
 unported families become explicit mediated exits. Invalid input is an error.
 
+CPUID (`0F A2`) always remains a no-operand mediated exit, even when additional
+instruction feature bits are declared. The Windows native resolver admits only
+the exact two-byte form; segment, repeat, LOCK and redundant operand/address/REX
+prefixes do not gain execution authority. It checks finite work, the live
+executable continuation and the successful-operation counter before observing
+the time backend or performing serialization. The four software results replace
+RAX/RBX/RCX/RDX with zero-extended 32-bit words; flags and other CPU state remain
+unchanged. Register ordering and instruction serialization follow the
+[Intel SDM Volume 2A, CPUID](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf).
+
+The guest sees the deliberate `PentaXEmuCPU` software profile, with maximum basic
+leaf 7 and maximum extended leaf `80000001h`. Leaf 1 has zero signature/topology,
+ECX `00800000h` (POPCNT), and EDX `06008100h` (CX8, CMOV, SSE, SSE2), plus TSC
+bit 4 only when the existing timestamp backend succeeds. Extended leaf 1 has
+ECX `00000020h` (LZCNT) and EDX `20000000h` (long mode), plus RDTSCP bit 27 under
+the same condition. The first feature query may initialize the same cached
+frequency calibration used by timestamp instructions and kernel services; a
+failed backend hides both time features. No new clock domain is introduced.
+
+Known scalar leaves ignore ECX. Leaf 7 returns zero for all subleaves, including
+its maximum-subleaf word. Unimplemented in-range leaves return zero; out-of-range
+leaves normalize to basic leaf 7 while retaining the original ECX subleaf. There
+is no processor brand, serial number, APIC identity, host feature passthrough or
+FPU/MMX/FXSR/XSAVE/AVX/AVX2 claim. This conservative profile is not a complete
+hardware model or proof that every instruction form in an advertised family has
+been ported; the positive form policy and explicit runtime refusals still apply.
+After admission, one fixed host CPUID leaf 0 provides the actual serializing
+instruction, surrounded by compiler barriers. Its outputs are discarded and
+never become guest identification data.
+
 Decoder-validated memory-destination LOCK arithmetic, unary operations, XADD,
 XCHG and compare-exchange preserve their actual prefix in native emission.
 These and implicit-lock memory XCHG always split into a single emitted

@@ -194,6 +194,7 @@ pub enum NativeDispatchError {
     UnsupportedStringInstruction,
     UnsupportedVectorInstruction,
     UnsupportedIntegerInstruction,
+    UnsupportedCpuInstruction,
     TimeCounter(crate::time_counter::CounterError),
     UnsupportedX87Exception,
     VectorAlignment,
@@ -409,6 +410,8 @@ static NEXT_EXECUTOR: AtomicU64 = AtomicU64::new(1);
 mod bit_counts;
 #[path = "prepared/cache_hints.rs"]
 mod cache_hints;
+#[path = "prepared/cpu_identification.rs"]
+mod cpu_identification;
 #[path = "prepared/float_ops.rs"]
 mod float_ops;
 #[path = "prepared/fused_float.rs"]
@@ -1761,6 +1764,13 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         memory: &mut PausedNativeMemory<'_>,
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<NativeBlockStop, NativeDispatchError> {
+        if block
+            .exit()
+            .instruction()
+            .is_some_and(cpu_identification::supported)
+        {
+            return self.emulate_cpu_identification(memory, block);
+        }
         if block
             .exit()
             .instruction()

@@ -27,6 +27,8 @@ mod float_arithmetic;
 #[path = "tests/float_comparisons.rs"]
 mod float_comparisons;
 
+#[path = "tests/cpu_identification.rs"]
+mod cpu_identification_tests;
 #[path = "tests/float_integer_convert.rs"]
 mod float_integer_convert;
 #[path = "tests/floating_bit_tests.rs"]

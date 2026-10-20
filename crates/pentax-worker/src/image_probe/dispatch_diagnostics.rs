@@ -38,6 +38,7 @@ pub(super) fn classify(error: &D) -> &'static str {
         D::UnsupportedStringInstruction => "string-form",
         D::UnsupportedVectorInstruction => "vector-form",
         D::UnsupportedIntegerInstruction => "integer-form",
+        D::UnsupportedCpuInstruction => "cpu-form",
         D::TimeCounter(_) => "time-counter",
         D::UnsupportedX87Exception => "x87-exception",
         D::VectorAlignment => "vector-alignment",
@@ -68,6 +69,7 @@ mod tests {
             ),
             (D::InvalidTarget(u64::MAX), "invalid-target"),
             (D::UnsupportedVectorInstruction, "vector-form"),
+            (D::UnsupportedCpuInstruction, "cpu-form"),
         ] {
             assert_eq!(classify(&error), expected);
         }
