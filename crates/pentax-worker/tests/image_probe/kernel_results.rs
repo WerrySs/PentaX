@@ -261,6 +261,9 @@ const NAME: i32 = 0xd00;
 const I32_INVALID: u64 = 0x8002_0016;
 const I32_BUSY: u64 = 0x8002_0010;
 
+#[path = "align_right.rs"]
+mod align_right;
+
 struct Program {
     code: Vec<u8>,
     branches: Vec<usize>,

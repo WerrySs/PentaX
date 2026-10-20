@@ -412,6 +412,8 @@ enum Phase {
 }
 static NEXT_EXECUTOR: AtomicU64 = AtomicU64::new(1);
 
+#[path = "prepared/align_right.rs"]
+mod align_right;
 #[path = "prepared/bit_counts.rs"]
 mod bit_counts;
 #[path = "prepared/cache_hints.rs"]
