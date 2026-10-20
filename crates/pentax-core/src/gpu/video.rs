@@ -17,7 +17,9 @@ mod presentation;
 pub use pixels::{
     ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32, retile_32_into,
 };
-pub use presentation::{FlipCompletion, FlipSource, FlipStatus, FlipSubmission, FlipTicket, Frame};
+pub use presentation::{
+    FlipCompletion, FlipSource, FlipStatus, FlipSubmission, FlipTicket, Frame, ReadyFrameMetadata,
+};
 
 const INVALID_VALUE: u64 = 0x8029_0001;
 const INVALID_ADDRESS: u64 = 0x8029_0002;

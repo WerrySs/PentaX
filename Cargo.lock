@@ -2397,6 +2397,7 @@ dependencies = [
  "pentax-linker",
  "pentax-loader",
  "pentax-platform",
+ "pentax-session",
 ]
 
 [[package]]

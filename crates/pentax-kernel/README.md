@@ -1275,3 +1275,14 @@ policy failures retain all IDs and state. ContextCreate models its output store
 before its queue-depth read through an atomic staged overlay. Physical aliases
 that cannot prove this ordering refuse. This profile does not claim host race
 equivalence, physical-device queue behavior, mastering or additional DSP APIs.
+
+VideoOut notifications use their own retained event subscriptions (filter -13),
+distinct from AGC interrupts. The native adapter supplies actual observed
+vblank ticks and acknowledged flip completions; numeric metadata alone creates
+neither a core Frame nor presentation authority. Default coalescing retains the
+newest payload and source counters saturated at15 while preserving active order.
+The existing bounded queue/handle/work policy applies; there is no unbounded
+legacy copy queue. Failed guest delivery leaves the pending event unchanged.
+Closed queues and retired port generations cannot receive stale notifications.
+The source lineage and explicit presentation boundaries are documented in
+`docs/worker-frame-bridge.md` at the repository root and in NOTICE.

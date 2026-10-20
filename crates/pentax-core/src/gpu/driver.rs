@@ -21,6 +21,8 @@ mod graphics;
 mod interrupts;
 #[path = "driver/presentation.rs"]
 mod presentation;
+#[path = "driver/video_events.rs"]
+mod video_events;
 pub(crate) type GraphicsClock =
     fn(&mut pentax_kernel::Kernel, &mut PausedNativeMemory<'_>) -> Result<u64, Failure>;
 
@@ -63,6 +65,13 @@ pub enum Function {
     VideoGetFlipStatus,
     VideoIsFlipPending,
     AgcDcbSetFlip,
+    VideoAddFlipEvent,
+    VideoDeleteFlipEvent,
+    VideoAddVblankEvent,
+    VideoDeleteVblankEvent,
+    VideoGetEventId,
+    VideoGetEventData,
+    VideoGetEventCount,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -173,8 +182,16 @@ pub(crate) struct Driver {
     poisoned: bool,
     frame: FrameState,
     video: super::video::State,
+    consumer: Option<ConsumerBudget>,
+    video_ticks: [Option<(u64, u64, u64)>; 3],
     defaults: Option<(pentax_platform::native_memory::NativeOwnerId, u64)>,
     shaders: super::shaders::State,
+}
+#[derive(Clone, Copy)]
+struct ConsumerBudget {
+    max_frame_bytes: usize,
+    max_held_bytes: usize,
+    external_held: usize,
 }
 impl Driver {
     pub(crate) fn new(limits: Limits) -> Self {
@@ -187,6 +204,8 @@ impl Driver {
             poisoned: false,
             frame: FrameState::default(),
             video: super::video::State::default(),
+            consumer: None,
+            video_ticks: [None; 3],
             defaults: None,
             shaders: Default::default(),
         }
@@ -320,6 +339,19 @@ impl Driver {
             return Err(Failure::Poisoned);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        if matches!(
+            function,
+            Function::VideoAddFlipEvent
+                | Function::VideoDeleteFlipEvent
+                | Function::VideoAddVblankEvent
+                | Function::VideoDeleteVblankEvent
+                | Function::VideoGetEventId
+                | Function::VideoGetEventData
+                | Function::VideoGetEventCount
+        ) || (function == Function::VideoClose && kernel.is_some())
+        {
+            return self.video_event_call(memory, function, args, stack, kernel);
+        }
         if function == Function::AgcDcbSetFlip {
             return self.encode_flip(memory, args);
         }

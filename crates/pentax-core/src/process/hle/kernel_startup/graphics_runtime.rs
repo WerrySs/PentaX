@@ -341,6 +341,100 @@ impl PreparedNativeKernelStartup<'_, '_> {
             .map_err(KernelStartupError::Graphics)
     }
 
+    /// Read-only oldest READY metadata from the actual paused owner. A later
+    /// ready frame cannot bypass an older request; no tick, dequeue or ack.
+    pub fn graphics_video_peek_ready_frame(
+        &mut self,
+    ) -> Result<Option<crate::gpu::video::ReadyFrameMetadata>, KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        self.graphics.as_ref().map_or(Ok(None), |driver| {
+            driver
+                .video_peek_ready_frame(&paused)
+                .map_err(KernelStartupError::Graphics)
+        })
+    }
+
+    /// Tighten live capture policy to include transport-held allocations. The
+    /// caller accounts actual capacities and keeps handed-off Frames charged
+    /// until dropped, including after by-reference acknowledgement.
+    pub fn graphics_video_consumer_admit(
+        &mut self,
+        max_frame_bytes: usize,
+        max_staging_bytes: usize,
+        external_held: usize,
+    ) -> Result<(), KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        self.graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?
+            .video_consumer_admit(&paused, max_frame_bytes, max_staging_bytes, external_held)
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Deliver the actual acknowledged flip to retained VideoOut subscriptions.
+    /// Failure preserves the same opaque completion; success consumes it once.
+    pub fn graphics_video_deliver_completion(
+        &mut self,
+        completion: &mut Option<crate::gpu::video::FlipCompletion>,
+    ) -> Result<(), KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let driver = self
+            .graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?;
+        let receipt = completion
+            .as_ref()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing presentation completion",
+            ))?;
+        if receipt.owner() != paused.owner_id()
+            || driver
+                .video_port(receipt.handle())
+                .is_none_or(|p| p.generation != receipt.generation())
+        {
+            return Err(KernelStartupError::NativeOwnerMismatch);
+        }
+        let tsc = pentax_platform::time_counter::sample()
+            .map_err(|_| KernelStartupError::InvalidProvider("video event counter"))?
+            .ticks;
+        driver
+            .video_deliver_completion(&paused, &mut self.kernel, completion, tsc)
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Only the actual window consumer supplies observed ticks. Numeric tick
+    /// metadata never acknowledges a Frame or signals an AGC interrupt.
+    pub fn graphics_video_observe_vblank(
+        &mut self,
+        handle: i32,
+        generation: u64,
+        tick: u64,
+    ) -> Result<(), KernelStartupError> {
+        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let driver = self
+            .graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing graphics state",
+            ))?;
+        if driver
+            .video_port(handle)
+            .is_none_or(|p| p.generation != generation)
+        {
+            return Err(KernelStartupError::NativeOwnerMismatch);
+        }
+        let tsc = pentax_platform::time_counter::sample()
+            .map_err(|_| KernelStartupError::InvalidProvider("video event counter"))?
+            .ticks;
+        driver
+            .video_observe_vblank(&paused, &mut self.kernel, handle, generation, tick, tsc)
+            .map_err(KernelStartupError::Graphics)
+    }
+
     /// Confirm actual consumer presentation once using this session's opaque
     /// frame. Exact owner, phase and generation admission precedes clock reads.
     /// Clock fields share the kernel services' process epoch; this adds no HLE
@@ -394,6 +488,9 @@ mod defaults_tests;
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod interrupt_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod video_event_tests;
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod tests {
@@ -480,7 +577,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 108);
+            assert_eq!(binding.factory.function_count(), 118);
             let open = binding
                 .factory
                 .markers()

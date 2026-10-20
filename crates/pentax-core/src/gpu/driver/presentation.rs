@@ -10,6 +10,78 @@ const INVALID_ADDRESS: u64 = 0x8029_0002;
 const INVALID_HANDLE: u64 = 0x8029_000b;
 
 impl Driver {
+    /// Accounting policy only. All inputs can only tighten configured bounds;
+    /// numeric byte counts confer no access or frame ownership.
+    pub(crate) fn video_consumer_admit(
+        &mut self,
+        memory: &PausedNativeMemory<'_>,
+        max_frame_bytes: usize,
+        max_held_bytes: usize,
+        external_held: usize,
+    ) -> Result<(), Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        self.video.check_owner(memory.owner_id())?;
+        let original = self.limits.video_presentation;
+        let frame = original.max_frame_bytes.min(max_frame_bytes);
+        let held = original.max_held_bytes.min(max_held_bytes);
+        if frame == 0
+            || held == 0
+            || external_held
+                .checked_add(self.video.retained_frame_bytes())
+                .is_none_or(|n| n > held)
+        {
+            return Err(Failure::Limit);
+        }
+        if let Some(old) = self.consumer
+            && (frame > old.max_frame_bytes || held > old.max_held_bytes)
+        {
+            return Err(Failure::Limit);
+        }
+        self.consumer = Some(ConsumerBudget {
+            max_frame_bytes: frame,
+            max_held_bytes: held,
+            external_held,
+        });
+        Ok(())
+    }
+    pub(super) fn presentation_limits(
+        &self,
+    ) -> Result<crate::gpu::video::PresentationLimits, Failure> {
+        let mut limits = self.limits.video_presentation;
+        if let Some(consumer) = self.consumer {
+            limits.max_frame_bytes = limits.max_frame_bytes.min(consumer.max_frame_bytes);
+            limits.max_held_bytes = limits
+                .max_held_bytes
+                .min(consumer.max_held_bytes)
+                .checked_sub(consumer.external_held)
+                .ok_or(Failure::Limit)?;
+        }
+        Ok(limits)
+    }
+    pub(super) fn graphics_host_limit(&self) -> Result<usize, Failure> {
+        match self.consumer {
+            Some(consumer) => self
+                .limits
+                .graphics
+                .max_host_bytes
+                .min(consumer.max_held_bytes)
+                .checked_sub(consumer.external_held)
+                .ok_or(Failure::Limit),
+            None => Ok(self.limits.graphics.max_host_bytes),
+        }
+    }
+    pub(crate) fn video_peek_ready_frame(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+    ) -> Result<Option<crate::gpu::video::ReadyFrameMetadata>, Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        self.video.check_owner(memory.owner_id())?;
+        self.video.peek_ready_frame()
+    }
     /// Guest-call wrapper: submit_impl has already admitted exactly one call.
     /// The lazy clock supplies the actual kernel process-counter domain only
     /// after source metadata admission; raw host ticks are never substituted.
@@ -67,8 +139,8 @@ impl Driver {
                 work,
                 self.limits.max_preparation_work,
             )?;
-            self.video
-                .prepare_flip(ticket, memory, &self.limits.video_presentation)?;
+            let limits = self.presentation_limits()?;
+            self.video.prepare_flip(ticket, memory, &limits)?;
             self.video.complete_flip(ticket)?; // CPU only; no GPU-EOP completion bypass.
             Ok(0)
         })();
@@ -172,12 +244,34 @@ impl Driver {
             return Err(Failure::Poisoned);
         }
         self.video.check_owner(memory.owner_id())?;
+        // A handoff moves an existing allocation from queue to transport. Admit
+        // the external counter before mutation; no quota follows a real take.
+        let external = if let Some(consumer) = self.consumer {
+            let capacity = self
+                .video
+                .peek_ready_frame()?
+                .map_or(0, |frame| frame.capacity());
+            Some(
+                consumer
+                    .external_held
+                    .checked_add(capacity)
+                    .ok_or(Failure::Limit)?,
+            )
+        } else {
+            None
+        };
         self.usage.preparation_work = add(
             self.usage.preparation_work,
             256,
             self.limits.max_preparation_work,
         )?;
-        self.video.take_frame(vblank_count)
+        let frame = self.video.take_frame(vblank_count)?;
+        if frame.is_some()
+            && let (Some(consumer), Some(external)) = (&mut self.consumer, external)
+        {
+            consumer.external_held = external;
+        }
+        Ok(frame)
     }
 
     /// Actual consumer acknowledgement, not an export or reservation success.
@@ -333,6 +427,43 @@ mod tests {
         );
         assert_eq!(samples.get(), 2);
         assert_eq!(driver.usage().calls, calls); // Caller already owns guest-call admission.
+        let before_peek = driver.video_flip_status(&memory, 1).unwrap();
+        let metadata = driver.video_peek_ready_frame(&memory).unwrap().unwrap();
+        assert_eq!(
+            (
+                metadata.width(),
+                metadata.height(),
+                metadata.source_format(),
+                metadata.premultiplied_alpha()
+            ),
+            (2, 2, crate::gpu::video::PixelFormat::Rgba8Srgb, false)
+        );
+        assert_eq!(
+            metadata.generation(),
+            driver.video_port(1).unwrap().generation
+        );
+        assert!(metadata.capacity() >= 16);
+        assert_eq!(driver.video_flip_status(&memory, 1).unwrap(), before_peek);
+        // Consumer metadata can only tighten policy; it grants no dequeue or
+        // acknowledgment. Existing captured capacity participates immediately.
+        let max_frame = driver.limits.video_presentation.max_frame_bytes;
+        let max_held = driver.limits.video_presentation.max_held_bytes;
+        assert_eq!(
+            driver.video_consumer_admit(&memory, max_frame, max_held, max_held),
+            Err(Failure::Limit)
+        );
+        driver
+            .video_consumer_admit(&memory, max_frame, max_held, 1024)
+            .unwrap();
+        assert_eq!(
+            driver.presentation_limits().unwrap().max_held_bytes,
+            max_held - 1024
+        );
+        let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
+        assert!(matches!(
+            driver.video_peek_ready_frame(&foreign.pause().unwrap()),
+            Err(Failure::Memory)
+        ));
         assert!(driver.video_buffer_pending(&memory, 1, 0).unwrap());
         assert_eq!(
             driver.video_flip_status(&memory, 1).unwrap().unwrap().count,
@@ -383,6 +514,15 @@ mod tests {
         );
         assert!(driver.video_take_frame(&memory, 0).unwrap().is_none());
         let frame = driver.video_take_frame(&memory, 1).unwrap().unwrap();
+        assert!(driver.video_peek_ready_frame(&memory).unwrap().is_none());
+        assert_eq!(
+            driver.consumer.unwrap().external_held,
+            1024 + frame.capacity()
+        );
+        assert_eq!(
+            driver.presentation_limits().unwrap().max_held_bytes,
+            max_held - 1024 - frame.capacity()
+        );
         assert_eq!(frame.rgba8(), original);
         memory.write(base + 65536, &[0; 4]).unwrap();
         assert_eq!(frame.rgba8(), original); // Immutable owned snapshot.

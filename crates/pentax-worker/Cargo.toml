@@ -15,6 +15,7 @@ pentax-platform = { path = "../pentax-platform" }
 pentax-linker = { path = "../pentax-linker" }
 pentax-loader = { path = "../pentax-loader" }
 pentax-kernel = { path = "../pentax-kernel" }
+pentax-session.workspace = true
 
 # Keep the workspace warning policy. Only the separately reviewed native_session
 # module may allow unsafe code; `forbid` cannot support a module-only exception.

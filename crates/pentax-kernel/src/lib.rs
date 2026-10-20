@@ -69,7 +69,10 @@ pub use budget::{Limits, Usage};
 pub use catalog::{Registration, Service, resolve};
 pub use dialog::CommonDialogStatus;
 pub use entitlement::{LocalAddcont, LocalEntitlements};
-pub use event_queue::{EventQueueWait, EventQueueWaitAction, GraphicsInterrupt};
+pub use event_queue::{
+    EventQueueWait, EventQueueWaitAction, GraphicsInterrupt, VideoClose, VideoEventKind,
+    VideoInterrupt,
+};
 pub use filesystem::{ReadOnlyFile, ReadOnlyRoot};
 pub use font::{AdmittedFontParser, FontParserAction};
 pub use handle_usage::HandleUsage;

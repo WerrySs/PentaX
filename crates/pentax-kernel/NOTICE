@@ -620,3 +620,17 @@ compatibility binding to KernelUsleep, not an upstream POSIX wrapper claim.
 The unsigned low32 microsecond input, zero result and unchanged errno reuse
 the existing kernel service. Signal polling/cancellation parity is not provided.
 Raw synchronous invocation retains its distinct bounded host-sleep profile.
+
+VideoOut consumer event delivery adapts PUBLIC KytyPS5/KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/presentation/videoOut.cpp,
+    Git blob 247df7a480a88d7f45f88495f2806744917b20d8
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the original Kyty MIT grant
+retained above apply. The separately retained authorized 209dffe source's
+kernel/eventQueue.cpp and eventQueueFilters.h supply the default-coalescing
+policy and packed VideoOut next-state rules, consistent with PentaX's existing
+bounded event queue profile. They are not claimed identical to public7b, whose
+legacy path queues additional copies. PentaX modifications 2026: exact live
+port-generation subscriptions, allocation-free preadmitted trigger/close tokens,
+bounded default coalescing, and output-atomic delivery. Only actual consumer
+observations trigger these events; no host refresh or presentation is invented.

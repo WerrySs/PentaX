@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 108] = {
+const ENTRIES: [(&str, Function, usize, usize); 118] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 108] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 108];
+    let mut entries = [BASE_ENTRIES[0]; 118];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -132,6 +132,24 @@ const ENTRIES: [(&str, Function, usize, usize); 108] = {
     }
     entries[106] = ("YUeqkyT7mEQ", Function::AgcDcbSetFlip, 1, 1);
     entries[107] = ("YUeqkyT7mEQ", Function::AgcDcbSetFlip, 2, 2);
+    let presentation = [
+        ("HXzjK9yI30k", Function::VideoAddFlipEvent),
+        ("-Ozn0F1AFRg", Function::VideoDeleteFlipEvent),
+        ("Xru92wHJRmg", Function::VideoAddVblankEvent),
+        ("oNOQn3knW6s", Function::VideoDeleteVblankEvent),
+        ("U2JJtSqNKZI", Function::VideoGetEventId),
+        ("rWUTcKdkUzQ", Function::VideoGetEventData),
+        ("Mt4QHHkxkOc", Function::VideoGetEventCount),
+        ("U46NwOiJpys", Function::VideoSubmitFlip),
+        ("SbU3dwp80lQ", Function::VideoGetFlipStatus),
+        ("zgXifHT9ErY", Function::VideoIsFlipPending),
+    ];
+    i = 0;
+    while i < presentation.len() {
+        let (nid, function) = presentation[i];
+        entries[108 + i] = (nid, function, 3, 3);
+        i += 1;
+    }
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -333,7 +351,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(8192).unwrap();
-        assert_eq!(provider.function_count(), 108);
+        assert_eq!(provider.function_count(), 118);
         assert_eq!(provider.image().len(), 8192);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -360,3 +378,7 @@ mod flip_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "graphics_provider/presentation_tests.rs"]
+mod presentation_tests;

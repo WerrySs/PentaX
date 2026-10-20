@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 mod wait;
 use wait::Waiter;
+mod video;
+pub use video::{VideoClose, VideoEventKind, VideoInterrupt};
 
 /// One admitted interrupt bound by an exclusive borrow to its real queue owner.
 /// Only a successfully retired graphics command may publish this notification.
@@ -58,6 +60,7 @@ impl crate::Kernel {
                 deadline: 0,
                 interval: 0,
                 active: 0,
+                video: None,
             },
             &mut self.budget,
             now,
@@ -138,6 +141,7 @@ const USER: i16 = -11;
 const TIMER: i16 = -7;
 const HR_TIMER: i16 = -15;
 const GRAPHICS: i16 = -14;
+const VIDEO_OUT: i16 = -13;
 const ADD: u16 = 1;
 const ONESHOT: u16 = 0x10;
 const CLEAR: u16 = 0x20;
@@ -154,6 +158,7 @@ struct Event {
     deadline: u64,
     interval: u64,
     active: u64, // zero means not pending
+    video: Option<video::Subscription>,
 }
 impl Event {
     fn encode(self, output: &mut [u8]) {
@@ -432,7 +437,7 @@ impl EventQueues {
             if event.flags & ONESHOT != 0 {
                 continue;
             }
-            if event.flags & CLEAR != 0 || event.filter == GRAPHICS {
+            if event.flags & CLEAR != 0 || event.filter == GRAPHICS || event.filter == VIDEO_OUT {
                 event.active = 0;
                 event.fflags = 0;
                 event.data = 0;
@@ -621,6 +626,7 @@ impl EventQueues {
                         },
                         interval: if service == AddTimerEvent { delay } else { 0 },
                         active: 0,
+                        video: None,
                     },
                     budget,
                     self.nanos(now),

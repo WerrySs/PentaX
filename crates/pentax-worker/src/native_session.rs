@@ -23,6 +23,9 @@ use pentax_platform::native_memory::{NativeMemoryError, PausedNativeMemory};
 use std::sync::OnceLock;
 
 mod dispatch_context;
+// The optional local window runs on this supervised worker thread, outside
+// every guest entry and memory pause. Ordinary probes retain no consumer.
+pub(crate) mod frame_bridge;
 mod plan_cache;
 mod scheduling;
 mod startup_profile;
@@ -82,6 +85,7 @@ pub(super) enum NativeSessionError {
     OutputUnavailable,
     FixtureInvariant(&'static str),
     ThreadDeadlock,
+    Frame(frame_bridge::Error),
 }
 impl std::fmt::Display for NativeSessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -103,6 +107,7 @@ impl std::fmt::Display for NativeSessionError {
             Self::ThreadDeadlock => {
                 f.write_str("all guest threads are blocked without a runnable notifier")
             }
+            Self::Frame(error) => write!(f, "frame session: {error:?}"),
         }
     }
 }
@@ -374,6 +379,106 @@ pub(super) fn run_prepared_with_initializer<'plan, 'image>(
     limits: &NativeSessionLimits,
     progress: &mut NativeSessionProgress,
 ) -> Result<NativeSessionReport, NativeSessionError> {
+    run_prepared_with_consumer(
+        session,
+        proof,
+        initial,
+        stack,
+        initializer,
+        limits,
+        progress,
+        None,
+    )
+}
+
+/// Explicit same-process consumer path. Its checked serial is a nonsecret
+/// identity, not a security token or a cross-process execution capability.
+pub(super) fn run_prepared_with_window<'plan, 'image>(
+    session: &mut PreparedNativeKernelStartup<'plan, 'image>,
+    proof: &PreparedNativeSource<'_, '_>,
+    initial: NativeCpuState,
+    stack: NativeStackFrame,
+    initializer: Option<&PreparedNativeModuleStart<'_, '_>>,
+    limits: &NativeSessionLimits,
+    progress: &mut NativeSessionProgress,
+) -> Result<NativeSessionReport, NativeSessionError> {
+    use frame_bridge::local_presenter::{Limits as WindowLimits, LocalPresenterTransport};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_LOCAL_WINDOW: AtomicU64 = AtomicU64::new(1);
+    let serial = NEXT_LOCAL_WINDOW
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .map_err(|_| NativeSessionError::Budget("local window identities"))?;
+    let mut identity = [0; 16];
+    identity[..8].copy_from_slice(b"PXWINDOW");
+    identity[8..].copy_from_slice(&serial.to_le_bytes());
+    let nonce = pentax_session::Nonce::new(identity)
+        .map_err(|_| NativeSessionError::Frame(frame_bridge::Error::Protocol))?;
+    let window = WindowLimits::default();
+    let mut transport =
+        LocalPresenterTransport::new(nonce, 1, window).map_err(NativeSessionError::Frame)?;
+    let mut bridge = frame_bridge::FrameBridge::new(
+        &mut transport,
+        nonce,
+        1,
+        frame_bridge::Limits {
+            wire: window.wire,
+            ..Default::default()
+        },
+    )
+    .map_err(NativeSessionError::Frame)?;
+    run_prepared_with_consumer(
+        session,
+        proof,
+        initial,
+        stack,
+        initializer,
+        limits,
+        progress,
+        Some(&mut bridge),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_prepared_with_consumer<'plan, 'image>(
+    session: &mut PreparedNativeKernelStartup<'plan, 'image>,
+    proof: &PreparedNativeSource<'_, '_>,
+    initial: NativeCpuState,
+    stack: NativeStackFrame,
+    initializer: Option<&PreparedNativeModuleStart<'_, '_>>,
+    limits: &NativeSessionLimits,
+    progress: &mut NativeSessionProgress,
+    mut consumer: Option<&mut frame_bridge::FrameBridge<'_>>,
+) -> Result<NativeSessionReport, NativeSessionError> {
+    let mut result = run_prepared_consumer_inner(
+        session,
+        proof,
+        initial,
+        stack,
+        initializer,
+        limits,
+        progress,
+        consumer.as_deref_mut(),
+    );
+    if let Some(consumer) = consumer {
+        if result.is_ok() && consumer.is_pending() {
+            result = Err(NativeSessionError::Frame(frame_bridge::Error::Cancelled));
+        }
+        consumer.cancel();
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_prepared_consumer_inner<'plan, 'image>(
+    session: &mut PreparedNativeKernelStartup<'plan, 'image>,
+    proof: &PreparedNativeSource<'_, '_>,
+    initial: NativeCpuState,
+    stack: NativeStackFrame,
+    initializer: Option<&PreparedNativeModuleStart<'_, '_>>,
+    limits: &NativeSessionLimits,
+    progress: &mut NativeSessionProgress,
+    mut consumer: Option<&mut frame_bridge::FrameBridge<'_>>,
+) -> Result<NativeSessionReport, NativeSessionError> {
     *progress = NativeSessionProgress::default();
     let mut initial = initial;
     let mut main_thread = None;
@@ -439,6 +544,7 @@ pub(super) fn run_prepared_with_initializer<'plan, 'image>(
         service_stops: 0,
         reported_blocks: 0,
         report: None,
+        frame_pump_blocks: None,
     };
     state
         .frames
@@ -478,6 +584,7 @@ pub(super) fn run_prepared_with_initializer<'plan, 'image>(
             initializer,
             limits,
             progress,
+            consumer.as_deref_mut(),
         )? {
             None => {
                 return state
@@ -583,6 +690,7 @@ struct RunState<'plan, 'image> {
     service_stops: u64,
     reported_blocks: u64,
     report: Option<NativeSessionReport>,
+    frame_pump_blocks: Option<u64>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -595,6 +703,7 @@ fn execute_epoch<'plan, 'image>(
     initializer: Option<&PreparedNativeModuleStart<'_, '_>>,
     limits: &NativeSessionLimits,
     progress: &mut NativeSessionProgress,
+    mut consumer: Option<&mut frame_bridge::FrameBridge<'_>>,
 ) -> Result<Option<(PendingModuleLoad, PreSyscallToken)>, NativeSessionError> {
     let source = proof.materialized_source();
     if proof.owner_id() != session.owner_id()
@@ -686,12 +795,46 @@ fn execute_epoch<'plan, 'image>(
     // still fetches its complete live executable window before cache lookup.
     let mut window_storage = Vec::new();
     loop {
+        let mut external = None;
+        if let Some(consumer) = consumer.as_deref_mut() {
+            let blocked = state.scheduling.active_blocked();
+            if blocked
+                || state
+                    .frame_pump_blocks
+                    .is_none_or(|old| engine.usage().blocks.saturating_sub(old) >= 1024)
+            {
+                match consumer.pump(session).map_err(NativeSessionError::Frame)? {
+                    frame_bridge::Pump::RetryEventDelivery => {
+                        let wake = consumer
+                            .external_wake()
+                            .map_err(NativeSessionError::Frame)?
+                            .ok_or(NativeSessionError::Frame(frame_bridge::Error::Protocol))?;
+                        state.scheduling.wait_consumer_retry(wake)?;
+                        state.frame_pump_blocks = None;
+                        continue;
+                    }
+                    frame_bridge::Pump::NeedsEventDelivery => {
+                        return Err(NativeSessionError::Frame(
+                            frame_bridge::Error::NeedsEventDelivery,
+                        ));
+                    }
+                    frame_bridge::Pump::Idle | frame_bridge::Pump::Progress => {}
+                }
+                state.frame_pump_blocks = Some(engine.usage().blocks);
+            }
+            if blocked {
+                external = consumer
+                    .external_wake()
+                    .map_err(NativeSessionError::Frame)?;
+            }
+        }
         let runnable = state.scheduling.rotate(
             session,
             proof,
             &mut engine,
             &mut state.frames,
             &mut progress.phase,
+            external,
         )?;
         progress.dispatch = engine.usage();
         if !runnable {

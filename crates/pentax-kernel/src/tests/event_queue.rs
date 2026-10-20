@@ -353,6 +353,7 @@ fn event_queues_timer_deadlines_coalesce_periods_and_consume_high_resolution_onc
         deadline,
         interval,
         active: 0,
+        video: None,
     };
     owner
         .event_queues

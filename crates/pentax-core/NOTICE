@@ -339,3 +339,15 @@ execution, exclusive current-draw authority, live registered-surface validation,
 actual owned GPU-ready capture, failed-reservation rollback and atomic fit-only
 packet/cursor publication. No game assets or proprietary command data copied.
 Readiness does not fabricate vblank, presentation acknowledgement or events.
+
+The native-consumer VideoOut event adapter and appended canonical bindings
+continue that same PUBLIC7b videoOut.cpp source and its src/libs/libVideoOut.cpp
+registration declarations. Copyright (c) 2021 InoriRus; GPL-2.0-only and the
+original Kyty MIT grant above remain applicable. PentaX modifications 2026:
+same-owner opaque FlipCompletion consumption only after actual retained-queue
+publication, live port-generation close cleanup, actual observed refresh input,
+and checked event getters. The kernel's explicitly bounded default-coalescing
+policy follows the separately retained authorized209dffe queue revision; public7b
+is not claimed to implement that policy. Ten canonical VideoOut1.1/library1
+exports append without moving earlier service markers. No unobserved namespace
+aliases, physical display timing or presentation completion are fabricated.

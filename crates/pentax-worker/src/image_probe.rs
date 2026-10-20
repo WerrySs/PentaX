@@ -5,7 +5,7 @@
 
 use crate::native_session::{
     NativeSessionError, NativeSessionLimits, NativeSessionProgress, NativeSessionReport,
-    run_prepared_with_initializer,
+    run_prepared_with_initializer, run_prepared_with_window,
 };
 use pentax_codegen::Mnemonic;
 use pentax_core::process::hle::{
@@ -67,6 +67,7 @@ impl ProbeError {
                 NativeSessionError::Allocation => "execution-allocation",
                 NativeSessionError::FixtureInvariant(_) => "execution-invariant",
                 NativeSessionError::ThreadDeadlock => "thread-deadlock",
+                NativeSessionError::Frame(_) => "frame-session",
             },
             Self::Admission(error) => error.code(),
         }
@@ -305,7 +306,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(5)
+                .saturating_add(6)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -316,6 +317,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--data-directory"
                     && pair[0] != "--memory-profile"
                     && pair[0] != "--execution-profile"
+                    && pair[0] != "--present-window"
             })
             .count()
             > limits.max_images
@@ -337,6 +339,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--data-directory"
                 && pair[0] != "--memory-profile"
                 && pair[0] != "--execution-profile"
+                && pair[0] != "--present-window"
         })
         || args
             .chunks_exact(2)
@@ -363,6 +366,14 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[1] != "extended-startup"
                 && pair[1] != "long-startup"
         })
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--present-window")
+            .count()
+            > 1
+        || args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--present-window" && pair[1] != "yes" && pair[1] != "no")
     {
         return Err(ProbeError::Input("image-arguments"));
     }
@@ -466,7 +477,10 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             user = config.user;
             continue;
         }
-        if pair[0] == "--memory-profile" || pair[0] == "--execution-profile" {
+        if pair[0] == "--memory-profile"
+            || pair[0] == "--execution-profile"
+            || pair[0] == "--present-window"
+        {
             continue;
         }
         if pair[0] == "--data-file" {
@@ -705,7 +719,15 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 initial.gpr[5] = entry.frame_pointer;
                 initial.gpr[7] = entry.arguments;
                 initial.gpr[6] = entry.exit_handler;
-                let result = run_prepared_with_initializer(
+                let run = if args
+                    .chunks_exact(2)
+                    .any(|pair| pair[0] == "--present-window" && pair[1] == "yes")
+                {
+                    run_prepared_with_window
+                } else {
+                    run_prepared_with_initializer
+                };
+                let result = run(
                     session,
                     &proof,
                     initial,

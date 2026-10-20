@@ -44,6 +44,40 @@ pub struct Frame {
     pixels: Vec<u8>,
     presentation_tick: u64,
 }
+/// Oldest READY payload metadata only: no pixels, ticket, address or handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadyFrameMetadata {
+    width: u32,
+    height: u32,
+    format: super::PixelFormat,
+    premultiplied_alpha: bool,
+    capacity: usize,
+    generation: u64,
+    handle: i32,
+}
+impl ReadyFrameMetadata {
+    pub fn width(self) -> u32 {
+        self.width
+    }
+    pub fn height(self) -> u32 {
+        self.height
+    }
+    pub fn source_format(self) -> super::PixelFormat {
+        self.format
+    }
+    pub fn premultiplied_alpha(self) -> bool {
+        self.premultiplied_alpha
+    }
+    pub fn capacity(self) -> usize {
+        self.capacity
+    }
+    pub fn generation(self) -> u64 {
+        self.generation
+    }
+    pub fn handle(self) -> i32 {
+        self.handle
+    }
+}
 impl Frame {
     pub fn ticket(&self) -> FlipTicket {
         self.ticket
@@ -205,6 +239,38 @@ impl Queue {
     }
 }
 impl super::State {
+    /// Preserve FIFO: a later ready request cannot bypass an older incomplete
+    /// or handed-off request. Does not observe ticks or mutate queue state.
+    pub(crate) fn peek_ready_frame(&self) -> Result<Option<ReadyFrameMetadata>, Failure> {
+        let request = self
+            .presentation
+            .requests
+            .iter()
+            .flatten()
+            .min_by_key(|r| r.ticket.id);
+        let Some(request) = request else {
+            return Ok(None);
+        };
+        if request.phase != Phase::Ready {
+            return Ok(None);
+        }
+        let frame = request.frame.as_ref().ok_or(Failure::UnsupportedVideo)?;
+        if self
+            .port(request.ticket.handle)
+            .is_none_or(|p| p.generation != request.ticket.generation)
+        {
+            return Err(Failure::UnsupportedVideo);
+        }
+        Ok(Some(ReadyFrameMetadata {
+            width: frame.width(),
+            height: frame.height(),
+            format: frame.source_format(),
+            premultiplied_alpha: frame.premultiplied_alpha(),
+            capacity: frame.capacity(),
+            generation: request.ticket.generation,
+            handle: request.ticket.handle,
+        }))
+    }
     pub(in crate::gpu) fn retained_frame_bytes(&self) -> usize {
         self.presentation.held
     }

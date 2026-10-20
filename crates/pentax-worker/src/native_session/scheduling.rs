@@ -9,6 +9,29 @@ use pentax_core::process::hle::{
 use pentax_kernel::ThreadPriorityClass;
 use pentax_platform::native_dispatch::NativeThreadContext;
 
+#[cfg(test)]
+mod tests;
+
+/// A consumer deadline can make a completely parked machine externally
+/// wakeable. It neither satisfies a guest wait nor consumes its sleep quota.
+fn idle_slice(
+    guest: Option<std::time::Duration>,
+    external: Option<super::frame_bridge::ExternalWake>,
+) -> Option<(std::time::Duration, Option<u64>)> {
+    match (guest, external) {
+        (Some(delay), Some(wake)) if wake.delay <= delay => Some((
+            wake.delay.min(std::time::Duration::from_millis(1)),
+            Some(wake.maximum_idle_nanoseconds),
+        )),
+        (None, Some(wake)) => Some((
+            wake.delay.min(std::time::Duration::from_millis(1)),
+            Some(wake.maximum_idle_nanoseconds),
+        )),
+        (Some(delay), _) => Some((delay.min(std::time::Duration::from_millis(1)), None)),
+        (None, None) => None,
+    }
+}
+
 // PentaX policy: preserve round-robin admission and vary only bounded guest
 // execution turns. Every runnable thread still receives a turn. These ratios
 // implement the source's three classes without changing Windows scheduling.
@@ -42,6 +65,7 @@ pub(super) struct Scheduling<'plan, 'image> {
     last_switch: u64,
     force_switch: bool,
     idle_nanoseconds: u64,
+    external_idle_nanoseconds: u64,
 }
 impl<'plan, 'image> Scheduling<'plan, 'image> {
     pub(super) fn new(
@@ -70,10 +94,31 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             last_switch: 0,
             force_switch: false,
             idle_nanoseconds: 0,
+            external_idle_nanoseconds: 0,
         })
     }
     pub(super) fn is_main(&self) -> bool {
         self.active == 0
+    }
+    pub(super) fn active_blocked(&self) -> bool {
+        self.threads[self.active].waiting.is_some() || self.threads[self.active].returned
+    }
+
+    /// A committed flip must publish its retained notification before any
+    /// guest entry. This wait uses only the independently bounded host lane.
+    pub(super) fn wait_consumer_retry(
+        &mut self,
+        wake: super::frame_bridge::ExternalWake,
+    ) -> Result<(), NativeSessionError> {
+        let delay = wake.delay.min(std::time::Duration::from_millis(1));
+        charge(
+            &mut self.external_idle_nanoseconds,
+            delay.as_nanos() as u64,
+            wake.maximum_idle_nanoseconds,
+            "frame idle waits",
+        )?;
+        std::thread::sleep(delay);
+        Ok(())
     }
 
     pub(super) fn create(
@@ -133,6 +178,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         engine: &mut NativeBlockStepper<'_, '_, '_>,
         frames: &mut Vec<(SuspendedInitializer, NativeNestedCall, NativeSessionPhase)>,
         phase: &mut NativeSessionPhase,
+        external: Option<super::frame_bridge::ExternalWake>,
     ) -> Result<bool, NativeSessionError> {
         let blocks = engine.usage().blocks;
         if !self.force_switch
@@ -173,17 +219,25 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                             Some(earliest.map_or(delay, |old: std::time::Duration| old.min(delay)));
                     }
                 }
-                if let Some(delay) = earliest {
+                if let Some((sleep, external_maximum)) = idle_slice(earliest, external) {
                     // No live memory borrow or guest execution while all CPUs
                     // are parked. Accept full-width finite deadlines; only
                     // requested host-idle slices consume the sleep budget.
-                    let sleep = delay.min(std::time::Duration::from_millis(1));
-                    charge(
-                        &mut self.idle_nanoseconds,
-                        sleep.as_nanos() as u64,
-                        session.plan().limits().kernel.max_sleep_nanoseconds,
-                        "idle waits",
-                    )?;
+                    if let Some(maximum) = external_maximum {
+                        charge(
+                            &mut self.external_idle_nanoseconds,
+                            sleep.as_nanos() as u64,
+                            maximum,
+                            "frame idle waits",
+                        )?;
+                    } else {
+                        charge(
+                            &mut self.idle_nanoseconds,
+                            sleep.as_nanos() as u64,
+                            session.plan().limits().kernel.max_sleep_nanoseconds,
+                            "idle waits",
+                        )?;
+                    }
                     std::thread::sleep(sleep);
                     self.force_switch = true;
                     return Ok(false);

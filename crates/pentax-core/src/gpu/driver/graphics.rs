@@ -32,6 +32,15 @@ impl Driver {
         {
             return Err(Failure::Memory);
         }
+        let max_host_bytes = self.graphics_host_limit()?;
+        let command_host_bytes = if self.consumer.is_some() {
+            max_host_bytes
+                .checked_sub(self.video.retained_frame_bytes())
+                .ok_or(Failure::Limit)?
+        } else {
+            max_host_bytes
+        };
+        let presentation = self.presentation_limits()?;
         let count = ranges
             .iter()
             .filter(|range| range.address != 0 && range.size != 0)
@@ -87,7 +96,7 @@ impl Driver {
         let mut held = host_add(
             metadata,
             usize::try_from(total).map_err(|_| Failure::Limit)?,
-            self.limits.graphics.max_host_bytes,
+            command_host_bytes,
         )?;
         self.usage.preparation_work = add(
             self.usage.preparation_work,
@@ -119,7 +128,7 @@ impl Driver {
                     .checked_sub(count)
                     .and_then(|n| n.checked_mul(size))
                     .ok_or(Failure::Limit)?,
-                self.limits.graphics.max_host_bytes,
+                command_host_bytes,
             )?;
         }
         for range in ranges
@@ -134,7 +143,7 @@ impl Driver {
             held = host_add(
                 held,
                 bytes.capacity().checked_sub(size).ok_or(Failure::Limit)?,
-                self.limits.graphics.max_host_bytes,
+                command_host_bytes,
             )?;
             bytes.resize(size, 0);
             memory
@@ -149,13 +158,9 @@ impl Driver {
         for bytes in &snapshots {
             buffers.push(bytes);
         }
-        commands.max_host_bytes = commands.max_host_bytes.min(
-            self.limits
-                .graphics
-                .max_host_bytes
-                .checked_sub(held)
-                .ok_or(Failure::Limit)?,
-        );
+        commands.max_host_bytes = commands
+            .max_host_bytes
+            .min(command_host_bytes.checked_sub(held).ok_or(Failure::Limit)?);
         commands.max_work = commands.max_work.min(
             self.limits
                 .max_preparation_work
@@ -224,19 +229,17 @@ impl Driver {
             let tight = usize::try_from(u64::from(surface.width) * u64::from(surface.height) * 4)
                 .map_err(|_| Failure::Limit)?;
             let source = usize::try_from(surface.data.size).map_err(|_| Failure::Limit)?;
-            if source > self.limits.video_presentation.max_frame_bytes
-                || tight > self.limits.video_presentation.max_frame_bytes
-            {
+            if source > presentation.max_frame_bytes || tight > presentation.max_frame_bytes {
                 return Err(Failure::Limit);
             }
             let peak = frame_bytes
                 .checked_add(source)
                 .and_then(|n| n.checked_add(tight))
                 .ok_or(Failure::Limit)?;
-            if peak > self.limits.video_presentation.max_held_bytes {
+            if peak > presentation.max_held_bytes {
                 return Err(Failure::Limit);
             }
-            host_add(retained, peak, self.limits.graphics.max_host_bytes)?;
+            host_add(retained, peak, max_host_bytes)?;
             frame_bytes = frame_bytes.checked_add(tight).ok_or(Failure::Limit)?;
             capture_work = capture_work
                 .checked_add(surface.data.size)
@@ -244,7 +247,7 @@ impl Driver {
                 .ok_or(Failure::Limit)?;
         }
         self.video
-            .admit_gpu_capture_budget(capture_work, &self.limits.video_presentation)?;
+            .admit_gpu_capture_budget(capture_work, &presentation)?;
         self.usage.preparation_work = add(
             self.usage.preparation_work,
             capture_work,
@@ -259,14 +262,10 @@ impl Driver {
                     let Cursor::Draw(current) = cursor else {
                         return Err(Failure::UnsupportedVideo);
                     };
-                    let mut limits = self.limits.video_presentation;
-                    limits.max_held_bytes = limits.max_held_bytes.min(
-                        self.limits
-                            .graphics
-                            .max_host_bytes
-                            .checked_sub(retained)
-                            .ok_or(Failure::Limit)?,
-                    );
+                    let mut limits = presentation;
+                    limits.max_held_bytes = limits
+                        .max_held_bytes
+                        .min(max_host_bytes.checked_sub(retained).ok_or(Failure::Limit)?);
                     let kernel = kernel.as_deref_mut().ok_or(Failure::UnsupportedVideo)?;
                     let clock = clock.ok_or(Failure::UnsupportedVideo)?;
                     let (memory, result) =
@@ -288,12 +287,11 @@ impl Driver {
             limits.max_vertices = limits
                 .max_vertices
                 .min(self.limits.max_vertices.saturating_sub(self.usage.vertices));
-            limits.max_host_bytes = limits
-                .max_host_bytes
+            limits.max_host_bytes = max_host_bytes
                 .checked_sub(host_add(
                     retained,
                     self.video.retained_frame_bytes(),
-                    self.limits.graphics.max_host_bytes,
+                    max_host_bytes,
                 )?)
                 .ok_or(Failure::Limit)?;
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
