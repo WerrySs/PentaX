@@ -183,6 +183,15 @@ enum NativeYmmMode {
 impl NativeSessionProgress {
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
+        format!(
+            "{}{}",
+            self.progress_fields(),
+            self.profile.final_sample_fields()
+        )
+    }
+
+    // Preserve existing PROGRESS records and their total bounded output size.
+    fn progress_fields(&self) -> String {
         // Closed aggregate mode only, observed from the actual retained engine.
         // No requested policy, host identity or raw XCR0 value is reported.
         let native_ymm = match self.native_ymm_mode {
@@ -719,6 +728,11 @@ fn execute_epoch<'plan, 'image>(
     {
         return Err(NativeSessionError::WrongPreparedSource);
     }
+    if limits.report_progress {
+        progress
+            .profile
+            .begin_sample_epoch(source.source_plan().identity());
+    }
     let metadata_visits = count_metadata(source, limits, &mut state.admission_work)?;
     progress.admission_work = state.admission_work;
     let mut engine = {
@@ -861,7 +875,7 @@ fn execute_epoch<'plan, 'image>(
         {
             crate::protocol(&format!(
                 "PROGRESS\tmode=entry-probe\t{}",
-                progress.protocol_fields()
+                progress.progress_fields()
             ))
             .map_err(|_| NativeSessionError::OutputUnavailable)?;
             state.reported_blocks = progress.dispatch.blocks;
@@ -949,6 +963,18 @@ fn execute_epoch<'plan, 'image>(
             let plan = session.plan();
             let mut paused = session.pause()?;
             let previous_native = engine.usage().native_instructions;
+            // Optional telemetry owns an independent bounded work allowance.
+            // It preadmits every record/ring visit before guest dispatch and
+            // never changes guest limits or makes an observer refusal fatal.
+            let observation = if sampled {
+                progress.profile.prepare_block_sample(
+                    source.source_plan().identity(),
+                    block,
+                    limits.block.max_instructions,
+                )
+            } else {
+                None
+            };
             // SAFETY: The opaque core proof, exact owner and active published
             // source epoch were
             // checked above. This exclusive pause owns the actual backing and
@@ -959,6 +985,9 @@ fn execute_epoch<'plan, 'image>(
             StartupProfile::checkpoint(&mut stamp, &mut progress.profile.dispatch_ns);
             progress.dispatch = engine.usage();
             if result.is_ok() {
+                if let Some(observation) = observation {
+                    progress.profile.complete_block_sample(observation);
+                }
                 let count = if progress.dispatch.native_instructions > previous_native {
                     &mut progress.profile.native_body_blocks
                 } else {

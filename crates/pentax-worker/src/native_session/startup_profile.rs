@@ -6,6 +6,8 @@
 use super::{NativeSessionError, charge};
 use std::time::Instant;
 
+mod block_samples;
+
 #[derive(Debug, Default)]
 pub(super) struct StartupProfile {
     pub samples: u64,
@@ -16,6 +18,7 @@ pub(super) struct StartupProfile {
     pub native_body_blocks: u64,
     pub exit_only_blocks: u64,
     pub services: ServiceProfile,
+    blocks: block_samples::BlockSamples,
 }
 
 /// Exact counts for the first 64 public kernel labels, plus an explicit
@@ -104,6 +107,27 @@ impl ServiceProfile {
 }
 
 impl StartupProfile {
+    pub fn begin_sample_epoch(&mut self, epoch: pentax_linker::SourceIdentity) {
+        self.blocks.begin_epoch(epoch);
+    }
+
+    pub fn prepare_block_sample(
+        &mut self,
+        epoch: pentax_linker::SourceIdentity,
+        block: &pentax_codegen::MaterializedBlockPlan<'_, '_, '_>,
+        maximum_records: u64,
+    ) -> Option<block_samples::PendingSample> {
+        self.blocks.prepare(epoch, block, maximum_records)
+    }
+
+    pub fn complete_block_sample(&mut self, sample: block_samples::PendingSample) {
+        self.blocks.complete(sample);
+    }
+
+    pub fn final_sample_fields(&self) -> String {
+        self.blocks.protocol_fields()
+    }
+
     pub fn sampled(enabled: bool, blocks: u64) -> bool {
         enabled && blocks.is_multiple_of(4093)
     }

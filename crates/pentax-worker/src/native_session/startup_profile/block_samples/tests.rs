@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//! Original pure observations; no native entry, guest reads or clock sampling.
+use super::super::StartupProfile;
+use super::*;
+use pentax_codegen::{Decoder, DecoderOptions};
+use pentax_linker::{ModuleInput, SymbolicLimits, plan_symbolic};
+use pentax_loader::open_executable;
+
+fn identity() -> SourceIdentity {
+    let mut bytes = vec![0; 4096];
+    bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    for (at, value) in [(16, 3_u16), (18, 62), (52, 64), (54, 56), (56, 1)] {
+        bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
+    }
+    for (at, value) in [(20, 1_u32), (64, 1), (68, 5)] {
+        bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    for (at, value) in [
+        (24, 0x200_u64),
+        (32, 64),
+        (96, 4096),
+        (104, 0x4000),
+        (112, 0x4000),
+    ] {
+        bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes[0x200] = 0xc3;
+    let inputs = [ModuleInput::new(open_executable(&bytes).unwrap(), 0x100000)];
+    plan_symbolic(&inputs, &SymbolicLimits::default())
+        .unwrap()
+        .identity()
+}
+fn instruction(bytes: &[u8]) -> Instruction {
+    let decoded = Decoder::with_ip(64, bytes, 0, DecoderOptions::NONE).decode();
+    assert!(!decoded.is_invalid());
+    decoded
+}
+fn sample(observer: &mut BlockSamples, epoch: SourceIdentity, module: usize, pc: u64) {
+    let instructions = [instruction(&[0xc5, 0xd8, 0x59, 0xdd])];
+    let pending = observer
+        .prepare_records(
+            Key { epoch, module, pc },
+            Some(instructions[0].code()),
+            instructions.iter(),
+            256,
+        )
+        .unwrap();
+    observer.complete(pending);
+}
+
+#[test]
+fn recent_exact_keys_distinguish_repetition_breadth_eviction_and_source_epochs_without_exports() {
+    let epoch = identity();
+    let next = identity();
+    assert_ne!(epoch, next);
+    let mut observer = BlockSamples::default();
+    observer.begin_epoch(epoch);
+    for _ in 0..64 {
+        sample(&mut observer, epoch, 0, 0xfedc_ba98_7654_3210);
+    }
+    assert_eq!(
+        (
+            observer.completed,
+            observer.recent,
+            observer.distinct,
+            observer.max_repeat
+        ),
+        (64, 64, 1, 64)
+    );
+    // Same numeric PC in another module is a different exact block.
+    sample(&mut observer, epoch, 1, 0xfedc_ba98_7654_3210);
+    assert_eq!((observer.distinct, observer.max_repeat), (2, 63));
+    for index in 0..64 {
+        sample(&mut observer, epoch, 0, 0x1000 + index);
+    }
+    assert_eq!(
+        (observer.recent, observer.distinct, observer.max_repeat),
+        (64, 64, 1)
+    );
+    for index in 0..64 {
+        sample(&mut observer, epoch, 0, 0x8000 + index % 2);
+    }
+    assert_eq!(
+        (observer.recent, observer.distinct, observer.max_repeat),
+        (64, 2, 32)
+    );
+    let completed = observer.completed;
+    observer.begin_epoch(next);
+    assert_eq!(
+        (
+            observer.completed,
+            observer.recent,
+            observer.distinct,
+            observer.epoch_changes
+        ),
+        (completed, 0, 0, 1)
+    );
+    sample(&mut observer, next, 0, 0x8000);
+    assert_eq!(
+        (observer.recent, observer.distinct, observer.max_repeat),
+        (1, 1, 1)
+    );
+    let debug = format!("{observer:?}");
+    let fields = observer.protocol_fields();
+    for forbidden in [
+        "SourceIdentity",
+        "fedc",
+        "18364758544493064720",
+        "module",
+        "pc=",
+        "0x8000",
+    ] {
+        assert!(!debug.contains(forbidden), "{debug}");
+        assert!(!fields.contains(forbidden), "{fields}");
+    }
+    assert!(StartupProfile::sampled(true, 4093));
+    assert!(!StartupProfile::sampled(true, 4096));
+    assert!(!StartupProfile::sampled(false, 4093));
+}
+
+#[test]
+fn all_twelve_fp_forms_count_planned_register_and_memory_occurrences_only_after_completion() {
+    let epoch = identity();
+    let mut observer = BlockSamples::default();
+    observer.begin_epoch(epoch);
+    let mut instructions = Vec::new();
+    for opcode in [0x58, 0x5c, 0x59] {
+        for double in [false, true] {
+            for wide in [false, true] {
+                for memory in [false, true] {
+                    instructions.push(instruction(&[
+                        0xc5,
+                        0xd8 | u8::from(double) | if wide { 4 } else { 0 },
+                        opcode,
+                        if memory { 0x18 } else { 0xdd },
+                    ]));
+                }
+            }
+        }
+    }
+    // Legacy ADDPS, scalar VADDSS, EVEX VADDPS and FMA are not candidate aliases.
+    for bytes in [
+        &[0x0f, 0x58, 0xdd][..],
+        &[0xc5, 0xda, 0x58, 0xdd][..],
+        &[0x62, 0xf1, 0x5c, 0x08, 0x58, 0xdd][..],
+        &[0xc4, 0xe2, 0x59, 0x98, 0xdd][..],
+    ] {
+        let decoded = instruction(bytes);
+        assert!(candidate(&decoded).is_none());
+        instructions.push(decoded);
+    }
+    let key = Key {
+        epoch,
+        module: 0,
+        pc: 0x1234,
+    };
+    let pending = observer
+        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256)
+        .unwrap();
+    assert_eq!((observer.completed, observer.records), (0, 0));
+    assert_eq!(observer.counts, [[0; 2]; 12]);
+    // A failed dispatch would discard this receipt instead of calling complete.
+    let _ = pending;
+    let pending = observer
+        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256)
+        .unwrap();
+    observer.complete(pending);
+    assert_eq!((observer.completed, observer.records), (1, 28));
+    assert_eq!(observer.counts, [[1; 2]; 12]);
+    let mut malformed = instructions[0];
+    malformed.set_op0_register(Register::YMM3);
+    assert!(candidate(&malformed).is_none());
+    let mut prefixed = instructions[0];
+    prefixed.set_segment_prefix(Register::FS);
+    assert!(candidate(&prefixed).is_none());
+}
+
+#[test]
+fn optional_work_record_and_counter_limits_disable_without_publication_and_final_fields_are_bounded()
+ {
+    let epoch = identity();
+    let instructions = [instruction(&[0xc5, 0xd8, 0x59, 0xdd])];
+    let key = Key {
+        epoch,
+        module: 0,
+        pc: 0x1234,
+    };
+    for case in 0..4 {
+        let mut observer = BlockSamples::default();
+        observer.begin_epoch(epoch);
+        match case {
+            0 => observer.maximum_work = observer.work + FIXED_WORK + RECORD_WORK - 1,
+            1 => {}
+            2 => observer.completed = u64::MAX,
+            3 => observer.counts[8][0] = u64::MAX,
+            _ => unreachable!(),
+        }
+        let completed = observer.completed;
+        let counts = observer.counts;
+        assert!(
+            observer
+                .prepare_records(
+                    key,
+                    Some(FORMS[8]),
+                    instructions.iter(),
+                    if case == 1 { 0 } else { 256 }
+                )
+                .is_none()
+        );
+        assert!(observer.disabled);
+        assert_eq!(observer.overflow, case >= 2);
+        assert_eq!((observer.completed, observer.recent), (completed, 0));
+        assert_eq!(observer.counts, counts);
+        assert!(
+            observer
+                .prepare_records(key, None, instructions.iter(), 256)
+                .is_none()
+        );
+    }
+    let longest = Code::values()
+        .max_by_key(|code| format!("{code:?}").len())
+        .unwrap();
+    let mut observer = BlockSamples::default();
+    observer.planned = Some(longest);
+    observer.counts = [[u64::MAX; 2]; 12];
+    observer.completed = u64::MAX;
+    observer.records = u64::MAX;
+    observer.work = u64::MAX;
+    observer.maximum_work = u64::MAX;
+    observer.epoch_changes = u64::MAX;
+    observer.recent = 64;
+    observer.distinct = 64;
+    observer.max_repeat = 64;
+    observer.disabled = true;
+    observer.overflow = true;
+    let fields = observer.protocol_fields();
+    assert!(fields.len() <= 2048, "{}", fields.len());
+    assert_eq!(fields.matches("sample_fp_forms=").count(), 1);
+    assert!(!fields.contains('\n'));
+    // New observer fields are final-only; old progress text remains unchanged.
+    let progress = crate::native_session::NativeSessionProgress::default();
+    assert!(!progress.progress_fields().contains("sample_completed="));
+    assert!(progress.protocol_fields().contains("sample_completed=0"));
+}

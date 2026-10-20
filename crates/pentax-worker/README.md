@@ -153,6 +153,33 @@ time covers all observed calls. Times are nanoseconds, not guest time or FPS,
 and sampled stage totals must not be read as whole-run durations. Successful
 steps also count blocks with native bodies separately from exit-only blocks.
 No guest address, service identifier or source bytes enter these observations.
+The final `RESULT` alone adds an optional, allocation-free observer at the same
+4093-block cadence; existing `PROGRESS` records do not grow. `sample_completed`
+counts successful sampled dispatches, separately from attempted `profile_samples`,
+and `sample_records` counts their planned instruction records. A fixed
+`sample_capacity=64` rolling window reports `sample_recent`, exact
+`sample_distinct` private block locations and `sample_max_repeat`; the associated
+`sample_planned_exit` is a public Code label, not a faulting body instruction.
+Keys use the exact immutable linker `SourceIdentity`, module and PC and are
+discarded on source-plan changes. This identity is not a live-permission or
+hardware execution epoch. No keys, hashes, addresses or thread identities are
+serialized or exposed by Debug. The window observes locations, not semantic
+progress: repeated samples cannot establish an infinite loop or deadlock.
+`sample_fp_forms` gives all twelve exact VEX ADD/SUB/MUL PS/PD128/256 public
+Codes as `Code:register_occurrences:memory_occurrences`, across successfully
+sampled plans. Register occurrences require three same-width vector registers
+0..15; memory occurrences have the matching complete operand2 width. These
+sampled planned counts are not whole-run frequencies or native admission.
+`sample_epoch_changes` counts linker-source transitions after the initial bind.
+The independent `sample_observer_work_limit` is 64 Mi units; fixed ring work
+and actual plan-record visits are admitted before dispatch. The observer has
+no per-sample allocation. Quota exhaustion disables it with
+`sample_observer_disabled=1`; checked counter exhaustion also sets
+`sample_observer_overflow=1`. Previously completed counts remain available.
+Guest limits, dispatch permissions, existing attempt/work counters and clocks
+are unchanged. Original pure fixtures cover eviction, source identity, all
+twelve forms, failed-sample publication, optional limits, Debug redaction and
+a conservative 2 KiB bound for the new final fields with maximum counters.
 `service_top` lists the four most frequent public kernel catalogue labels among
 the first 64 distinct admitted labels; their counts are exact. `service_overflow`
 counts successful actions for additional labels and `service_other` counts other
