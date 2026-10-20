@@ -13,25 +13,43 @@ fn vector_mode_requires_cpu_os_and_xcr0_and_marshals_every_guest_half() {
                 for avx2 in [false, true] {
                     let xgets = Cell::new(0);
                     let leaf7 = Cell::new(0);
-                    let mode = VectorMode::detect_with(|leaf, subleaf| {
-                        assert_eq!(subleaf, 0);
-                        match leaf {
-                            0 => [maximum, 0, 0, 0],
-                            1 => { assert!(maximum >= 1); [0, 0, REQUIRED & !missing, 0] },
-                            7 => { leaf7.set(leaf7.get() + 1); [0, if avx2 { 1 << 5 } else { 0 }, 0, 0] },
-                            _ => panic!("unexpected fixed CPU capability leaf"),
-                        }
-                    }, || { xgets.set(xgets.get() + 1); xcr0 });
+                    let mode = VectorMode::detect_with(
+                        |leaf, subleaf| {
+                            assert_eq!(subleaf, 0);
+                            match leaf {
+                                0 => [maximum, 0, 0, 0],
+                                1 => {
+                                    assert!(maximum >= 1);
+                                    [0, 0, REQUIRED & !missing, 0]
+                                }
+                                7 => {
+                                    leaf7.set(leaf7.get() + 1);
+                                    [0, if avx2 { 1 << 5 } else { 0 }, 0, 0]
+                                }
+                                _ => panic!("unexpected fixed CPU capability leaf"),
+                            }
+                        },
+                        || {
+                            xgets.set(xgets.get() + 1);
+                            xcr0
+                        },
+                    );
                     let cpu = maximum >= 1 && missing == 0;
                     let admitted = cpu && xcr0 & 6 == 6;
                     assert_eq!(xgets.get(), u32::from(cpu));
                     assert_eq!(leaf7.get(), u32::from(admitted && maximum >= 7));
                     assert_eq!(mode.supports(CpuidFeature::AVX), admitted);
-                    assert_eq!(mode.supports(CpuidFeature::AVX2), admitted && maximum >= 7 && avx2);
+                    assert_eq!(
+                        mode.supports(CpuidFeature::AVX2),
+                        admitted && maximum >= 7 && avx2
+                    );
                     assert_eq!(mode.features().is_some(), admitted);
                     if admitted {
                         assert_ne!(mode.trailer(), VectorMode::Sse2.trailer());
-                        assert_ne!(mode.entry() as *const (), VectorMode::Sse2.entry() as *const ());
+                        assert_ne!(
+                            mode.entry() as *const (),
+                            VectorMode::Sse2.entry() as *const ()
+                        );
                     }
                 }
             }
@@ -49,8 +67,14 @@ fn vector_mode_requires_cpu_os_and_xcr0_and_marshals_every_guest_half() {
         assert_eq!(observed_upper, upper);
         if mode.features().is_some() {
             for register in 0..16 {
-                assert_eq!(&context.ymm[register * 32..register * 32 + 16], &low[register * 16..register * 16 + 16]);
-                assert_eq!(&context.ymm[register * 32 + 16..register * 32 + 32], &upper[register * 16..register * 16 + 16]);
+                assert_eq!(
+                    &context.ymm[register * 32..register * 32 + 16],
+                    &low[register * 16..register * 16 + 16]
+                );
+                assert_eq!(
+                    &context.ymm[register * 32 + 16..register * 32 + 32],
+                    &upper[register * 16..register * 16 + 16]
+                );
             }
         }
     }
