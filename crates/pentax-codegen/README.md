@@ -6,6 +6,13 @@ host pointers, install exception handlers or authorize execution. The crate's
 own Rust code forbids `unsafe`. Its decoder/encoder is the pinned, pure-Rust
 `iced-x86` 1.21.0 dependency, rather than a second byte parser.
 
+The legacy PCMPGTQ and VEX.128/256 VPCMPGTQ forms retain their exact operands,
+complete source widths and original RIP targets in mediated exits. Declaring
+SSE4.2, AVX or AVX2 does not emit these instructions into the native cache.
+The existing legacy byte/word/dword comparison admission remains unchanged;
+EVEX mask-destination comparisons require separate semantics and stay outside
+the runtime's three-form qword comparison profile.
+
 ## Source and ownership
 
 `plan_block(&SymbolicLinkPlan, module_index, guest_pc, CachePlacement,

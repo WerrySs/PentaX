@@ -1,5 +1,17 @@
 # Native block dispatch
 
+PCMPGTQ and VEX.128/256 VPCMPGTQ compare corresponding signed 64-bit elements
+into complete zero/all-one qword masks. Sources are captured before destination
+aliases change. Legacy preserves upper YMM; VEX.128 zeros it and VEX.256 replaces
+all four lanes. Memory reads cover the complete 16/32-byte source; legacy m128
+requires 16-byte alignment, while VEX permits unaligned memory. RFLAGS, MXCSR
+and unrelated state remain unchanged. Exact-code, prefix, next-PC, work and
+counter checks precede staged CPU publication; failures never expose a partial
+destination. W is ignored, L selects the VEX width and vvvv supplies SRC1.
+EVEX mask forms are excluded and no host AVX instruction is needed. Contracts
+follow the [Intel PCMPGTQ entry, Volume 2B pages 4-267–269](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)
+and [Type 4 exception table](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf).
+
 Stack admission combines CPU read/write and nonexecute requirements into one
 live complete-span page walk. A failed combined check repeats the original
 read, write and nonexecute checks to preserve their error and address precedence.

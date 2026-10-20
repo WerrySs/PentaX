@@ -94,6 +94,9 @@ jobs:
       - name: Test software CPU identification and atomic refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::cpu_identification_tests:: -- --test-threads=1
+      - name: Test signed packed-qword comparison state and refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::qword_comparisons:: -- --test-threads=1
       - name: Test the native CPU and kernel counter boundary
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -104,3 +107,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::cpu_identification:: -- --test-threads=1
+      - name: Test native signed packed-qword comparisons
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::qword_comparisons:: -- --test-threads=1

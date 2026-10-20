@@ -26,6 +26,8 @@ mod extract_vectors;
 mod float_arithmetic;
 #[path = "tests/float_comparisons.rs"]
 mod float_comparisons;
+#[path = "tests/qword_comparisons.rs"]
+mod qword_comparisons;
 
 #[path = "tests/cpu_identification.rs"]
 mod cpu_identification_tests;

@@ -360,6 +360,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || shuffle_layout(instruction.code()).is_some()
         || broadcast_widths(instruction.code()).is_some()
         || binary_width(instruction.code()).is_some()
+        || qword_comparison(instruction.code()).is_some()
         || vector_shifts::form(instruction.code()).is_some()
         || mxcsr_control::store(instruction.code()).is_some()
         || x87_control::supported(instruction.code())
@@ -487,6 +488,16 @@ fn equality_width(mnemonic: Mnemonic) -> Option<usize> {
         Mnemonic::Vpcmpeqw => Some(2),
         Mnemonic::Vpcmpeqd => Some(4),
         Mnemonic::Vpcmpeqq => Some(8),
+        _ => None,
+    }
+}
+
+// Exact non-EVEX signed-qword comparisons: vector bytes and destructive legacy form.
+fn qword_comparison(code: Code) -> Option<(usize, bool)> {
+    match code {
+        Code::Pcmpgtq_xmm_xmmm128 => Some((16, true)),
+        Code::VEX_Vpcmpgtq_xmm_xmm_xmmm128 => Some((16, false)),
+        Code::VEX_Vpcmpgtq_ymm_ymm_ymmm256 => Some((32, false)),
         _ => None,
     }
 }
@@ -706,6 +717,48 @@ impl NativeBlockStepper<'_, '_, '_> {
             next.xmm[destination..destination + 16].copy_from_slice(&output);
             if !legacy {
                 next.ymm_upper[destination..destination + 16].fill(0);
+            }
+        } else if let Some((size, legacy)) = qword_comparison(instruction.code()) {
+            let right_operand = if legacy { 1 } else { 2 };
+            if instruction.op_count() != right_operand + 1 {
+                return Err(NativeDispatchError::UnsupportedVectorInstruction);
+            }
+            let destination = register_slot(instruction, 0, size)?;
+            // Legacy DEST is also SRC1. Both sources are fully captured before
+            // any aliased destination is changed, including identical operands.
+            let left = vector_register(instruction, if legacy { 0 } else { 1 }, size, &next)?;
+            let right = if instruction.op_kind(right_operand) == OpKind::Memory {
+                if instruction.memory_size().size() != size {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                let source_address = address(instruction, right_operand, &next)?;
+                // Intel Type4: legacy requires aligned m128; VEX may be unaligned.
+                if legacy && source_address & 15 != 0 {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                transferred = size as u64;
+                self.machine
+                    .usage
+                    .vector_bytes
+                    .checked_add(transferred)
+                    .ok_or(NativeDispatchError::Budget("vector bytes"))?;
+                let mut bytes = [0; 32];
+                memory.read(source_address, &mut bytes[..size])?;
+                bytes
+            } else {
+                vector_register(instruction, right_operand, size, &next)?
+            };
+            let mut output = [0; 32];
+            for start in (0..size).step_by(8) {
+                let a = i64::from_le_bytes(left[start..start + 8].try_into().unwrap());
+                let b = i64::from_le_bytes(right[start..start + 8].try_into().unwrap());
+                output[start..start + 8].fill(if a > b { 0xff } else { 0 });
+            }
+            next.xmm[destination..destination + 16].copy_from_slice(&output[..16]);
+            if !legacy {
+                // Initialized output zeros upper YMM for VEX.128; VEX.256
+                // replaces all four signed-qword lanes independently.
+                next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
             }
         } else if let Some(form) = mask_comparisons::form(instruction.code()) {
             if instruction.op_count() != 4 || instruction.op3_kind() != OpKind::Immediate8 {

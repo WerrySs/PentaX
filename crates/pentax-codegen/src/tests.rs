@@ -11,6 +11,7 @@ mod materialized;
 mod memory;
 mod minimum_position;
 mod packed_convert;
+mod qword_comparisons;
 mod source_window;
 mod timestamp_counter;
 mod vector_masks;

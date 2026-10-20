@@ -49,6 +49,8 @@ mod mask_comparisons;
 mod minimum_position;
 #[path = "packed_convert.rs"]
 mod packed_convert;
+#[path = "qword_comparisons.rs"]
+mod qword_comparisons;
 
 #[path = "directory_abi.rs"]
 mod directory_abi;
