@@ -74,6 +74,8 @@ use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 #[path = "dispatch/context_probe.rs"]
 mod context_probe;
+#[path = "dispatch/ymm_bridge.rs"]
+mod ymm_bridge;
 
 /// Explicit unsafe one-block execution over retained prepared memory.
 #[path = "dispatch/prepared.rs"]
@@ -118,6 +120,9 @@ struct GuestContext {
     _pad: u32,
     /// XMM0..XMM15, preserved and restored each round trip.
     xmm: [u8; 16 * 16],
+    /// Full YMM0..15 used only by the independently admitted AVX bridge. The
+    /// legacy context offsets above stay fixed for the SSE2-only entry point.
+    ymm: [u8; 32 * 16],
 }
 
 const CTX_RIP: usize = 128;
@@ -127,6 +132,7 @@ const CTX_GUEST_LIMIT: usize = 152;
 const CTX_HOST_RSP: usize = 160;
 const CTX_MXCSR: usize = 168;
 const CTX_XMM0: usize = 176;
+const CTX_YMM0: usize = 432;
 
 const _: () = assert!(std::mem::offset_of!(GuestContext, gpr) == 0);
 const _: () = assert!(std::mem::offset_of!(GuestContext, rip) == CTX_RIP);
@@ -136,6 +142,8 @@ const _: () = assert!(std::mem::offset_of!(GuestContext, guest_limit) == CTX_GUE
 const _: () = assert!(std::mem::offset_of!(GuestContext, host_rsp) == CTX_HOST_RSP);
 const _: () = assert!(std::mem::offset_of!(GuestContext, mxcsr) == CTX_MXCSR);
 const _: () = assert!(std::mem::offset_of!(GuestContext, xmm) == CTX_XMM0);
+const _: () = assert!(std::mem::offset_of!(GuestContext, ymm) == CTX_YMM0);
+const _: () = assert!(std::mem::size_of::<GuestContext>() == 944);
 
 impl GuestContext {
     /// Every field is initialized under this documented original-fixture policy;
@@ -154,6 +162,7 @@ impl GuestContext {
             mxcsr: 0x1f80,
             _pad: 0,
             xmm: [0; 16 * 16],
+            ymm: [0; 32 * 16],
         }
     }
 }
@@ -890,6 +899,23 @@ fn publish_block(
     plan: &BlockPlan<'_, '_>,
     guest_pc: u64,
 ) -> Result<(), PlatformError> {
+    publish_block_with_mode(cache, space, plan, guest_pc, ymm_bridge::VectorMode::Sse2)
+}
+
+fn publish_block_with_mode(
+    cache: &mut CodeCache,
+    space: &mut NativeAddressSpace,
+    plan: &BlockPlan<'_, '_>,
+    guest_pc: u64,
+    mode: ymm_bridge::VectorMode,
+) -> Result<(), PlatformError> {
+    // The closed diagnostic wrapper above always selects the SSE2 mode.
+    // A declared vector request cannot override that immutable entry/tail pair.
+    if plan.policy().requests_native_ymm_registers() && mode.features().is_none() {
+        return Err(PlatformError::UnsupportedHostFeature {
+            feature: "native YMM context",
+        });
+    }
     // 1. Host CPUID/OS support must satisfy the declared emission policy for
     //    every instruction actually emitted into the cache.
     for record in plan.instructions() {
@@ -897,7 +923,7 @@ fn publish_block(
             continue;
         }
         for feature in record.instruction().cpuid_features() {
-            if !host_supports(*feature) {
+            if !mode.supports(*feature) {
                 return Err(PlatformError::UnsupportedHostFeature {
                     feature: feature_name(*feature),
                 });
@@ -948,7 +974,7 @@ fn publish_block(
     if ud2_off + 6 > cell_off {
         return Err(PlatformError::OutOfBounds);
     }
-    let trailer = pentax_block_trailer as *const () as u64;
+    let trailer = mode.trailer();
     let jmp_end = cache.address() + (ud2_off + 6) as u64;
     let cell_abs = cache.address() + cell_off as u64;
     let rel =

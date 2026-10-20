@@ -4,6 +4,22 @@
 
 use super::*;
 
+/// Only the engine's observed closed mode selects these exact counts. Memory
+/// forms stay mediated; callers account for their known register promotions.
+fn assert_modeled_vector_operations(fields: &HashMap<String, String>, expected: [&str; 3]) {
+    let mode = fields["native_ymm_mode"].as_str();
+    let index = match mode {
+        "sse2" => 0,
+        "avx" => 1,
+        "avx2" => 2,
+        other => panic!("unexpected closed native vector mode: {other}"),
+    };
+    assert_eq!(
+        fields["vector_ops"], expected[index],
+        "native_ymm_mode={mode}"
+    );
+}
+
 #[path = "font_parser.rs"]
 mod font_parser;
 #[path = "ime_callbacks.rs"]
@@ -49,6 +65,8 @@ mod mask_comparisons;
 mod minimum_position;
 #[path = "multiply_add_words.rs"]
 mod multiply_add_words;
+#[path = "native_ymm.rs"]
+mod native_ymm;
 #[path = "packed_convert.rs"]
 mod packed_convert;
 #[path = "qword_comparisons.rs"]

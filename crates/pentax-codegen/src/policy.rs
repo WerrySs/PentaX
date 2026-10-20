@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-use crate::{CpuidFeature, Mnemonic, Register, UnsupportedReason};
+use crate::{Code, CpuidFeature, Mnemonic, Register, UnsupportedReason};
 use iced_x86::{EncodingKind, Instruction, OpKind};
 
 /// Declared feature policy, not hardware detection or an execution capability.
@@ -53,6 +53,7 @@ pub struct TranslationPolicy {
     isolate_memory: bool,
     independent_memory: bool,
     split_partial_windows: bool,
+    native_ymm_registers: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -61,10 +62,21 @@ impl TranslationPolicy {
             isolate_memory: false,
             independent_memory: false,
             split_partial_windows: false,
+            native_ymm_registers: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
         self.features
+    }
+    /// Request the closed register-only VEX integer profile. This is not host
+    /// detection or execution authority: the runtime must independently bind
+    /// it to an admitted full-YMM entry/trailer mode and actual CPU/OS features.
+    pub const fn with_native_ymm_registers(mut self) -> Self {
+        self.native_ymm_registers = true;
+        self
+    }
+    pub const fn requests_native_ymm_registers(self) -> bool {
+        self.native_ymm_registers
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -185,16 +197,27 @@ pub(crate) fn ordinary(
     // BMI's VEX encoding addresses GPRs only. It does not authorize AVX or
     // extended vector state; declared features and actual host checks still apply.
     let vex_gpr = opcode.encoding() == EncodingKind::VEX && bmi(instruction.mnemonic());
-    if opcode.encoding() != EncodingKind::Legacy && !vex_gpr {
+    let vex_vector = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && native_ymm_registers(instruction);
+    if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
-    if !integer(instruction.mnemonic()) && !sse(instruction.mnemonic()) {
+    if !vex_vector && !integer(instruction.mnemonic()) && !sse(instruction.mnemonic()) {
         return Err(UnsupportedReason::InstructionClass);
+    }
+    if vex_vector && !policy.features.contains(CpuidFeature::AVX) {
+        return Err(UnsupportedReason::MissingFeature(CpuidFeature::AVX));
     }
     for feature in instruction.cpuid_features() {
         if !policy.features.contains(*feature) {
             return Err(UnsupportedReason::MissingFeature(*feature));
         }
+    }
+    if vex_vector {
+        // The exact-code gate already proved every operand is a same-width
+        // vector register0..15. No memory/immediate/implicit authority follows.
+        return Ok(());
     }
     // Multi-byte NOP's apparent memory operand is only an encoding field:
     // it computes no address and performs no access, including FS/GS overrides.
@@ -243,6 +266,55 @@ pub(crate) fn ordinary(
         }
     }
     Ok(())
+}
+
+/// Twenty-six exact decoded forms, all nonfloating and register-only. W/L,
+/// mandatory prefixes and reserved fields remain the pinned decoder's contract.
+/// Memory encodings sharing a Code are explicitly excluded below.
+fn native_ymm_registers(instruction: &Instruction) -> bool {
+    use Code::*;
+    let (width, operands) = match instruction.code() {
+        VEX_Vmovdqa_xmm_xmmm128
+        | VEX_Vmovdqa_xmmm128_xmm
+        | VEX_Vmovdqu_xmm_xmmm128
+        | VEX_Vmovdqu_xmmm128_xmm => (16, 2),
+        VEX_Vmovdqa_ymm_ymmm256
+        | VEX_Vmovdqa_ymmm256_ymm
+        | VEX_Vmovdqu_ymm_ymmm256
+        | VEX_Vmovdqu_ymmm256_ymm => (32, 2),
+        VEX_Vpand_xmm_xmm_xmmm128
+        | VEX_Vpandn_xmm_xmm_xmmm128
+        | VEX_Vpor_xmm_xmm_xmmm128
+        | VEX_Vpxor_xmm_xmm_xmmm128
+        | VEX_Vpcmpgtq_xmm_xmm_xmmm128
+        | VEX_Vpacksswb_xmm_xmm_xmmm128
+        | VEX_Vpackssdw_xmm_xmm_xmmm128
+        | VEX_Vpackuswb_xmm_xmm_xmmm128
+        | VEX_Vpackusdw_xmm_xmm_xmmm128 => (16, 3),
+        VEX_Vpand_ymm_ymm_ymmm256
+        | VEX_Vpandn_ymm_ymm_ymmm256
+        | VEX_Vpor_ymm_ymm_ymmm256
+        | VEX_Vpxor_ymm_ymm_ymmm256
+        | VEX_Vpcmpgtq_ymm_ymm_ymmm256
+        | VEX_Vpacksswb_ymm_ymm_ymmm256
+        | VEX_Vpackssdw_ymm_ymm_ymmm256
+        | VEX_Vpackuswb_ymm_ymm_ymmm256
+        | VEX_Vpackusdw_ymm_ymm_ymmm256 => (32, 3),
+        _ => return false,
+    };
+    instruction.op_count() == operands
+        && (0..operands).all(|operand| {
+            if instruction.op_kind(operand) != OpKind::Register {
+                return false;
+            }
+            let register = instruction.op_register(operand);
+            register.size() == width
+                && if width == 16 {
+                    register.is_xmm() && register <= Register::XMM15
+                } else {
+                    register.is_ymm() && register <= Register::YMM15
+                }
+        })
 }
 
 // Positive semantic families, covering all decoder-defined encodings of these

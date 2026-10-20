@@ -176,7 +176,9 @@ fn native_qword_comparisons_consume_signed_endpoints_aliases_and_all_upper_rules
     // Six comparisons, twelve32-byte operand loads and twelve32-byte result/
     // source stores, plus one unrelated vector load/store and MXCSR each way.
     // Memory comparison operands add exactly16+16+32 bytes.
-    assert_eq!(fields["vector_ops"], "34", "{text}");
+    // One register-only VEX128 comparison becomes native in AVX mode; its
+    // VEX256 counterpart additionally requires AVX2. Memory remains mediated.
+    assert_modeled_vector_operations(&fields, ["34", "33", "32"]);
     assert_eq!(fields["vector_bytes"], "904", "{text}");
     assert_eq!(fields["integer_ops"], "0", "{text}");
     assert_eq!(fields["fp_status"], "4", "{text}");

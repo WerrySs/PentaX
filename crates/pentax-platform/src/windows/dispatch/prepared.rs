@@ -8,10 +8,10 @@
 //! validates independent memory operands from the current observed context.
 //! No raw code pointer is exposed, and neither path provides a security sandbox.
 
+use super::ymm_bridge::VectorMode;
 use super::{
     CONTEXT, CodeCache, DEFAULT_CACHE_SEARCH_GRANULES, DispatchGuard, GuestContext, RAX, RCX, RDI,
-    RDX, RSI, RSP, TAIL_CELL, condition_holds, gpr_slot, host_supports, memory_effective_address,
-    pentax_block_enter, pentax_block_trailer,
+    RDX, RSI, RSP, TAIL_CELL, condition_holds, gpr_slot, memory_effective_address,
 };
 use crate::PlatformError;
 use crate::native_memory::{
@@ -68,7 +68,8 @@ pub struct NativeCpuState {
     pub mxcsr: u32,
     pub x87: NativeX87State,
     pub xmm: [u8; 256],
-    /// Bits 255:128 of YMM0..15. Managed as guest data; never loaded into host AVX state.
+    /// Bits 255:128 of YMM0..15. Transferred only through the host-admitted
+    /// full-YMM bridge; otherwise retained as software guest state.
     pub ymm_upper: [u8; 256],
     /// Modeled guest segment bases only; host FS/GS registers are never set.
     pub fs_base: Option<u64>,
@@ -455,6 +456,7 @@ pub struct NativeBlockMachine {
     state: NativeCpuState,
     stack: NativeStackFrame,
     cache: CodeCache,
+    vector_mode: VectorMode,
     published_lengths: Vec<Option<usize>>,
     limits: NativeDispatchLimits,
     usage: NativeDispatchUsage,
@@ -737,6 +739,13 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             }
         }
         let cache = cache.ok_or(NativeDispatchError::Budget("near cache search"))?;
+        charge(
+            &mut usage.work_units,
+            128,
+            limits.max_work_units,
+            "vector context admission",
+        )?;
+        let vector_mode = VectorMode::detect();
         let executor = NEXT_EXECUTOR
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
@@ -750,6 +759,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 state,
                 stack,
                 cache,
+                vector_mode,
                 published_lengths,
                 limits: *limits,
                 usage,
@@ -772,6 +782,13 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
     }
     pub fn placement(&self) -> CachePlacement {
         self.slot_placement(0)
+    }
+
+    /// Native vector feature requirements admitted for this exact immutable
+    /// bridge mode. These policy data grant no source or execution authority.
+    /// None retains the SSE2 bridge and software vector fallback.
+    pub fn native_ymm_features(&self) -> Option<pentax_codegen::CpuFeatures> {
+        self.machine.vector_mode.features()
     }
 
     /// Deterministic finite slot selection. This placement grants no execution
@@ -1440,6 +1457,16 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         {
             return Err(NativeDispatchError::EmissionMismatch);
         }
+        if block.bytes().len() > 2 && self.machine.vector_mode.features().is_some() {
+            // Admit both full 512-byte context transfers before publication or
+            // native entry. Saving after execution cannot consume a new quota.
+            charge(
+                &mut self.machine.usage.work_units,
+                1024,
+                self.machine.limits.max_work_units,
+                "vector context transfer",
+            )?;
+        }
         if self.publish(memory, block)? {
             let entries = self
                 .machine
@@ -1452,7 +1479,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             context.gpr = self.machine.state.gpr;
             context.rflags = self.machine.state.rflags;
             context.mxcsr = self.machine.state.mxcsr;
-            context.xmm = self.machine.state.xmm;
+            self.machine.vector_mode.load(
+                &mut context,
+                &self.machine.state.xmm,
+                &self.machine.state.ymm_upper,
+            );
             context.guest_base = end(self.machine.stack.stack)?;
             context.guest_limit = self.machine.stack.stack.address;
             context.rip = block.placement().address;
@@ -1465,14 +1496,18 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             // owns CONTEXT; no Rust reference crosses assembly.
             unsafe {
                 *CONTEXT.0.get() = context;
-                pentax_block_enter();
+                self.machine.vector_mode.enter();
                 context = *CONTEXT.0.get();
             }
             self.machine.usage.native_entries = entries;
             self.machine.state.gpr = context.gpr;
             self.machine.state.rflags = context.rflags;
             self.machine.state.mxcsr = context.mxcsr;
-            self.machine.state.xmm = context.xmm;
+            self.machine.vector_mode.save(
+                &context,
+                &mut self.machine.state.xmm,
+                &mut self.machine.state.ymm_upper,
+            );
         } else {
             // An attested UD2-only plan has no native body. Resolve its exit
             // from the same admitted CPU/memory state without entering hardware.
@@ -1622,6 +1657,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         memory: &PausedNativeMemory<'_>,
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<bool, NativeDispatchError> {
+        if block.policy().requests_native_ymm_registers()
+            && self.machine.vector_mode.features().is_none()
+        {
+            return Err(NativeDispatchError::InvalidState);
+        }
         let stride = self.machine.cache.len / self.machine.limits.cache_slots;
         let base_offset = block
             .placement()
@@ -1642,7 +1682,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                     .instruction()
                     .cpuid_features()
                     .iter()
-                    .any(|feature| !host_supports(*feature))
+                    .any(|feature| !self.machine.vector_mode.supports(*feature))
             {
                 return Err(NativeDispatchError::InvalidState);
             }
@@ -1703,7 +1743,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         if offset.checked_add(6).is_none_or(|end| end > cell_offset) {
             return Err(NativeDispatchError::EmissionMismatch);
         }
-        let trailer = pentax_block_trailer as *const () as u64;
+        let trailer = self.machine.vector_mode.trailer();
         let relative = i32::try_from(cell_offset as i64 - offset as i64 - 6)
             .map_err(|_| NativeDispatchError::EmissionMismatch)?;
         let mut tail = [0xff, 0x25, 0, 0, 0, 0];

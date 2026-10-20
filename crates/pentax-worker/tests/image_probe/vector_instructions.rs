@@ -551,7 +551,7 @@ fn native_float_arithmetic_keeps_status_across_scalar_and_packed_execution() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "36");
-    assert_eq!(fields["vector_ops"], "7");
+    assert_modeled_vector_operations(&fields, ["7", "6", "6"]);
     assert_eq!(fields["vector_bytes"], "96");
 }
 
@@ -573,7 +573,7 @@ fn native_integer_float_conversions_publish_guest_precision_and_merged_lanes() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "32"); // Inexact remains sticky across the exact conversion.
-    assert_eq!(fields["vector_ops"], "5");
+    assert_modeled_vector_operations(&fields, ["5", "4", "4"]);
     assert_eq!(fields["vector_bytes"], "8");
 }
 
@@ -1008,7 +1008,7 @@ fn native_logical_vectors_read_memory_shuffle_bytes_and_zero_aliased_registers()
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "8");
+    assert_modeled_vector_operations(&fields, ["8", "7", "7"]);
     assert_eq!(fields["vector_bytes"], "160");
 }
 

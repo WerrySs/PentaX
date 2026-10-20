@@ -65,6 +65,8 @@ mod multiply_vectors;
 mod mxcsr_registers;
 #[path = "tests/native_cache.rs"]
 mod native_cache;
+#[path = "tests/native_ymm.rs"]
+mod native_ymm_tests;
 #[path = "tests/packed_convert.rs"]
 mod packed_convert_tests;
 #[path = "tests/packed_vectors.rs"]

@@ -259,10 +259,15 @@ fn native_all_pack_profiles_saturate_signed_sources_and_preserve_lane_order_alia
         // and16-byte source read do not enter mediated vector counters. USDW
         // remains mediated. The two32-byte loads/stores in each of six cases,
         // unrelated vector each way and two MXCSR operations are unchanged.
-        assert_eq!(
-            fields["vector_ops"],
-            if kind == 3 { "34" } else { "32" },
-            "profile={kind}: {text}"
+        // The optional YMM bridge promotes only the register VEX128 form on
+        // AVX, plus register VEX256 on AVX2. Exact memory counts do not change.
+        assert_modeled_vector_operations(
+            &fields,
+            if kind == 3 {
+                ["34", "33", "32"]
+            } else {
+                ["32", "31", "30"]
+            },
         );
         assert_eq!(
             fields["vector_bytes"],

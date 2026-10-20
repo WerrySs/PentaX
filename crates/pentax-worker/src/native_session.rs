@@ -163,11 +163,27 @@ pub(super) struct NativeSessionProgress {
     dispatch_exit: Option<Mnemonic>,
     dispatch_context: dispatch_context::DispatchContext,
     profile: StartupProfile,
+    native_ymm_mode: Option<NativeYmmMode>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NativeYmmMode {
+    Sse2,
+    Avx,
+    Avx2,
 }
 
 impl NativeSessionProgress {
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
+        // Closed aggregate mode only, observed from the actual retained engine.
+        // No requested policy, host identity or raw XCR0 value is reported.
+        let native_ymm = match self.native_ymm_mode {
+            None => "",
+            Some(NativeYmmMode::Sse2) => "\tnative_ymm_mode=sse2",
+            Some(NativeYmmMode::Avx) => "\tnative_ymm_mode=avx",
+            Some(NativeYmmMode::Avx2) => "\tnative_ymm_mode=avx2",
+        };
         let counters = format!(
             "block_attempts={}\tnative_instructions={}\tprimary_native_instructions={}\tservice_stops={}\tsegment_ops={}\tstring_elements={}\tstring_bytes={}\tvector_ops={}\tvector_bytes={}\tphase={}\tinitializer_calls={}\tfetched_source_bytes={}\tadmission_work={}\tdispatch_work={}\tplan_cache_hits={}\tplan_cache_misses={}",
             self.dispatch.blocks,
@@ -230,7 +246,7 @@ impl NativeSessionProgress {
             fields
         });
         format!(
-            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}",
+            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}",
             self.dispatch.native_entries,
             self.dispatch.cache_publications,
             self.dispatch.cache_reuses,
@@ -590,6 +606,12 @@ fn execute_epoch<'plan, 'image>(
         }
     };
     progress.dispatch = engine.usage();
+    let native_ymm_features = engine.native_ymm_features();
+    progress.native_ymm_mode = Some(match native_ymm_features {
+        None => NativeYmmMode::Sse2,
+        Some(features) if features.contains(CpuidFeature::AVX2) => NativeYmmMode::Avx2,
+        Some(_) => NativeYmmMode::Avx,
+    });
     if let Some((start, token)) = starting {
         let call =
             engine.begin_syscall_call(&mut session.pause()?, token, start.entry(), start.args());
@@ -621,9 +643,22 @@ fn execute_epoch<'plan, 'image>(
             native_features = native_features.with(feature);
         }
     }
+    // AVX declarations come only from this exact engine's admitted full-YMM
+    // bridge mode. Raw host AVX flags alone never enable native vector plans.
+    if let Some(features) = native_ymm_features {
+        for feature in [CpuidFeature::AVX, CpuidFeature::AVX2] {
+            if features.contains(feature) {
+                native_features = native_features.with(feature);
+            }
+        }
+    }
+    let mut policy = TranslationPolicy::new(native_features);
+    if native_ymm_features.is_some() {
+        policy = policy.with_native_ymm_registers();
+    }
     let plans = plan_cache::PlanCache::new(
         source,
-        TranslationPolicy::new(native_features)
+        policy
             .with_independent_memory()
             .with_partial_window_splits(),
         limits.block,

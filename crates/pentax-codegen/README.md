@@ -12,17 +12,18 @@ not broaden native policy. Legacy XMM PMADDWD keeps its existing SSE2 native
 admission; the pure mediator tests exercise its checked fallback through an
 explicit missing-feature declaration. MMX and EVEX remain excluded.
 
-The legacy PCMPGTQ and VEX.128/256 VPCMPGTQ forms retain their exact operands,
-complete source widths and original RIP targets in mediated exits. Declaring
-SSE4.2, AVX or AVX2 does not emit these instructions into the native cache.
+Under the default policy, legacy PCMPGTQ and VEX.128/256 VPCMPGTQ retain their
+exact operands, complete source widths and original RIP targets in mediated
+exits. Declaring SSE4.2, AVX or AVX2 alone never emits these instructions.
 The existing legacy byte/word/dword comparison admission remains unchanged;
 EVEX mask-destination comparisons require separate semantics and stay outside
 the runtime's three-form qword comparison profile.
 
 Saturating PACKSSWB, PACKSSDW and PACKUSWB retain their existing SSE2 legacy
 native admission; this change does not force those instructions through a
-software exit. Legacy PACKUSDW and all VEX.128/256 versions remain mediated,
-including when SSE4.1/AVX/AVX2 features are declared. Their exact source operands,
+software exit. Under the default policy, legacy PACKUSDW and all VEX.128/256
+versions remain mediated, including when SSE4.1/AVX/AVX2 features are declared.
+Their exact source operands,
 16/32-byte read widths and RIP targets survive planning. The runtime implements
 the twelve non-MMX, non-EVEX forms with signed source values, saturation to the
 selected signed/unsigned destination range, and independent 128-bit halves for
@@ -118,9 +119,28 @@ logic, multiply/divide, shifts, bit operations, MOV/extensions, LEA, CMOV/SETcc,
 GPR PUSH/POP/LEAVE and legacy XMM arithmetic, conversions, shuffle and loads/stores.
 The thirteen VEX-encoded BMI1/BMI2 GPR families are admitted only with their
 declared feature bits and 32/64-bit GPR operands. Their memory reads retain
-isolation and relocation checks. Other VEX/EVEX families remain mediated; adding
+isolation and relocation checks. Other VEX/EVEX families remain mediated by default; adding
 BMI support does not authorize vector state. Native consumers must check actual
 host BMI support before entry; no software BMI fallback is provided here.
+
+`with_native_ymm_registers()` explicitly requests a separate closed profile of
+26 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
+VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
+128/256-bit vectors. Every operand must be a same-width XMM0–15 or YMM0–15;
+all memory encodings, GPR transfers, floating-point operations, vector-state
+control and EVEX remain excluded. Existing legacy SSE2 admission is unchanged.
+The request requires declared AVX plus each decoded instruction's exact feature
+requirements, including AVX2 for the 256-bit integer operations. Decoder
+reserved-field checks and existing prefix gates still apply.
+
+This policy flag is not an execution capability. The platform must independently
+bind it to the exact machine's admitted full-YMM entry, trailer and cache mode,
+including actual CPU support and OS-enabled vector state. The worker obtains
+AVX/AVX2 declarations only from that retained engine's `native_ymm_features()`;
+without it, the default mediated path remains in use. Its closed aggregate
+`native_ymm_mode=sse2|avx|avx2` field reports that actual engine mode, not host
+identity or the guest CPUID profile. No guest feature advertisement is changed,
+and no performance gain is claimed without execution measurements.
 Alignment NOPs retain ignored segment/address prefixes without computing or
 checking a memory operand that the instruction never accesses.
 LEA likewise ignores segment overrides without reading a segment base. Its
@@ -152,7 +172,8 @@ the original instruction, guest PC/continuation, direct or register/memory targe
 condition and near-RET adjustment where supported. Segment overrides outside
 LEA and alignment NOPs, REP/HLE prefixes, unsupported LOCK forms, strings,
 far/non-64-bit transfers, loop-counter branches,
-privileged/state-control operations, x87/MMX, AVX/extended state and other
+privileged/state-control operations, x87/MMX, vector forms outside the explicitly
+requested register-only profile and other
 unported families become explicit mediated exits. Invalid input is an error.
 
 CPUID (`0F A2`) always remains a no-operand mediated exit, even when additional

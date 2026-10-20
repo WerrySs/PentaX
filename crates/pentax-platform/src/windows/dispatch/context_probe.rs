@@ -48,6 +48,7 @@ struct HostProbeState {
     observed_base: u64,
     observed_limit: u64,
     observed_flags: u64,
+    enter: u64,
 }
 
 impl HostProbeState {
@@ -70,6 +71,7 @@ impl HostProbeState {
             observed_base: 0,
             observed_limit: 0,
             observed_flags: 0,
+            enter: 0,
         }
     }
 
@@ -90,6 +92,7 @@ impl HostProbeState {
             *byte = (index as u8).wrapping_mul(29).wrapping_add(0x53);
         }
         value.expected_mxcsr = HOST_MXCSR;
+        value.enter = super::pentax_block_enter as *const () as u64;
         value.expected_cw = HOST_X87_CW;
         value
     }
@@ -110,7 +113,8 @@ const _: () = assert!(offset_of!(HostProbeState, observed_rsp) == 488);
 const _: () = assert!(offset_of!(HostProbeState, observed_base) == 496);
 const _: () = assert!(offset_of!(HostProbeState, observed_limit) == 504);
 const _: () = assert!(offset_of!(HostProbeState, observed_flags) == 512);
-const _: () = assert!(size_of::<HostProbeState>() == 528);
+const _: () = assert!(offset_of!(HostProbeState, enter) == 528);
+const _: () = assert!(size_of::<HostProbeState>() == 544);
 const _: () = assert!(align_of::<HostProbeState>() == 16);
 
 #[repr(transparent)]
@@ -211,7 +215,7 @@ pentax_context_probe_host:
     ldmxcsr [rip + {probe} + 224]
     fldcw [rip + {probe} + 228]
     cld
-    call {enter}
+    call qword ptr [rip + {probe} + 528]
     mov [rip + {probe} + 256], rbx
     mov [rip + {probe} + 264], rbp
     mov [rip + {probe} + 272], rsi
@@ -270,7 +274,6 @@ pentax_context_probe_host:
     ret
 "#,
     probe = sym HOST_PROBE,
-    enter = sym super::pentax_block_enter,
 );
 
 unsafe extern "C" {
@@ -422,6 +425,12 @@ fn verify_host(observed: &HostProbeState) -> Result<(), PlatformError> {
 /// Execute only this fixed original diagnostic. The parent wires it from the
 /// isolated worker before its principal fixture.
 pub(super) fn verify_context_roundtrip() -> Result<(), PlatformError> {
+    verify_context_roundtrip_mode(super::ymm_bridge::VectorMode::Sse2)
+}
+
+pub(super) fn verify_context_roundtrip_mode(
+    mode: super::ymm_bridge::VectorMode,
+) -> Result<(), PlatformError> {
     // This probe touches one host page before the inner bridge. Do not guess a
     // page geometry, or silently claim coverage of a larger future prologue.
     require(
@@ -458,7 +467,13 @@ pub(super) fn verify_context_roundtrip() -> Result<(), PlatformError> {
     })?;
     let (mut memory, rsp) = stage_guest(&plan, arena)?;
     let mut cache = CodeCache::reserve_near(bias, CACHE_BYTES)?;
-    let seed = guest_seed(rsp, bias);
+    let mut seed = guest_seed(rsp, bias);
+    let low = seed.xmm;
+    let mut upper = [0; 256];
+    for (index, byte) in upper.iter_mut().enumerate() {
+        *byte = (index as u8).wrapping_mul(19).wrapping_add(0x53);
+    }
+    mode.load(&mut seed, &low, &upper);
     let red_zone_address = rsp.checked_sub(128).ok_or(PlatformError::OutOfBounds)?;
     let mut red_zone = [0_u8; 128];
     for (index, byte) in red_zone.iter_mut().enumerate() {
@@ -505,18 +520,23 @@ pub(super) fn verify_context_roundtrip() -> Result<(), PlatformError> {
         )?;
         // Same publication/host-feature/source/emission attestation path as
         // run_one_block, with a stronger native caller around its enter call.
-        publish_block(&mut cache, &mut memory, &block, guest_pc)?;
+        publish_block_with_mode(&mut cache, &mut memory, &block, guest_pc, mode)?;
         // SAFETY: Guard held, owned RX cache just attested. The private wrapper
         // captures observations and restores host RSP/TEB/DF/nonvolatile state
         // before returning; unexpected native faults remain worker-fatal.
         unsafe {
             (*CONTEXT.0.get()).rip = cache.address();
             *HOST_PROBE.0.get() = HostProbeState::seeded();
+            (*HOST_PROBE.0.get()).enter = mode.entry() as *const () as u64;
             pentax_context_probe_host();
         }
         // SAFETY: Same exclusive guard, assembly returned and no Rust borrow
         // aliases either private record while assembly modifies it.
-        let (actual, host) = unsafe { (*CONTEXT.0.get(), *HOST_PROBE.0.get()) };
+        let (mut actual, host) = unsafe { (*CONTEXT.0.get(), *HOST_PROBE.0.get()) };
+        let snapshot = actual;
+        let mut actual_upper = upper;
+        mode.save(&snapshot, &mut actual.xmm, &mut actual_upper);
+        require(actual_upper == upper, "context-probe-guest-ymm-upper")?;
         verify_host(&host)?;
         let expected = expected_guest(seed, round);
         require(actual.gpr == expected.gpr, "context-probe-guest-gpr")?;
