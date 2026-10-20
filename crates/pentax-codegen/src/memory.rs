@@ -2,20 +2,21 @@
 
 //! Numeric ordinary-instruction footprints, not ownership or execution proof.
 
-use crate::{InstructionRecord, Mnemonic, Register};
-use iced_x86::{CodeSize, Instruction, InstructionInfo, InstructionInfoFactory, OpAccess};
+use crate::{Code, InstructionRecord, Mnemonic, Register};
+use iced_x86::{CodeSize, Instruction, InstructionInfo, InstructionInfoFactory, OpAccess, OpKind};
 
 /// Conservative GPR dependencies, including partial/conditional/implicit writes.
 /// A previous write to any address register requires a fresh CPU observation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemoryRegisterDependencies {
-    /// Address bases/indices in RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15 order.
+    /// Address bases/indices, including memory bit-string register offsets, in
+    /// RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15 order.
     pub address: u16,
     /// Any written alias in the same order, including conditional writes.
     pub written: u16,
 }
 
-fn dependencies(info: &InstructionInfo) -> MemoryRegisterDependencies {
+fn dependencies(info: &InstructionInfo, instruction: &Instruction) -> MemoryRegisterDependencies {
     let mut output = MemoryRegisterDependencies::default();
     for used in info.used_memory() {
         for register in [used.base(), used.index()] {
@@ -33,7 +34,65 @@ fn dependencies(info: &InstructionInfo) -> MemoryRegisterDependencies {
             output.written |= 1 << index;
         }
     }
+    // ModRM.reg is not part of the ordinary address expression, but a signed
+    // bit-string register offset selects another complete memory element.
+    // Planning and execution MUST use this same dependency rule.
+    if instruction.op0_kind() == OpKind::Memory
+        && bit_string_width(instruction.code()).is_some()
+        && instruction.op1_kind() == OpKind::Register
+        && let Some(index) = slot(instruction.op1_register().full_register())
+    {
+        output.address |= 1 << index;
+    }
     output
+}
+
+fn bit_string_width(code: Code) -> Option<u64> {
+    use Code::*;
+    Some(match code {
+        Bt_rm16_r16 | Bt_rm16_imm8 | Btc_rm16_r16 | Btc_rm16_imm8 | Btr_rm16_r16
+        | Btr_rm16_imm8 | Bts_rm16_r16 | Bts_rm16_imm8 => 2,
+        Bt_rm32_r32 | Bt_rm32_imm8 | Btc_rm32_r32 | Btc_rm32_imm8 | Btr_rm32_r32
+        | Btr_rm32_imm8 | Bts_rm32_r32 | Bts_rm32_imm8 => 4,
+        Bt_rm64_r64 | Bt_rm64_imm8 | Btc_rm64_r64 | Btc_rm64_imm8 | Btr_rm64_r64
+        | Btr_rm64_imm8 | Bts_rm64_r64 | Bts_rm64_imm8 => 8,
+        _ => return None,
+    })
+}
+
+/// Intel SDM2A Bit(), Table3-2 and BT/BTC/BTR/BTS: register offsets are signed
+/// at operand width and DIV rounds down; immediates select within one element.
+/// An assembler may already fold higher immediate bits into the displacement.
+fn bit_string_displacement(
+    instruction: &Instruction,
+    width: u64,
+    gpr: &[u64; 16],
+) -> Result<i64, MemoryAccessError> {
+    if instruction.op_count() != 2 || instruction.op0_kind() != OpKind::Memory {
+        return Err(MemoryAccessError::UnsupportedBitString);
+    }
+    match instruction.op1_kind() {
+        OpKind::Immediate8 => Ok(0), // High immediate bits never advance memory.
+        OpKind::Register => {
+            let register = instruction.op1_register();
+            if register.size() as u64 != width {
+                return Err(MemoryAccessError::UnsupportedBitString);
+            }
+            let raw = gpr
+                [slot(register.full_register()).ok_or(MemoryAccessError::UnsupportedBitString)?];
+            let signed = match width {
+                2 => i64::from(raw as i16),
+                4 => i64::from(raw as i32),
+                8 => raw as i64,
+                _ => return Err(MemoryAccessError::UnsupportedBitString),
+            };
+            signed
+                .div_euclid(width as i64 * 8)
+                .checked_mul(width as i64)
+                .ok_or(MemoryAccessError::InvalidRange)
+        }
+        _ => Err(MemoryAccessError::UnsupportedBitString),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -103,7 +162,7 @@ impl Default for MemoryAccessAnalyzer {
 }
 impl MemoryAccessAnalyzer {
     pub(crate) fn dependencies(&mut self, instruction: &Instruction) -> MemoryRegisterDependencies {
-        dependencies(self.factory.info(instruction))
+        dependencies(self.factory.info(instruction), instruction)
     }
     /// Derive explicit and implicit accesses using PRE-instruction GPR values
     /// in RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15 order. Conditional accesses are
@@ -112,9 +171,9 @@ impl MemoryAccessAnalyzer {
     /// LEA and memory-form NOP do not read memory. Original RIP targets are
     /// retained by Iced's decoded used-memory metadata, not cache addresses.
     ///
-    /// Memory bit-string forms have offset semantics beyond ordinary effective
-    /// addressing. They are explicitly refused until a separately validated
-    /// admission rule covers both register and immediate offsets.
+    /// Exact ordinary BT/BTC/BTR/BTS memory forms admit the full selected2/4/8B
+    /// element. Signed register offsets also participate in address dependencies;
+    /// immediate offsets never extend the element beyond decoded displacement.
     pub fn analyze(
         &mut self,
         record: &InstructionRecord,
@@ -126,7 +185,7 @@ impl MemoryAccessAnalyzer {
         let instruction = record.instruction();
         let info = self.factory.info(instruction);
         let mut output = InstructionMemoryAccesses {
-            dependencies: dependencies(info),
+            dependencies: dependencies(info, instruction),
             ..Default::default()
         };
         let atomic = record.has_atomic_memory();
@@ -139,14 +198,22 @@ impl MemoryAccessAnalyzer {
         {
             return Err(MemoryAccessError::UnsupportedAddress);
         }
-        if !info.used_memory().is_empty()
+        let bit_string = !info.used_memory().is_empty()
             && matches!(
                 instruction.mnemonic(),
                 Mnemonic::Bt | Mnemonic::Btc | Mnemonic::Btr | Mnemonic::Bts
+            );
+        let bit_width = if bit_string {
+            if info.used_memory().len() != 1 {
+                return Err(MemoryAccessError::UnsupportedBitString);
+            }
+            Some(
+                bit_string_width(instruction.code())
+                    .ok_or(MemoryAccessError::UnsupportedBitString)?,
             )
-        {
-            return Err(MemoryAccessError::UnsupportedBitString);
-        }
+        } else {
+            None
+        };
         for used in info.used_memory() {
             if output.length == output.entries.len() {
                 return Err(MemoryAccessError::TooManyAccesses);
@@ -164,7 +231,7 @@ impl MemoryAccessAnalyzer {
                 OpAccess::ReadWrite | OpAccess::ReadCondWrite => MemoryAccessKind::ReadWrite,
                 _ => return Err(MemoryAccessError::UnsupportedAddress),
             };
-            let address = used
+            let mut address = used
                 .virtual_address(0, |register, _, _| match register {
                     Register::None | Register::CS | Register::DS | Register::ES | Register::SS => {
                         Some(0)
@@ -172,6 +239,13 @@ impl MemoryAccessAnalyzer {
                     _ => slot(register).map(|index| gpr[index]),
                 })
                 .ok_or(MemoryAccessError::UnsupportedAddress)?;
+            if let Some(width) = bit_width {
+                if size != width {
+                    return Err(MemoryAccessError::UnsupportedBitString);
+                }
+                address =
+                    address.wrapping_add_signed(bit_string_displacement(instruction, width, gpr)?);
+            }
             if atomic {
                 if kind != MemoryAccessKind::ReadWrite {
                     return Err(MemoryAccessError::UnsupportedAddress);

@@ -104,8 +104,17 @@ explicit operands and implicit PUSH/POP/LEAVE memory, including POP destinations
 relative to incremented RSP. RIP-relative operands retain their original target;
 LEA/NOP address expressions cause no dereference. Conditional accesses are
 conservative, and a read-modify-write requires both rights. Unknown/non-64-bit
-addresses for actual accesses, variable or oversized footprints and memory
-bit-string forms return explicit errors. Numeric footprints establish no live
+addresses for actual accesses and variable or oversized footprints return
+explicit errors. Exact ordinary BT/BTC/BTR/BTS memory forms use the complete
+selected16/32/64-bit element. Register bit offsets are signed at operand width;
+floor division selects the element before or after the decoded address.
+Immediate offsets stay within that element, including high imm8 values; an
+assembler's displacement adjustment is already part of the decoded address.
+Bit-index GPRs join base/index dependencies in both block planning and live
+execution checks, including preceding partial or conditional register writes.
+The selected full element must pass ordinary live read or read/write checks;
+no single-byte permission shortcut or allocation is introduced. Existing LOCK,
+HLE, segment and address32 restrictions remain in force. Numeric footprints establish no live
 backing or permissions;
 the native consumer recomputes and checks those on the actual exclusive owner
 immediately before execution. Iced's reused instruction-info scratch uses its
@@ -290,6 +299,8 @@ TCB/DTV or GPU compatibility is established by this crate or its encoding tests.
   instructions are safe to emit.
 - [Intel architecture manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html):
   instruction semantics, addressing, state and exception requirements.
+  The bit-string extension follows Volume2A, Bit() and Table3-2, and the
+  BT/BTC/BTR/BTS entries in the [primary instruction manual](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf).
 
 PentaX's original code is GPL-2.0-only. Iced is MIT-licensed, copyright
 2018-present iced project and contributors; its

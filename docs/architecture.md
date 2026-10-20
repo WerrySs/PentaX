@@ -318,8 +318,13 @@ registers. Both platform stepping paths check the exact owned read/write span
 and natural alignment before publication. Misalignment is an explicit PentaX
 policy stop to avoid split locks; no guest alignment exception is synthesized.
 Hardware ordering, flags and register results survive the existing context
-bridge. HLE, segment-prefixed atomics and memory bit-string offsets remain
-unsupported. Additional guest-thread execution and scheduling remain separate
+bridge. HLE, segment-prefixed atomics and LOCK-prefixed bit strings remain
+unsupported. Ordinary BT/BTC/BTR/BTS memory accesses separately admit the full
+selected16/32/64-bit element. Signed register bit offsets participate in both
+planning and execution address dependencies; immediate offsets do not extend
+the decoded element. Live owner/range/permission checks precede native entry,
+including cross-page spans. No new instruction/prefix authority is added.
+Additional guest-thread execution and scheduling remain separate
 unfinished work.
 
 String instructions execute as checked Rust memory transitions on the same

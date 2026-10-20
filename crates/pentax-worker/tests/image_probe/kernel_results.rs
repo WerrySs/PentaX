@@ -180,6 +180,8 @@ mod agc_shaders;
 mod atomic_instructions;
 #[path = "bit_counts.rs"]
 mod bit_counts;
+#[path = "bit_strings.rs"]
+mod bit_strings;
 #[path = "bmi_instructions.rs"]
 mod bmi_instructions;
 #[path = "debug_stops.rs"]

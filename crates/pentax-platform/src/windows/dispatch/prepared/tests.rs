@@ -10,6 +10,8 @@ mod arithmetic_vectors;
 mod atomics;
 #[path = "tests/bit_counts.rs"]
 mod bit_counts;
+#[path = "tests/bit_strings.rs"]
+mod bit_strings;
 #[path = "tests/blend_vectors.rs"]
 mod blend_vectors;
 #[path = "tests/broadcast_vectors.rs"]

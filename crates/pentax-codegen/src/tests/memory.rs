@@ -338,11 +338,7 @@ fn rip_relative_footprint_is_original_guest_address_and_lea_nop_do_not_dereferen
 }
 
 #[test]
-fn unmodeled_bit_strings_control_records_and_invalid_full_spans_are_refused() {
-    assert_eq!(
-        footprint(&[0x48, 0x0f, 0xa3, 0x08, 0xc3], [0; 16]),
-        Err(MemoryAccessError::UnsupportedBitString)
-    );
+fn control_records_and_invalid_full_spans_are_refused() {
     assert_eq!(
         footprint(&[0xc3], [0; 16]),
         Err(MemoryAccessError::NotEmitted)
