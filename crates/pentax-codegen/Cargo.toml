@@ -1,0 +1,16 @@
+[package]
+name = "pentax-codegen"
+description = "Source-bound x86-64 basic-block translation plans for PentaX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pentax-linker = { path = "../pentax-linker" }
+pentax-loader.workspace = true
+iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "encoder", "instr_info", "op_code_info"] }
+
+[lints]
+workspace = true

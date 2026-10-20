@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+use super::*;
+use crate::process::hle::fixture::{CODE, CONSUMER_BIAS, Consumer, Import, PROVIDER_BIAS};
+use pentax_linker::{ModuleInput, Resolution, SymbolicError, UnsupportedSymbol, plan_symbolic};
+use pentax_loader::open_executable;
+
+fn consumer(module: &'static [u8], library: &'static [u8], rows: &[Registration]) -> Consumer {
+    let mut original = Consumer::importing(vec![(CODE, vec![0xcc])]);
+    original.module_name = module;
+    original.library_name = library;
+    original.imports = rows
+        .iter()
+        .map(|row| Import {
+            nid: row.nid.as_bytes().try_into().unwrap(),
+            symbol_type: 2,
+            binding: 1,
+            relocation: 7,
+            addend: 0,
+        })
+        .collect();
+    original
+}
+fn link<'a>(
+    bytes: &'a [u8],
+    provider: &'a GeneratedKernelProvider,
+) -> Result<pentax_linker::SymbolicLinkPlan<'a>, SymbolicError> {
+    plan_symbolic(
+        &[
+            ModuleInput::new(open_executable(bytes).unwrap(), CONSUMER_BIAS),
+            ModuleInput::new(open_executable(provider.image()).unwrap(), PROVIDER_BIAS),
+        ],
+        &Default::default(),
+    )
+}
+
+#[test]
+fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
+    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    assert_eq!(provider.registration_count(), 1281);
+    assert_eq!(
+        (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
+        (2048, 4 * PAGE_SIZE)
+    );
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!(
+        &MODULES[53..56],
+        &[
+            ("Mouse", (1, 1)),
+            ("libSceMouse", (1, 1)),
+            ("Keyboard", (1, 1))
+        ]
+    );
+    assert_eq!(
+        &LIBRARIES[54..57],
+        &[("Mouse", 1), ("libSceMouse", 1), ("Keyboard", 1)]
+    );
+    assert_eq!(
+        (provider.code_bytes().len(), provider.image().len()),
+        (0xfdb8, 0xfdc8)
+    );
+    for (index, marker) in provider.markers().iter().enumerate() {
+        assert_eq!(
+            (marker.symbol, marker.service_id, marker.rva),
+            (
+                index + 1,
+                0x5058_4b01 + index as u32,
+                0x100 + index as u64 * 8
+            )
+        );
+        assert_eq!(
+            &provider.image()[marker.rva as usize..marker.rva as usize + 8],
+            &marker.bytes()
+        );
+    }
+    assert_eq!(
+        (
+            provider.markers()[1197].service_id,
+            provider.markers()[1197].rva
+        ),
+        (0x5058_4fae, 0x2668)
+    );
+    assert_eq!(
+        (
+            provider.markers()[1198].service_id,
+            provider.markers()[1198].rva
+        ),
+        (0x5058_4faf, 0x2670)
+    );
+    assert_eq!(
+        (
+            provider.markers()[1210].service_id,
+            provider.markers()[1210].rva
+        ),
+        (0x5058_4fbb, 0x26d0)
+    );
+    assert_eq!(
+        (provider.objects()[0].symbol, provider.objects()[0].rva),
+        (1282, 0x10000)
+    );
+    assert_eq!(
+        (provider.objects()[1].symbol, provider.objects()[1].rva),
+        (1283, 0x10008)
+    );
+    assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
+    assert_eq!(
+        &provider.data_bytes()[..8],
+        &STACK_GUARD_INITIAL.to_le_bytes()
+    );
+    assert_eq!(&provider.data_bytes()[8..], &[0; 8]);
+    for (scope, start, end) in [
+        (b"Mouse".as_slice(), 1198, 1202),
+        (b"Keyboard".as_slice(), 1202, 1208),
+        (b"libSceMouse".as_slice(), 1208, 1211),
+    ] {
+        let rows = &Service::registrations()[start..end];
+        let bytes = consumer(scope, scope, rows).build().unwrap();
+        let plan = link(&bytes, &provider).unwrap();
+        assert_eq!(plan.patch_count(), rows.len() + 1);
+        let imports = plan
+            .patches()
+            .iter()
+            .filter(|patch| patch.consumer().index() == 0);
+        assert_eq!(imports.clone().count(), rows.len());
+        for (offset, patch) in imports.enumerate() {
+            let index = start + offset;
+            assert_eq!(patch.value(), PROVIDER_BIAS + 0x100 + index as u64 * 8);
+            assert!(
+                matches!(patch.resolution(), Resolution::Definition(reference) if reference.module.index() == 1 && reference.symbol == index + 1)
+            );
+        }
+    }
+    assert_eq!(Service::registrations()[1207].arguments, 6);
+    assert!(matches!(
+        build_kernel_provider(provider.image().len() as u64 - 1),
+        Err(KernelProviderError::Budget)
+    ));
+}
+
+#[test]
+fn raw_input_refuses_unobserved_aliases_mixed_axes_versions_and_nonfunction_types() {
+    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    for (index, row) in Service::registrations()[1198..1208].iter().enumerate() {
+        let (scope, prefix) = if index < 4 {
+            (b"Mouse".as_slice(), b"libSceMouse".as_slice())
+        } else {
+            (b"Keyboard".as_slice(), b"libSceKeyboard".as_slice())
+        };
+        if !matches!(index, 1..=3) {
+            let bytes = consumer(prefix, prefix, &[*row]).build().unwrap();
+            assert!(matches!(
+                link(&bytes, &provider),
+                Err(SymbolicError::MissingProvider { .. })
+            ));
+        }
+        for (module, library) in [(scope, prefix), (prefix, scope)] {
+            let bytes = consumer(module, library, &[*row]).build().unwrap();
+            assert!(matches!(
+                link(&bytes, &provider),
+                Err(SymbolicError::MissingProvider { .. })
+            ));
+        }
+        for (major, minor, version) in [(2, 1, 1), (1, 2, 1), (1, 1, 2)] {
+            let mut original = consumer(scope, scope, &[*row]);
+            (original.major, original.minor, original.version) = (major, minor, version);
+            assert!(matches!(
+                link(&original.build().unwrap(), &provider),
+                Err(SymbolicError::VersionMismatch { .. })
+            ));
+        }
+        let mut original = consumer(scope, scope, &[*row]);
+        original.imports[0].symbol_type = 1;
+        original.imports[0].relocation = 6;
+        assert!(matches!(
+            link(&original.build().unwrap(), &provider),
+            Err(SymbolicError::UnsupportedSymbol {
+                reason: UnsupportedSymbol::TypeMismatch,
+                ..
+            })
+        ));
+    }
+}

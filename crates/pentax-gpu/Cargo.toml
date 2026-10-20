@@ -1,0 +1,15 @@
+[package]
+name = "pentax-gpu"
+description = "Bounded GPU command inspection and compute submission preparation for PentaX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pentax-shader = { path = "../pentax-shader" }
+pentax-shader-compiler = { path = "../pentax-shader-compiler" }
+
+[lints]
+workspace = true

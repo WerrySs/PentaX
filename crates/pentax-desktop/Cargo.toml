@@ -1,0 +1,26 @@
+[package]
+name = "pentax-desktop"
+description = "Native Rust desktop frontend for the experimental PentaX runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pentax"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+gilrs = "0.11.0"
+rfd = "0.17.2"
+pentax-config.workspace = true
+pentax-core.workspace = true
+pentax-loader.workspace = true
+serde.workspace = true
+toml.workspace = true
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true

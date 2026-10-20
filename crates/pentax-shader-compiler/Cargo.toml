@@ -1,0 +1,14 @@
+[package]
+name = "pentax-shader-compiler"
+description = "Bounded Rust port of the KytyPS5-Performance shader CFG, IR and SPIR-V compiler pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-2.0-only"
+repository.workspace = true
+
+[dependencies]
+pentax-shader = { path = "../pentax-shader" }
+
+[lints]
+workspace = true

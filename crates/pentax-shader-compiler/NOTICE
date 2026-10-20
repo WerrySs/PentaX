@@ -1,0 +1,66 @@
+pentax-shader-compiler is a modified Rust adaptation of portions of
+KytyPS5-Performance, not an independent implementation of those portions.
+
+Source project: https://github.com/WerrySs/KytyPS5-Performance
+Pinned source: 209dffe9032d72749257ce18680d506b891284de
+Upstream project: https://github.com/KytyPS5/KytyPS5
+
+Adapted files under src/graphics/shader/recompiler/:
+  frontend/decode/ShaderDecoder.cpp: DecodeProgram termination rules.
+  frontend/cfg/ShaderCFG.{h,cpp}: checked direct graph construction,
+    dominators/post-dominators, natural loops, components and structurization.
+  frontend/translate/{Translator.h,Translate.cpp,Dispatch.cpp,Scalar.cpp,
+    Vector.cpp,Integer.cpp,Float.cpp,Convert.cpp,Compare.cpp,Control.cpp,
+    Memory.cpp,Attribute.cpp}: operand and stage entry handling and the
+    supported scalar/vector/control/buffer/interpolation/export lowerings.
+  ir/{ShaderIR.h,Value.h,Value.cpp,Type.h,Reg.h,Block.h,IREmitter.h,
+    IREmitter.cpp,opcodes/ValueOpcodes.inc}: the typed IR subset and emitter.
+  ir/passes/{SsaRewrite.cpp,ConstantPropagation.cpp,DeadCodeElimination.cpp,
+    ResourceTracking.cpp,ShaderInfoCollection.cpp,BindingLayout.cpp}:
+    SSA, folding, liveness, direct buffer tracking and interface/binding layout.
+  backend/spirv/{SpirvBuilder.h,SpirvBuilder.cpp,SpirvEmitter.cpp,
+    spirvEmitterModule.cpp,spirvEmitterProgram.cpp,spirvEmitterInstructions.h,
+    spirvEmitterAlu.cpp,spirvEmitterAluHelpers.cpp,spirvEmitterFlow.cpp,
+    spirvEmitterMemory.cpp,spirvEmitterMemoryHelpers.cpp}:
+    supported binary module, control, ALU, interface and buffer emission.
+  ShaderRecompiler.h and CodegenOptions.h: typed compile fields and defaults.
+Additional source vocabulary: src/graphics/shader/shader.h and shaderBindings.h.
+This inventory describes adapted portions, not whole-file feature parity.
+
+The source project specifies GNU General Public License version 2 only.
+The full unmodified license text is retained in LICENSE. The original Kyty
+copyright and MIT permission notice retained by the source project is reproduced
+in Kyty-MIT.txt, including:
+
+Copyright (c) 2021 InoriRus
+
+The adapted project files contain no additional per-file copyright notices.
+No new holder attribution has been invented for them.
+
+Selected SPIR-V and GLSL.std.450 enumerants in src/spirv/spec.rs were transcribed
+from official Khronos SPIRV-Headers at
+01e0577914a75a2569c846778c2f93aa8e6feddd:
+  include/spirv/unified1/spirv.hpp
+  include/spirv/unified1/GLSL.std.450.h
+Source: https://github.com/KhronosGroup/SPIRV-Headers/tree/01e0577914a75a2569c846778c2f93aa8e6feddd
+Their original source-header notice is retained in spec.rs:
+  Copyright: 2014-2024 The Khronos Group Inc.
+  License: MIT
+The corresponding unmodified MIT permission text and 2015-2024 copyright
+from that revision's LICENSE are retained in Khronos-MIT.txt, including the
+Khronos modification and normative-specification notice.
+
+PentaX modifications, 2026-10-18:
+  Adapted the above portions into safe Rust with immutable owned source,
+  owner-bound graph views, a private typed IR, finite capacity/work/ID/record
+  limits, fallible arena reservation, iterative graph/SSA traversal, typed
+  errors instead of process aborts, and original synthetic regression tests.
+  Restricted stage/resource/modifier forms to the implemented lowerings and
+  added explicit refusals for source paths not ported. Replaced source
+  uninitialized-register zero substitution with an explicit reject/OpUndef
+  policy. Kept the source NativeBinding and shader-data numbering, exposed
+  typed caller specialization and a read-only output/host-feature manifest,
+  and added independent official-tool validation of original output modules.
+
+This modified port is distributed under GPL-2.0-only. Retained MIT notices
+continue to apply to their respective original portions. See README.md for scope.

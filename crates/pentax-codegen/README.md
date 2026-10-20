@@ -1,0 +1,224 @@
+# PentaX code generation
+
+`pentax-codegen` builds immutable same-ISA x86-64 basic-block translation plans.
+It emits bytes; it does not allocate executable memory, run native code, expose
+host pointers, install exception handlers or authorize execution. The crate's
+own Rust code forbids `unsafe`. Its decoder/encoder is the pinned, pure-Rust
+`iced-x86` 1.21.0 dependency, rather than a second byte parser.
+
+## Source and ownership
+
+`plan_block(&SymbolicLinkPlan, module_index, guest_pc, CachePlacement,
+&TranslationPolicy, &BlockLimits)` retains the exact immutable linker plan and
+selected module identity. It copies a bounded initialized executable window,
+applies only that retained plan's ordinary eight-byte source-overlapping writes,
+and decodes the resulting bytes. Original and relocated snapshots, instruction
+guest/cache offsets and the copied immutable policy remain inspectable.
+
+`plan_block` refuses any deferred relocation, even outside the selected block.
+The separate caller-declared path below produces a distinct pure planning type.
+Cross-segment instruction fetch and executable BSS synthesis are unsupported.
+At a configured window boundary, a truncated instruction fails rather than
+guessing bytes. A completed initialized window ends at a fallthrough exit.
+
+The requested cache interval must be within the lower 47-bit address space and
+disjoint, at 16 KiB page granularity, from every retained module mapping,
+including page padding. It is a numeric request, not evidence of an allocation.
+The native mapping owner must reserve the full checked interval and separately
+establish actual host page geometry, ownership and permissions.
+
+## Caller-declared materialized source
+
+`declare_materialized_source(&SymbolicLinkPlan, &[DeclaredAppliedWrite],
+&BlockLimits)` retains the exact source and owns bounded declaration records.
+Every deferred record must have exactly one declaration, with the exact original
+index, consumer, relocation record and checked biased target address. Only the
+fixed eight-byte relocation encodings 16/17/18 are admitted. Targets must be
+wholly within their consumer's logical mappings, ordered, nonoverlapping and
+disjoint from all ordinary patches. The original deferred list remains visible.
+
+`plan_materialized_block(&MaterializedSource, module_index, guest_pc,
+staged_window, CachePlacement, &TranslationPolicy, &BlockLimits)` requires every
+staged byte to equal the exact initialized source with ordinary and declared
+writes overlaid, including partial intersections. It uses the same bounded
+decoder, encoder, positive policy and exit construction as `plan_block`.
+Declaration and per-block work/allocation limits are enforced independently;
+ordinary and declared writes both count against the aggregate patch bound.
+
+The returned `MaterializedBlockPlan` has read-only byte/provenance/exit getters
+and no conversion or implicit dereference to `BlockPlan`. Its assurance is always
+`CallerDeclared`: numeric values are supplied by the caller and are not proof of
+TLS resolution, actual write application, prepared storage, live permissions or
+execution admission. An unsafe native consumer must separately bind every
+declaration to the exact prepared owner and verified typed-TLS plan, establish
+owner liveness, and compare the actual paused initialized executable bytes. This
+API alone cannot authorize execution or resolve unknown deferred records.
+
+## Emission and exits
+
+`TranslationPolicy::with_isolated_memory` splits before and after a potential
+ordinary memory instruction, retaining batches of register-only work. The next
+memory instruction is retried at its original PC after the preceding CPU state
+has actually been observed. This is a planning option, not permission to run.
+
+`with_independent_memory` batches accesses whose base/index GPRs are unchanged
+by preceding instructions. Partial, implicit and conditional writes invalidate
+the full aliased GPR; a dependent access starts the next block. Atomics remain
+isolated. The checked dispatcher independently repeats this analysis and checks
+every live span before entry, including later accesses in the same block.
+Memory aliasing is allowed because native execution preserves instruction order.
+Dependency masks come from the pinned
+[Iced instruction-info API](https://docs.rs/iced-x86/1.21.0/iced_x86/struct.InstructionInfo.html).
+
+`MemoryAccessAnalyzer` derives numeric read/write footprints from an emitted
+record and supplied PRE-instruction GPR values. Its fixed two-entry result covers
+explicit operands and implicit PUSH/POP/LEAVE memory, including POP destinations
+relative to incremented RSP. RIP-relative operands retain their original target;
+LEA/NOP address expressions cause no dereference. Conditional accesses are
+conservative, and a read-modify-write requires both rights. Unknown/non-64-bit
+addresses for actual accesses, variable or oversized footprints and memory
+bit-string forms return explicit errors. Numeric footprints establish no live
+backing or permissions;
+the native consumer recomputes and checks those on the actual exclusive owner
+immediately before execution. Iced's reused instruction-info scratch uses its
+dependency allocator, outside the caller's fixed output value; recoverable
+process-wide OOM is not promised.
+
+Ordinary instructions pass a positive integer/SSE family policy, operand and
+register checks, encoding checks, privilege/save-state checks and declared
+CPUID feature gates. This covers decoder-defined forms of integer arithmetic,
+logic, multiply/divide, shifts, bit operations, MOV/extensions, LEA, CMOV/SETcc,
+GPR PUSH/POP/LEAVE and legacy XMM arithmetic, conversions, shuffle and loads/stores.
+The thirteen VEX-encoded BMI1/BMI2 GPR families are admitted only with their
+declared feature bits and 32/64-bit GPR operands. Their memory reads retain
+isolation and relocation checks. Other VEX/EVEX families remain mediated; adding
+BMI support does not authorize vector state. Native consumers must check actual
+host BMI support before entry; no software BMI fallback is provided here.
+Alignment NOPs retain ignored segment/address prefixes without computing or
+checking a memory operand that the instruction never accesses.
+LEA likewise ignores segment overrides without reading a segment base. Its
+16/32/64-bit destination semantics and wrapping 32-bit address arithmetic,
+including EIP-relative forms, are retained. It is not isolated as a memory
+access, but its destination write still invalidates a later dependent address.
+Exact families are listed in `policy.rs`; adding a CPUID bit never admits another
+family.
+AMD decoding mode preserves long-mode 16-bit branch/return distinctions, which
+are mediated. `NO_INVALID_CHECK` is never enabled.
+
+RIP-relative ordinary memory accesses are re-encoded at their new cache IP while
+retaining the original guest target. Unrepresentable signed displacements fail
+explicitly. IP-relative LEA computes a numeric constant: when its original target
+fails the relocation range/address checks or normal re-encoding overflows after
+prefix normalization, a width-matched MOV immediate retains the result without
+a scratch register or a memory access. A 16-bit
+destination preserves its upper bits, a 32-bit destination clears its upper bits,
+and a 64-bit destination retains the complete value. The original LEA instruction,
+source PC/length and guest target remain in the provenance record; actual emitted
+bytes still obey the existing output/allocation/work limits and attestation.
+EIP-relative LEA is relocated modulo 2^32. Actual memory accesses with 32-bit
+bases or EIP-relative operands remain mediated.
+
+CALL, JMP, Jcc, indirect transfers, RET, SYSCALL, interrupts and system/exception
+instructions never appear as native guest transfers in emitted blocks. Each
+block ends in its privately constructed two-byte UD2. Typed exit metadata retains
+the original instruction, guest PC/continuation, direct or register/memory target,
+condition and near-RET adjustment where supported. Segment overrides outside
+LEA and alignment NOPs, REP/HLE prefixes, unsupported LOCK forms, strings,
+far/non-64-bit transfers, loop-counter branches,
+privileged/state-control operations, x87/MMX, AVX/extended state and other
+unported families become explicit mediated exits. Invalid input is an error.
+
+Decoder-validated memory-destination LOCK arithmetic, unary operations, XADD,
+XCHG and compare-exchange preserve their actual prefix in native emission.
+These and implicit-lock memory XCHG always split into a single emitted
+instruction, even without optional memory isolation. Numeric footprint admission
+requires exactly one read/write access and natural alignment, a PentaX policy
+that avoids split locks rather than emulating a guest alignment exception.
+The platform checks actual owned backing and both permissions on its manual
+and checked paths. Ordinary CPUID gates remain: CMPXCHG8B is admitted under CX8,
+while CMPXCHG16B remains unavailable in the default profile. Bit-string offsets,
+HLE hints and segment-prefixed atomics remain explicitly unsupported. Real CPU
+ordering and flags are retained; Rust read/write sequences do not replace them.
+
+The instruction and output bounds can split a block before its next un-emitted
+instruction. The split exit retries the same guest PC, so no instruction is
+silently skipped. `attest_emission` compares a complete buffer with the retained
+emission; `attest_exit` checks only its exact final instruction-boundary PC and
+UD2 bytes. Incidental UD2/SYSCALL byte pairs inside immediates have no authority.
+The native consumer must supply actual owned paused backing for these comparisons.
+
+## Limits and remaining execution work
+
+Aggregate module/segment/patch counts are checked before source copies. Sorted
+ordinary and declared relocation tables use bounded binary searches for each
+source window, including partial eight-byte intersections. Search visits and
+overlapping writes are charged without rescanning unrelated patches. Complete
+declaration validation and exact staged-byte comparison remain required. All
+per-plan byte, record and encoder-scratch buffers are fallibly reserved with
+reported-capacity accounting. Record/output buffers start with small capacities
+and grow only when the decoded block requires more space. Growth precharges
+the full replacement and movement; reported allocation is cumulative, retaining
+both old and replacement capacities to cover their overlap. Short isolated
+blocks therefore avoid reserving a worst-case record for every fetched byte.
+A single work budget charges metadata visits,
+reservations, copies, decoding/classification and encoding before the work.
+Usage reports window bytes, actual decode attempts, emitted bytes, recorded
+buffer capacities and work units. Bounds are per call, not wall-clock timing.
+Iced's fixed dependency-global lazy tables and its internal encoder diagnostic
+strings use that dependency's ordinary allocator; recoverable process-wide OOM
+is not promised. Allocator bookkeeping is outside reported buffer capacities.
+
+`CpuFeatures` is an immutable **declared policy**, not a host probe. The native
+consumer must verify actual host CPUID and OS/context support, and preserve every
+admitted GPR, RFLAGS (including DF), XMM/MXCSR and exception effect. Conditional
+exits must evaluate guest flags. CALL/RET/indirect exits must resolve against
+owned guest memory, validate canonical executable targets and permissions, and
+commit guest stack/context effects transactionally. Target metadata alone does
+not assert that a target is mapped, executable or translated. No guest instruction
+may be resumed by incrementing the host IP across UD2 without these operations.
+
+Ordinary native memory operands remain guest-address operands. The separate
+native-memory owner now supplies checked physically NX guest mappings and an
+exclusive paused adapter sharing actual backing and service-write semantics
+with HLE. The reusable platform stepper binds an exact materialized source to a
+stable actual-owner identity, checks live initialized immutable executable bytes
+and host features, and separately attests its private native tail before entry.
+The dedicated worker obtains typed materialization provenance from the composed
+core session, pauses that owner for one block, then releases it before checked
+PRE-SYSCALL services. The sparse `GuestMemory` Vec backend cannot be paired with
+a detached native snapshot. The composed path executes an original kernel/TLS
+program in debug and release; this establishes no supplied-binary compatibility.
+
+The stepper republishes one block at a time. Persistent caching, writable-code
+support, broader context state and cancellation remain unfinished. Native
+identity addressing is not a sandbox: ordinary runtime memory operands are not
+instrumented here. The manual native entry requires caller-established bounds; the checked
+entry derives live spans from address-independent instructions and validates permissions.
+Typed TLS provenance, byte equality and worker isolation alone do not establish
+ordinary operand confinement. No game, PS5 startup ABI, firmware
+TCB/DTV or GPU compatibility is established by this crate or its encoding tests.
+
+## Primary evidence and dependency provenance
+
+- [Iced 1.21.0 release](https://github.com/icedland/iced/releases/tag/v1.21.0)
+  and [Rust crate documentation](https://docs.rs/iced-x86/1.21.0/iced_x86/).
+- [Decoder options](https://docs.rs/iced-x86/1.21.0/iced_x86/struct.DecoderOptions.html):
+  AMD mode and validation controls.
+- [Encoder](https://docs.rs/iced-x86/1.21.0/iced_x86/struct.Encoder.html):
+  encoding an original decode at a chosen IP and supplying its buffer.
+- [Flow metadata](https://docs.rs/iced-x86/1.21.0/iced_x86/enum.FlowControl.html)
+  and [opcode metadata](https://docs.rs/iced-x86/1.21.0/iced_x86/struct.OpCodeInfo.html):
+  these are classification inputs, not a proof that arbitrary fallthrough
+  instructions are safe to emit.
+- [Intel architecture manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html):
+  instruction semantics, addressing, state and exception requirements.
+
+PentaX's original code is GPL-2.0-only. Iced is MIT-licensed, copyright
+2018-present iced project and contributors; its
+[pinned license](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/LICENSE.txt)
+is retained verbatim in `third-party/iced-x86-LICENSE-MIT.txt` because the
+published crate archive does not include that license file. The archive's
+`.cargo_vcs_info.json` pins this exact upstream commit. Its transitive
+`lazy_static` 1.5.1 dependency offers
+MIT OR Apache-2.0 licensing; see its packaged license files. No upstream
+implementation or guest instruction fixture is copied into this crate.

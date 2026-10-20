@@ -1,0 +1,52 @@
+pentax-shader is a modified Rust port of portions of KytyPS5-Performance,
+not an independent implementation of those portions.
+
+Source project: https://github.com/WerrySs/KytyPS5-Performance
+Pinned source: 209dffe9032d72749257ce18680d506b891284de
+Upstream project: https://github.com/KytyPS5/KytyPS5
+
+Ported source files under src/graphics/shader/recompiler/frontend/decode/:
+  ShaderDecoder.h and ShaderDecoder.cpp (family, opcode vocabulary, operand
+    and instruction metadata decoding)
+  OpcodeTable.h (opcode table lookup semantics)
+  ScalarAluOps.cpp (complete scalar opcode maps and instruction decoding)
+  ExportOps.cpp (export instruction decoding)
+  VectorAluOps.cpp (VOP1/VOP2/VOPC/VOP3/VOP3P/VINTRP maps and decoding)
+  MemoryOps.cpp (SMEM/MUBUF/MTBUF/FLAT/DS maps and decoding)
+  ImageOps.cpp (MIMG maps, decoding and address component layout)
+Stage vocabulary is from src/graphics/shader/shader.h.
+
+The source project specifies GNU General Public License version 2 only.
+The full unmodified license text is retained in LICENSE. The original Kyty
+copyright and MIT permission notice retained by the source project is reproduced
+in Kyty-MIT.txt, including:
+
+Copyright (c) 2021 InoriRus
+
+The adapted source files do not contain additional per-file copyright notices.
+No new holder attribution has been invented for them. Copyright and permission
+notices in LICENSE and Kyty-MIT.txt remain applicable.
+
+PentaX modifications, 2026-10-17:
+  Ported these portions to safe Rust, replacing unchecked spans and process
+  aborts with owned immutable input, typed errors and checked fallible limits.
+  Added private instruction records with owner-bound views, bounded allocation
+  capacities and work accounting, and original synthetic regression tests.
+  Retained source opcode IDs, operand/constant and literal word rules, export
+  flags and interpolation operands. Preserved caller-supplied stage metadata.
+  Exposed linear-span decoding instead of the original program/termination
+  walker. Branch target metadata uses signed arithmetic without wraparound.
+  Deferred other families explicitly, without guessing their lengths or
+  translating instructions, resources, descriptor bindings or shaders.
+
+PentaX modifications, 2026-10-18:
+  Ported the remaining observed families (VOP1/VOP2/VOPC/VOP3/VOP3P, SMEM,
+  MUBUF, MTBUF, FLAT, DS and MIMG) with their source opcode maps, aliases,
+  SDWA/DPP/DPP8 and VOP3/VOP3P modifier rules, memory/image fields, NSA and
+  BVH address counts. Replaced source aborts and SetUnsupported results with
+  typed errors in the source's check order, proved every modifier, body, NSA
+  and literal word present before reading it, and added compact fixed-size
+  operand, memory and image metadata plus original synthetic tests. Opcode
+  tables were transcribed into Rust match tables; no C++ is included.
+
+This modified port is distributed under GPL-2.0-only. See README.md for scope.

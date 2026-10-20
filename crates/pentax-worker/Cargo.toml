@@ -1,0 +1,26 @@
+[package]
+name = "pentax-worker"
+description = "Isolated native execution worker and bounded image-entry probes for PentaX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pentax-config = { path = "../pentax-config" }
+pentax-codegen = { path = "../pentax-codegen" }
+pentax-core = { path = "../pentax-core" }
+pentax-platform = { path = "../pentax-platform" }
+pentax-linker = { path = "../pentax-linker" }
+pentax-loader = { path = "../pentax-loader" }
+pentax-kernel = { path = "../pentax-kernel" }
+
+# Keep the workspace warning policy. Only the separately reviewed native_session
+# module may allow unsafe code; `forbid` cannot support a module-only exception.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+undocumented_unsafe_blocks = "deny"

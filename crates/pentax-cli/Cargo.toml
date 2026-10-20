@@ -1,0 +1,20 @@
+[package]
+name = "pentax-cli"
+description = "PentaX executable inspection and reproducible guest diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pentax-core.workspace = true
+pentax-loader.workspace = true
+pentax-config.workspace = true
+pentax-linker = { path = "../pentax-linker" }
+pentax-gpu = { path = "../pentax-gpu" }
+pentax-shader = { path = "../pentax-shader" }
+
+[lints]
+workspace = true
+

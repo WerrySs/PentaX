@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "package": {
+    "name": "epaint_default_fonts",
+    "version": "0.37.0"
+  },
+  "resource": "fonts/Ubuntu-Light.ttf",
+  "source_locator": "https://crates.io/crates/epaint_default_fonts/0.37.0",
+  "source_archive": "https://static.crates.io/crates/epaint_default_fonts/epaint_default_fonts-0.37.0.crate",
+  "source_sha256": "80307b8da7649aa4ee4d484b232140e3ce1ec0ca093073d3c53c8f5a5ced7a70",
+  "source_bytes": 361676,
+  "name_table_offset": 280232,
+  "name_table_length": 716,
+  "name_table_format": 0,
+  "copyright_records": [
+    {
+      "name_id": 0,
+      "platform_id": 3,
+      "encoding_id": 1,
+      "language_id": 1033,
+      "decoding": "utf-16-be",
+      "raw_offset": 280406,
+      "raw_length": 146,
+      "raw_sha256": "2a2d6a187a03d4b10663895b18fac576a601149a5479204ddab2d4880e3a5961",
+      "decoded_text": "Copyright 2011 Canonical Ltd.  Licensed under the Ubuntu Font Licence 1.0"
+    }
+  ],
+  "notice_file": "ubuntu-light-copyright.txt",
+  "notice_sha256": "8acacc7c5ad4da2f69c6dda72000cd483c7f1816cd2b20bf15f0da1e89f48b21",
+  "notice_bytes": 74,
+  "extraction": "Decode name-table nameID 0 records using their platform encoding. Preserve the exact Unicode string, with one final LF added for text-file presentation. No author metadata or inferred holder text used."
+}

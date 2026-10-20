@@ -1,0 +1,983 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (c) 2021 InoriRus
+// Modified 2026 for PentaX: checked guest submit ABI and cumulative admission.
+// Adapted from pinned src/libs/agc.{h,cpp}; see docs/upstream-provenance.md.
+
+//! Source-observed submit calls over the exact exclusively paused guest owner.
+//! Queue contexts and packets are guest data, never host pointers or handles.
+use super::{Error, execute_dispatch_admitted};
+use pentax_gpu::compute;
+use pentax_platform::{
+    native_memory::{NativeMemoryWrite, NativeRange, NativeTransactionLimits, PausedNativeMemory},
+    vulkan::GpuLimits,
+};
+
+#[path = "driver/interrupts.rs"]
+mod interrupts;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Function {
+    CommandBuffer,
+    MultiCommandBuffers,
+    Acb,
+    MultiAcbs,
+    SuspendPoint,
+    AgcInit,
+    AgcCreateShader,
+    AgcGetFusedShaderSize,
+    AgcFuseShaderHalves,
+    AgcFuseShaderHalvesLegacy,
+    AgcCreateInterpolantMapping,
+    AgcCreateInterpolantMapping2,
+    AgcAddEqEvent,
+    AgcDeleteEqEvent,
+    AgcGetEqEventType,
+    AgcGetEqContextId,
+    AgcGetIsTrinityMode,
+    AgcRegistryUnavailable,
+    AgcGetRegisterDefaults,
+    AgcGetRegisterDefaultsInternal,
+    VideoOpen,
+    VideoClose,
+    VideoSetFlipMaster,
+    VideoSetFlipRate,
+    VideoInitializeOptions,
+    VideoIsOutputSupported,
+    VideoConfigureOutput,
+    VideoGetOutputStatus,
+    VideoSetBufferAttribute2,
+    VideoAddBufferAttributeOption,
+    VideoRegisterBuffers2,
+    VideoChangeBufferAttribute2,
+    VideoUnregisterBuffers,
+}
+
+/// Source frame boundary bookkeeping, independent of presentation or FPS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameState {
+    pub boundaries: u64,
+    pub reset_before_graphics: bool,
+}
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            boundaries: 0,
+            reset_before_graphics: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    /// Explicit emulated display policy, not a host monitor measurement or
+    /// proof that any vblank/flip has occurred.
+    pub video_vblank_hz: u32,
+    pub video_display: super::video::DisplayPolicy,
+    pub max_calls: u64,
+    pub max_batch_buffers: u32,
+    pub max_dispatches: u64,
+    pub max_command_buffers: u64,
+    pub max_command_bytes: u64,
+    pub max_invocations: u64,
+    pub max_preparation_work: u64,
+    pub max_memory_write_bytes: u64,
+    pub max_shader_mappings: usize,
+    pub compute: compute::Limits,
+    pub commands: compute::CommandLimits,
+    pub gpu: GpuLimits,
+}
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            video_vblank_hz: 60,
+            video_display: Default::default(),
+            max_calls: 256,
+            max_batch_buffers: 32,
+            max_dispatches: 128,
+            max_command_buffers: 256,
+            max_command_bytes: 4 * 1024 * 1024,
+            max_invocations: 16 * 1024 * 1024,
+            max_preparation_work: 256 * 1024 * 1024,
+            max_memory_write_bytes: 4 * 1024 * 1024,
+            max_shader_mappings: 4096,
+            compute: compute::Limits::default(),
+            commands: compute::CommandLimits::default(),
+            gpu: GpuLimits::default(),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub interrupts: u64,
+    pub calls: u64,
+    pub dispatches: u64,
+    pub command_buffers: u64,
+    pub indirect_buffers: u64,
+    pub command_bytes: u64,
+    pub invocations: u64,
+    pub preparation_work: u64,
+    pub written_bytes: u64,
+    pub memory_commands: u64,
+    pub memory_written_bytes: u64,
+}
+
+/// Typed stops never become invented guest success or errno. Only explicit
+/// null-argument branches use the source's EINVAL return domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    Limit,
+    Allocation,
+    Memory,
+    UnsupportedQueue,
+    UnsupportedVideo,
+    Poisoned,
+    Waiting,
+    Preparation(compute::Error),
+    Vulkan(pentax_platform::vulkan::VulkanError),
+    Kernel(pentax_kernel::Failure),
+    Shader(super::shaders::ShaderFailure),
+}
+
+pub(crate) struct Driver {
+    limits: Limits,
+    usage: Usage,
+    queues: [compute::ComputeState; 56],
+    poisoned: bool,
+    frame: FrameState,
+    video: super::video::State,
+    defaults: Option<(pentax_platform::native_memory::NativeOwnerId, u64)>,
+    shaders: super::shaders::State,
+}
+impl Driver {
+    pub(crate) fn new(limits: Limits) -> Self {
+        Self {
+            limits,
+            usage: Usage::default(),
+            queues: [compute::ComputeState::empty(); 56],
+            poisoned: false,
+            frame: FrameState::default(),
+            video: super::video::State::default(),
+            defaults: None,
+            shaders: Default::default(),
+        }
+    }
+    pub(crate) fn usage(&self) -> Usage {
+        self.usage
+    }
+    pub(crate) fn frame_state(&self) -> FrameState {
+        self.frame
+    }
+    pub(crate) fn video_port(&self, handle: i32) -> Option<super::video::PortState> {
+        self.video.port(handle)
+    }
+    pub(crate) fn video_surface(&self, handle: i32, buffer: i32) -> Option<super::video::Surface> {
+        self.video.surface(handle, buffer)
+    }
+
+    pub(crate) fn shader_mapping(
+        &self,
+        owner: pentax_platform::native_memory::NativeOwnerId,
+        address: u64,
+    ) -> Option<super::shaders::MappedShader> {
+        self.shaders.mapping(owner, address)
+    }
+
+    pub(crate) fn register_defaults(
+        &mut self,
+        owner: pentax_platform::native_memory::NativeOwnerId,
+        kernel: &mut pentax_kernel::Kernel,
+        guest: &mut impl pentax_kernel::GuestAccess,
+        internal: bool,
+        version: u64,
+    ) -> Result<u64, Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        if self.defaults.is_some_and(|(expected, _)| expected != owner) {
+            return Err(Failure::Memory);
+        }
+        self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            if self.defaults.is_some() {
+                8
+            } else {
+                super::agc_defaults::WORK
+            },
+            self.limits.max_preparation_work,
+        )?;
+        let base = if let Some((_, base)) = self.defaults {
+            base
+        } else {
+            let base = kernel
+                .allocate_runtime_data(
+                    super::agc_defaults::SIZE,
+                    guest,
+                    super::agc_defaults::initialize,
+                )
+                .map_err(Failure::Kernel)?;
+            self.defaults = Some((owner, base));
+            base
+        };
+        base.checked_add(super::agc_defaults::descriptor(internal, version))
+            .ok_or(Failure::Limit)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn submit(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+    ) -> Result<u64, Failure> {
+        self.submit_with_stack(memory, function, args, None)
+    }
+    #[cfg(test)]
+    pub(crate) fn submit_with_stack(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+        stack: Option<u64>,
+    ) -> Result<u64, Failure> {
+        self.submit_impl(memory, function, args, stack, None)
+    }
+    pub(crate) fn submit_with_kernel(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+        stack: Option<u64>,
+        kernel: &mut pentax_kernel::Kernel,
+    ) -> Result<u64, Failure> {
+        self.submit_impl(memory, function, args, stack, Some(kernel))
+    }
+    fn submit_impl(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+        stack: Option<u64>,
+        mut kernel: Option<&mut pentax_kernel::Kernel>,
+    ) -> Result<u64, Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        if matches!(
+            function,
+            Function::AgcAddEqEvent
+                | Function::AgcDeleteEqEvent
+                | Function::AgcGetEqEventType
+                | Function::AgcGetEqContextId
+        ) {
+            return self.event_queue(memory, function, args, kernel);
+        }
+        if matches!(
+            function,
+            Function::AgcCreateInterpolantMapping | Function::AgcCreateInterpolantMapping2
+        ) {
+            return super::shaders::interpolants::create(
+                memory,
+                args,
+                function == Function::AgcCreateInterpolantMapping2,
+                &mut self.usage.preparation_work,
+                self.limits.max_preparation_work,
+            );
+        }
+        if function == Function::AgcGetFusedShaderSize {
+            return super::shaders::fusion::size(
+                memory,
+                args,
+                &mut self.usage.preparation_work,
+                self.limits.max_preparation_work,
+            );
+        }
+        if matches!(
+            function,
+            Function::AgcFuseShaderHalves | Function::AgcFuseShaderHalvesLegacy
+        ) {
+            return super::shaders::fusion::fuse(
+                memory,
+                args,
+                function == Function::AgcFuseShaderHalves,
+                &mut self.usage.preparation_work,
+                self.limits.max_preparation_work,
+            );
+        }
+        if function == Function::AgcCreateShader {
+            return self.shaders.create(
+                memory,
+                args,
+                self.limits.max_shader_mappings,
+                &mut self.usage.preparation_work,
+                self.limits.max_preparation_work,
+            );
+        }
+        if function == Function::AgcGetIsTrinityMode {
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                8,
+                self.limits.max_preparation_work,
+            )?;
+            // Source is void and writes exactly one byte from its fixed false
+            // base-console profile. The transport return conveys no status.
+            memory
+                .apply_transaction(
+                    pentax_platform::native_memory::NativeMemoryTransaction {
+                        effect: pentax_platform::native_memory::NativeMemoryEffect::None,
+                        writes: &[NativeMemoryWrite {
+                            address: args[0],
+                            bytes: &[0],
+                        }],
+                    },
+                    &NativeTransactionLimits::default(),
+                )
+                .map_err(|_| Failure::Memory)?;
+            return Ok(0);
+        }
+        if matches!(
+            function,
+            Function::AgcInit | Function::AgcRegistryUnavailable
+        ) {
+            // Pinned AgcInit returns OK without state access. The four pinned
+            // registry APIs return the exact int32 error, never fake handles or
+            // successful registration. None reads or writes guest memory.
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                8,
+                self.limits.max_preparation_work,
+            )?;
+            return Ok(if function == Function::AgcRegistryUnavailable {
+                0x8a6c_9018
+            } else {
+                0
+            });
+        }
+        if super::video::supported(function) {
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                match function {
+                    Function::VideoRegisterBuffers2 | Function::VideoChangeBufferAttribute2 => 4096,
+                    Function::VideoSetBufferAttribute2 => 256,
+                    _ => 128,
+                },
+                self.limits.max_preparation_work,
+            )?;
+            return self.video.invoke(
+                function,
+                args,
+                self.limits.video_vblank_hz,
+                self.limits.video_display,
+                stack,
+                memory,
+            );
+        }
+        if function == Function::SuspendPoint {
+            // Every admitted compute submission waits for its Vulkan fence and
+            // same-owner writeback before returning. There is no pending queue
+            // to drain here. Poisoned/partial submissions are rejected above.
+            // Preserve Done's actual frame number and next-graphics reset flag;
+            // compute register state is independent and must remain retained.
+            let next = self.frame.boundaries.checked_add(1).ok_or(Failure::Limit)?;
+            self.frame.boundaries = next;
+            self.frame.reset_before_graphics = true;
+            return Ok(0);
+        }
+        if let Some(value) = null_result(function, args) {
+            return Ok(value);
+        }
+        let (queue, ranges) = self.ranges(memory, function, args)?;
+        // These are the source's ACB queues. Draw queues need the graphics
+        // interpreter; compute-only execution must not silently replace it.
+        if ranges.iter().any(|r| r.address != 0 && r.size != 0) && !(0x20..0x58).contains(&queue) {
+            return Err(Failure::UnsupportedQueue);
+        }
+        for range in ranges.into_iter().filter(|r| r.address != 0 && r.size != 0) {
+            let next_bytes = add(
+                self.usage.command_bytes,
+                range.size,
+                self.limits.max_command_bytes,
+            )?;
+            self.usage.command_buffers = add(
+                self.usage.command_buffers,
+                1,
+                self.limits.max_command_buffers,
+            )?;
+            self.usage.command_bytes = next_bytes;
+            let queue_index = (queue - 0x20) as usize;
+            let mut command_limits = self.limits.commands;
+            command_limits.max_command_bytes = command_limits.max_command_bytes.min(
+                usize::try_from(self.limits.max_command_bytes - next_bytes + range.size)
+                    .unwrap_or(usize::MAX),
+            );
+            command_limits.max_dispatches = command_limits.max_dispatches.min(
+                usize::try_from(
+                    self.limits
+                        .max_dispatches
+                        .saturating_sub(self.usage.dispatches),
+                )
+                .unwrap_or(usize::MAX),
+            );
+            command_limits.max_work = command_limits.max_work.min(
+                self.limits
+                    .max_preparation_work
+                    .saturating_sub(self.usage.preparation_work),
+            );
+            let plan = compute::plan_commands(
+                &self.queues[queue_index],
+                compute::CommandRange {
+                    address: range.address,
+                    size: range.size,
+                },
+                &super::Memory(memory),
+                &command_limits,
+            )
+            .map_err(Failure::Preparation)?;
+            self.usage.command_bytes = add(
+                self.usage.command_bytes,
+                (plan.usage().command_bytes as u64)
+                    .checked_sub(range.size)
+                    .ok_or(Failure::Limit)?,
+                self.limits.max_command_bytes,
+            )?;
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                plan.usage().work,
+                self.limits.max_preparation_work,
+            )?;
+            self.usage.indirect_buffers = self
+                .usage
+                .indirect_buffers
+                .saturating_add(plan.usage().indirect_buffers);
+            for command in plan.commands() {
+                let dispatch = match command {
+                    compute::Command::Release(release) => {
+                        self.retire_release(
+                            memory,
+                            release,
+                            plan.command_ranges(),
+                            &mut kernel,
+                            queue,
+                        )?;
+                        continue;
+                    }
+                    compute::Command::Dispatch(dispatch) => dispatch,
+                    compute::Command::Write(write) => {
+                        self.memory_write(memory, write, plan.command_ranges())?;
+                        continue;
+                    }
+                    compute::Command::Wait(wait) => {
+                        self.usage.preparation_work = add(
+                            self.usage.preparation_work,
+                            wait.byte_count() as u64 + 1,
+                            self.limits.max_preparation_work,
+                        )?;
+                        self.usage.memory_commands = self.usage.memory_commands.saturating_add(1);
+                        if !wait
+                            .satisfied(&super::Memory(memory))
+                            .map_err(Failure::Preparation)?
+                        {
+                            return Err(Failure::Waiting);
+                        }
+                        continue;
+                    }
+                };
+                let remaining_invocations = self
+                    .limits
+                    .max_invocations
+                    .saturating_sub(self.usage.invocations);
+                let mut limits = self.limits.compute;
+                if self.shaders.lookup_work() > 1
+                    && let Ok(address) = dispatch.shader_address()
+                {
+                    self.usage.preparation_work = add(
+                        self.usage.preparation_work,
+                        self.shaders.lookup_work(),
+                        self.limits.max_preparation_work,
+                    )?;
+                    if let Some(mapped) = self.shaders.mapping(memory.owner_id(), address) {
+                        if mapped.kind != 0 {
+                            return Err(Failure::Shader(super::shaders::ShaderFailure::Stage));
+                        }
+                        // Zero size follows the source's unspecified-size metadata
+                        // behavior. A nonzero declared extent bounds real decoding.
+                        if mapped.code_bytes != 0 {
+                            limits.max_shader_words =
+                                limits.max_shader_words.min(mapped.code_bytes as usize / 4);
+                        }
+                    }
+                }
+                limits.max_invocations = limits.max_invocations.min(remaining_invocations);
+                limits.max_work = limits.max_work.min(
+                    self.limits
+                        .max_preparation_work
+                        .saturating_sub(self.usage.preparation_work),
+                );
+                limits.max_host_bytes = limits
+                    .max_host_bytes
+                    .checked_sub(plan.usage().host_bytes)
+                    .ok_or(Failure::Limit)?;
+                self.usage.dispatches = add(self.usage.dispatches, 1, self.limits.max_dispatches)?;
+                let report = execute_dispatch_admitted(
+                    memory,
+                    dispatch,
+                    &limits,
+                    &self.limits.gpu,
+                    plan.command_ranges(),
+                    |prepared, preflight, may_execute| {
+                        let invocations = add(
+                            self.usage.invocations,
+                            prepared.invocations,
+                            self.limits.max_invocations,
+                        )
+                        .map_err(|_| Error::Limit)?;
+                        let work = prepared.work.checked_add(preflight).ok_or(Error::Limit)?;
+                        let work = add(
+                            self.usage.preparation_work,
+                            work,
+                            self.limits.max_preparation_work,
+                        )
+                        .map_err(|_| Error::Limit)?;
+                        self.usage.invocations = invocations;
+                        self.usage.preparation_work = work;
+                        // Once GPU work could have happened, a later failure is
+                        // terminal. Never replay a partially completed stream with
+                        // an earlier register snapshot.
+                        self.poisoned |= may_execute;
+                        Ok(())
+                    },
+                )
+                .map_err(|e| match e {
+                    Error::Prepare(e) => Failure::Preparation(e),
+                    Error::Memory(_) => Failure::Memory,
+                    Error::Vulkan(e) => Failure::Vulkan(e),
+                    Error::Allocation => Failure::Allocation,
+                    Error::Limit => Failure::Limit,
+                })?;
+                // max_dispatches * max_buffer_bytes can overflow for caller limits;
+                // accounting is saturated, never a post-effect fallible operation.
+                self.usage.written_bytes = self
+                    .usage
+                    .written_bytes
+                    .saturating_add(report.written_bytes as u64);
+            }
+            self.queues[queue_index] = plan.final_state();
+            self.poisoned = true;
+        }
+        self.poisoned = false;
+        Ok(0)
+    }
+
+    fn memory_write(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        write: &compute::MemoryWrite,
+        commands: &[compute::CommandRange],
+    ) -> Result<(), Failure> {
+        self.memory_write_bytes(memory, write, commands, write.bytes())
+    }
+    fn memory_write_bytes(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        write: &compute::MemoryWrite,
+        commands: &[compute::CommandRange],
+        payload: &[u8],
+    ) -> Result<(), Failure> {
+        if payload.len() != write.bytes().len() {
+            return Err(Failure::Memory);
+        }
+        let address = write.address();
+        let size = write.bytes().len() as u64;
+        let bytes = add(
+            self.usage.memory_written_bytes,
+            size,
+            self.limits.max_memory_write_bytes,
+        )?;
+        let remaining = self
+            .limits
+            .max_preparation_work
+            .saturating_sub(self.usage.preparation_work);
+        let mut work = memory
+            .preflight_distinct_backing(address, size, remaining)
+            .map_err(|_| Failure::Memory)?;
+        memory
+            .preflight_gpu_write(address, size)
+            .map_err(|_| Failure::Memory)?;
+        for command in commands {
+            let charge = memory
+                .preflight_disjoint_backing(
+                    NativeRange { address, size },
+                    NativeRange {
+                        address: command.address,
+                        size: command.size,
+                    },
+                    remaining.checked_sub(work).ok_or(Failure::Limit)?,
+                )
+                .map_err(|_| Failure::Memory)?;
+            work = work.checked_add(charge).ok_or(Failure::Limit)?;
+        }
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            work.checked_add(size).ok_or(Failure::Limit)?,
+            self.limits.max_preparation_work,
+        )?;
+        self.usage.memory_written_bytes = bytes;
+        self.usage.memory_commands = self.usage.memory_commands.saturating_add(1);
+        self.poisoned = true;
+        memory
+            .apply_gpu_writes(
+                &[NativeMemoryWrite {
+                    address,
+                    bytes: payload,
+                }],
+                &NativeTransactionLimits {
+                    max_outputs: 1,
+                    max_output_bytes: size,
+                    max_preflight_steps: work,
+                    ..Default::default()
+                },
+            )
+            .map_err(|_| Failure::Memory)?;
+        self.usage.written_bytes = self.usage.written_bytes.saturating_add(size);
+        Ok(())
+    }
+
+    fn ranges(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+    ) -> Result<(u32, Vec<NativeRange>), Failure> {
+        let (queue, packet, arrays) = match function {
+            Function::Acb => (args[0] as u32, Some(args[1]), None),
+            Function::CommandBuffer => (context_queue(memory, args[0])?, Some(args[1]), None),
+            Function::MultiAcbs => (
+                args[0] as u32,
+                None,
+                Some((args[1], args[2], args[3] as u32)),
+            ),
+            Function::MultiCommandBuffers => {
+                // A zero count returns before touching even the context.
+                if args[3] as u32 == 0 {
+                    return Ok((0, Vec::new()));
+                }
+                (
+                    context_queue(memory, args[0])?,
+                    None,
+                    Some((args[1], args[2], args[3] as u32)),
+                )
+            }
+            _ => return Err(Failure::UnsupportedQueue),
+        };
+        let count = arrays.map_or(1, |(_, _, n)| n);
+        if count > self.limits.max_batch_buffers {
+            return Err(Failure::Limit);
+        }
+        let mut ranges = Vec::new();
+        ranges
+            .try_reserve_exact(count as usize)
+            .map_err(|_| Failure::Allocation)?;
+        // Capacity must stay within the retained metadata bound, even if the
+        // allocator returned more elements than requested.
+        if ranges.capacity() > self.limits.max_batch_buffers as usize {
+            return Err(Failure::Limit);
+        }
+        if let Some(packet) = packet {
+            let mut raw = [0; 16];
+            memory.read(packet, &mut raw).map_err(|_| Failure::Memory)?;
+            // flags/reserved are ignored by this pinned submit path.
+            ranges.push(NativeRange {
+                address: u64::from_le_bytes(raw[..8].try_into().unwrap()),
+                size: u64::from(u32::from_le_bytes(raw[8..12].try_into().unwrap())) * 4,
+            });
+        } else if let Some((addresses, sizes, count)) = arrays {
+            for index in 0..u64::from(count) {
+                let mut address = [0; 8];
+                let mut size = [0; 4];
+                let address_at = addresses.checked_add(index * 8).ok_or(Failure::Memory)?;
+                let size_at = sizes.checked_add(index * 4).ok_or(Failure::Memory)?;
+                memory
+                    .read(address_at, &mut address)
+                    .map_err(|_| Failure::Memory)?;
+                memory
+                    .read(size_at, &mut size)
+                    .map_err(|_| Failure::Memory)?;
+                ranges.push(NativeRange {
+                    address: u64::from_le_bytes(address),
+                    size: u64::from(u32::from_le_bytes(size)) * 4,
+                });
+            }
+        }
+        let mut bytes = 0_u64;
+        for range in &ranges {
+            if range.address != 0 && range.size != 0 {
+                if range.size > self.limits.commands.max_command_bytes as u64 {
+                    return Err(Failure::Limit);
+                }
+                bytes = add(
+                    bytes,
+                    range.size,
+                    self.limits
+                        .max_command_bytes
+                        .saturating_sub(self.usage.command_bytes),
+                )?;
+                memory
+                    .preflight_gpu_read(range.address, range.size)
+                    .map_err(|_| Failure::Memory)?;
+            }
+        }
+        Ok((queue, ranges))
+    }
+}
+
+fn context_queue(memory: &PausedNativeMemory<'_>, context: u64) -> Result<u32, Failure> {
+    let mut raw = [0; 4];
+    memory
+        .read(context.checked_add(4).ok_or(Failure::Memory)?, &mut raw)
+        .map_err(|_| Failure::Memory)?;
+    Ok(u32::from_le_bytes(raw))
+}
+fn add(value: u64, count: u64, maximum: u64) -> Result<u64, Failure> {
+    value
+        .checked_add(count)
+        .filter(|n| *n <= maximum)
+        .ok_or(Failure::Limit)
+}
+
+/// Source null-argument ordering, separated from reads and GPU effects.
+pub(crate) fn null_result(function: Function, args: [u64; 6]) -> Option<u64> {
+    const INVALID: u64 = 0x8002_0016; // int return: low 32 bits, as the kernel ABI.
+    match function {
+        Function::Acb if args[1] == 0 => Some(0),
+        Function::CommandBuffer if args[0] == 0 || args[1] == 0 => Some(INVALID),
+        Function::MultiAcbs | Function::MultiCommandBuffers if args[3] as u32 == 0 => Some(0),
+        Function::MultiAcbs if args[1] == 0 || args[2] == 0 => Some(INVALID),
+        Function::MultiCommandBuffers if args[..3].contains(&0) => Some(INVALID),
+        _ => None,
+    }
+}
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod suspend_tests {
+    use super::*;
+    use pentax_platform::native_memory::{NativeAddressSpace, NativePermissions};
+
+    #[test]
+    fn registry_calls_return_the_source_error_without_creating_resources() {
+        let mut space = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
+        let mut memory = space.pause().unwrap();
+        let mut driver = Driver::new(Limits {
+            max_calls: 1,
+            ..Default::default()
+        });
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcRegistryUnavailable, [u64::MAX; 6]),
+            Ok(0x8a6c_9018)
+        );
+        assert_eq!(driver.frame_state(), FrameState::default());
+        assert_eq!(driver.usage().dispatches, 0);
+        assert_eq!(driver.video_port(1), None);
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcRegistryUnavailable, [0; 6]),
+            Err(Failure::Limit)
+        );
+        let mut limited = Driver::new(Limits {
+            max_preparation_work: 7,
+            ..Default::default()
+        });
+        assert_eq!(
+            limited.submit(&mut memory, Function::AgcRegistryUnavailable, [0; 6]),
+            Err(Failure::Limit)
+        );
+        limited.poisoned = true;
+        assert_eq!(
+            limited.submit(&mut memory, Function::AgcRegistryUnavailable, [0; 6]),
+            Err(Failure::Poisoned)
+        );
+    }
+
+    #[test]
+    fn agc_trinity_query_writes_one_source_byte_and_preserves_neighbors_on_refusal() {
+        let mut space = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
+        let base = space.reserved_ranges().next().unwrap().address;
+        space
+            .map_at(base, 0x4000, NativePermissions::READ_WRITE)
+            .unwrap();
+        let mut memory = space.pause().unwrap();
+        let mut driver = Driver::new(Default::default());
+        memory.write(base + 8, &[0xa5; 8]).unwrap();
+        driver
+            .submit(
+                &mut memory,
+                Function::AgcGetIsTrinityMode,
+                [base + 11, 0, 0, 0, 0, 0],
+            )
+            .unwrap();
+        let mut bytes = [0; 8];
+        memory.read(base + 8, &mut bytes).unwrap();
+        assert_eq!(bytes, [0xa5, 0xa5, 0xa5, 0, 0xa5, 0xa5, 0xa5, 0xa5]);
+        driver
+            .submit(
+                &mut memory,
+                Function::AgcGetIsTrinityMode,
+                [base + 0x3fff, 0, 0, 0, 0, 0],
+            )
+            .unwrap();
+        assert_eq!(
+            driver.submit(
+                &mut memory,
+                Function::AgcGetIsTrinityMode,
+                [base + 0x4000, 0, 0, 0, 0, 0]
+            ),
+            Err(Failure::Memory)
+        );
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcGetIsTrinityMode, [0; 6]),
+            Err(Failure::Memory)
+        );
+        let mut limited = Driver::new(Limits {
+            max_preparation_work: 7,
+            ..Default::default()
+        });
+        assert_eq!(
+            limited.submit(
+                &mut memory,
+                Function::AgcGetIsTrinityMode,
+                [base + 8, 0, 0, 0, 0, 0]
+            ),
+            Err(Failure::Limit)
+        );
+        let mut actual = [0; 8];
+        memory.read(base + 8, &mut actual).unwrap();
+        assert_eq!(actual, bytes);
+        limited.poisoned = true;
+        assert_eq!(
+            limited.submit(
+                &mut memory,
+                Function::AgcGetIsTrinityMode,
+                [base + 8, 0, 0, 0, 0, 0]
+            ),
+            Err(Failure::Poisoned)
+        );
+    }
+
+    #[test]
+    fn agc_init_keeps_source_no_op_semantics_under_shared_limits() {
+        let mut space = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
+        let mut memory = space.pause().unwrap();
+        let mut driver = Driver::new(Limits {
+            max_calls: 2,
+            ..Default::default()
+        });
+        for args in [[0; 6], [u64::MAX; 6]] {
+            assert_eq!(driver.submit(&mut memory, Function::AgcInit, args), Ok(0));
+            assert_eq!(driver.frame_state(), FrameState::default());
+            assert_eq!(driver.video_port(1), None);
+        }
+        assert_eq!(driver.usage().calls, 2);
+        assert_eq!(driver.usage().preparation_work, 16);
+        assert_eq!(driver.usage().dispatches, 0);
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcInit, [0; 6]),
+            Err(Failure::Limit)
+        );
+        let mut driver = Driver::new(Limits {
+            max_preparation_work: 7,
+            ..Default::default()
+        });
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcInit, [0; 6]),
+            Err(Failure::Limit)
+        );
+        assert_eq!(driver.usage().preparation_work, 0);
+        driver.poisoned = true;
+        let before = driver.usage();
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcInit, [0; 6]),
+            Err(Failure::Poisoned)
+        );
+        assert_eq!(driver.usage(), before);
+    }
+
+    #[test]
+    fn suspend_records_actual_boundaries_and_refuses_limits_or_partial_submission_failure() {
+        let mut space = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
+        let base = space.reserved_ranges().next().unwrap().address;
+        space
+            .map_at(
+                base,
+                0x4000,
+                NativePermissions::READ_WRITE.with_gpu(true, true),
+            )
+            .unwrap();
+        let mut memory = space.pause().unwrap();
+        let mut driver = Driver::new(Limits {
+            max_calls: 2,
+            ..Default::default()
+        });
+        for boundary in 1..=2 {
+            assert_eq!(
+                driver.submit(&mut memory, Function::SuspendPoint, [u64::MAX; 6]),
+                Ok(0)
+            );
+            assert_eq!(
+                driver.frame_state(),
+                FrameState {
+                    boundaries: boundary,
+                    reset_before_graphics: true
+                }
+            );
+        }
+        assert_eq!(
+            driver.submit(&mut memory, Function::SuspendPoint, [0; 6]),
+            Err(Failure::Limit)
+        );
+        assert_eq!(driver.frame_state().boundaries, 2);
+        let mut driver = Driver::new(Default::default());
+        driver.frame.boundaries = u64::MAX;
+        assert_eq!(
+            driver.submit(&mut memory, Function::SuspendPoint, [0; 6]),
+            Err(Failure::Limit)
+        );
+        assert_eq!(driver.frame_state().boundaries, u64::MAX);
+        let mut driver = Driver::new(Default::default());
+        let label = base + 0x200;
+        let words = [
+            0xc005_3700,
+            0x100,
+            label as u32,
+            (label >> 32) as u32,
+            1,
+            1,
+            1,
+            0xc005_3c00,
+            0x13,
+            label as u32,
+            (label >> 32) as u32,
+            17,
+            u32::MAX,
+            0,
+        ];
+        let bytes: Vec<_> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+        memory.write(base, &bytes).unwrap();
+        let mut packet = [0; 16];
+        packet[..8].copy_from_slice(&base.to_le_bytes());
+        packet[8..12].copy_from_slice(&(words.len() as u32).to_le_bytes());
+        memory.write(base + 0x100, &packet).unwrap();
+        assert_eq!(
+            driver.submit(&mut memory, Function::Acb, [0x20, base + 0x100, 0, 0, 0, 0]),
+            Err(Failure::Waiting)
+        );
+        let mut actual = [0; 4];
+        memory.read(label, &mut actual).unwrap();
+        assert_eq!(u32::from_le_bytes(actual), 1); // A real earlier effect happened.
+        let usage = driver.usage();
+        assert_eq!(
+            driver.submit(&mut memory, Function::SuspendPoint, [0; 6]),
+            Err(Failure::Poisoned)
+        );
+        assert_eq!(driver.frame_state(), FrameState::default());
+        assert_eq!(driver.usage(), usage);
+    }
+}

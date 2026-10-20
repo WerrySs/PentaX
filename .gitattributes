@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+# Preserve the original whitespace in checksum-verified upstream notices.
+crates/pentax-xtask/notices/SDL_GameControllerDB-LICENSE.txt -whitespace
+crates/pentax-xtask/notices/plasma-copyrights.txt -whitespace
+*.png binary
+*.ico binary
+

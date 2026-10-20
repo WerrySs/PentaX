@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "scope": "Original headers and licenses for bundled Khronos resources and source attributions. The crate manifest licenses are retained separately. No copyright statement inferred from authors.",
+  "records": [
+    {
+      "file": "khronos-egl-mit-header.txt",
+      "sha256": "8a7572d955f871de863843c527759ce04c883cadd88c250989859e50ace5eb01",
+      "bytes": 1165,
+      "source_url": "https://raw.githubusercontent.com/KhronosGroup/EGL-Registry/b6b558e7042d67fc7543383bb0e13a075f21d8ab/api/egl.xml",
+      "source_sha256": "523fc17745545daca85c5b107b4a4c1a23dd3de39f70e499c77249e3dd6569ec",
+      "source_bytes": 167957,
+      "extraction": "xml_first_comment",
+      "packages": [
+        {
+          "name": "khronos_api",
+          "version": "3.1.0",
+          "resources": [
+            "api_egl/api/egl.xml",
+            "api_angle/scripts/egl.xml"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "khronos-webgl-mit-header.txt",
+      "sha256": "eac51b81804aa36aa7a4bbf6824f03c7cc8ad0ba30148549fc5849c38496c423",
+      "bytes": 1136,
+      "source_url": "https://raw.githubusercontent.com/KhronosGroup/WebGL/c987f075bfdca44119175c41f547d849c08983a3/specs/latest/1.0/webgl.idl",
+      "source_sha256": "9bd8707845fb68ff349f95b320582160423ee4cdf47294cbd980933b3b25dae9",
+      "source_bytes": 33828,
+      "extraction": "webgl_header",
+      "packages": [
+        {
+          "name": "khronos_api",
+          "version": "3.1.0",
+          "resources": [
+            "api_webgl/specs/latest/1.0/webgl.idl",
+            "api_webgl/specs/latest/2.0/webgl2.idl"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "khronos-opengl-apache-header.txt",
+      "sha256": "966c337c1f690de86f2cdefc4685550dd1ccde5275b530c11714d4fa68522b77",
+      "bytes": 572,
+      "source_url": "https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/85d924a5165e7206f4c73c8c10307658dc2bbe10/xml/gl.xml",
+      "source_sha256": "7dae830ddacefd2af92aef2b438ff89f90fb5496f596dec8282b212eb4fc51e3",
+      "source_bytes": 2745540,
+      "extraction": "copyright Apache notice through limitations-under-license line",
+      "packages": [
+        {
+          "name": "khronos_api",
+          "version": "3.1.0",
+          "resources": [
+            "api/xml/gl.xml",
+            "api/xml/glx.xml",
+            "api/xml/wgl.xml",
+            "api_angle/scripts/gl.xml",
+            "api_angle/scripts/wgl.xml"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "angle-bsd-license.txt",
+      "sha256": "bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a",
+      "bytes": 1643,
+      "source_url": "https://raw.githubusercontent.com/google/angle/7403dd2cd3764fe96660fe09892e764e9ae1dbca/LICENSE",
+      "source_sha256": "bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a",
+      "source_bytes": 1643,
+      "extraction": "entire_file",
+      "packages": [
+        {
+          "name": "khronos_api",
+          "version": "3.1.0",
+          "resources": [
+            "api_angle/scripts/gl_angle_ext.xml",
+            "api_angle/scripts/egl_angle_ext.xml"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "accesskit-winit-apache-header.txt",
+      "sha256": "8f66c779519de460932950fc3240883b3d5dace439d9c024f05e7b1d5f9e46fd",
+      "bytes": 151,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/winit/src/lib.rs",
+      "source_sha256": "46f5c0812702f09043537dd4e51a19f2d47c385b58d684c91e585df7a21cac88",
+      "source_bytes": 9684,
+      "extraction": "leading_rust_comment",
+      "packages": [
+        {
+          "name": "accesskit_winit",
+          "version": "0.34.1",
+          "resources": [
+            "src/lib.rs",
+            "src/platform_impl/macos.rs",
+            "src/platform_impl/windows.rs",
+            "src/platform_impl/unix.rs",
+            "src/platform_impl/mod.rs",
+            "src/platform_impl/null.rs"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "gl-rs-2015-apache-header.txt",
+      "sha256": "7eb15307bafc2e83b48490a5a4f1024f860d00c98b173fb5b8fa11e4e6692a31",
+      "bytes": 621,
+      "source_url": "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/gl_generator/lib.rs",
+      "source_sha256": "6f47da878479b503b5202bda84ad8935607264ac03c0b68203109fad9cd479db",
+      "source_bytes": 2432,
+      "extraction": "leading_rust_comment",
+      "packages": [
+        {
+          "name": "gl_generator",
+          "version": "0.14.0",
+          "resources": [
+            "lib.rs",
+            "generators/*.rs",
+            "registry/parse.rs"
+          ]
+        },
+        {
+          "name": "khronos_api",
+          "version": "3.1.0",
+          "resources": [
+            "src/lib.rs",
+            "build.rs"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    },
+    {
+      "file": "gl-rs-2015-2016-apache-header.txt",
+      "sha256": "b185f94aadadfc7d2ddcb32b94c39d84e38cbcef2d8b6ee603ad4d0072802d94",
+      "bytes": 626,
+      "source_url": "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/gl_generator/registry/mod.rs",
+      "source_sha256": "84eed5c113b322e5267b2b130987e6bb726b4e7c38ce50292cd6cc57b8e06994",
+      "source_bytes": 5280,
+      "extraction": "leading_rust_comment",
+      "packages": [
+        {
+          "name": "gl_generator",
+          "version": "0.14.0",
+          "resources": [
+            "registry/mod.rs"
+          ]
+        }
+      ],
+      "basis": "Supplemental original resource/source notice; does not assert a crate-wide license expression."
+    }
+  ]
+}

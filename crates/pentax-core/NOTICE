@@ -1,0 +1,255 @@
+PentaX source-observed kernel objects and graphics submit services
+
+The prepared NetCtl callback bridge additionally adapts the disconnected-event
+iteration in src/libs/network.cpp and scoped registrations in libNet.cpp at
+209dffe9032d72749257ce18680d506b891284de. PentaX independently attests owner,
+source, thread, immutable executable target, original service and actual nested
+call/return identities. Callback completion is published only after a verified
+guest return; sequential callbacks suspend the same original caller. No raw
+host callback or fabricated network connectivity replaces guest execution.
+
+Graphics interrupt integration additionally adapts pinned agc.cpp's four event
+wrappers, renderer/sync.cpp/h, renderContext.cpp/h, referenceClock.h and
+kernel/eventQueueFilters.h. PentaX uses owner-bound retained kernel subscriptions,
+exclusive prepared delivery and ordered release retirement after real Vulkan
+fences and label writeback. No host callback, arbitrary event injection, fabricated
+completion or frame/presentation claim replaces those source operations.
+
+The diagnostic-only public_names table adapts public LIB_FUNC registration
+identities and function names from src/libs/libKernel.cpp and src/libs/libC.cpp
+at revision 209dffe9032d72749257ce18680d506b891284de. Exact module/library/version
+matching and bounded binary lookup return a static public label or no label.
+This table neither provides implementations nor changes import resolution.
+
+The three library-bound HTTP2 diagnostic references in
+process/hle/kernel_startup/public_names/sharp_http2.rs adapt only the explicit
+Gen5 Nid, ExportName and LibraryName attributes from SharpEmu:
+  https://github.com/sharpemu/sharpemu/blob/b0fa905fa10682107813dd4c53c48a18005859d6/src/SharpEmu.Libs/Network/Http2Exports.cs
+  Source lines 202-205, 280-283 and 293-296; Git blob
+  c3dd043c06b95462950f1227bce70c3875378849.
+Original notice: Copyright (C) 2026 SharpEmu Emulator Project;
+SPDX-License-Identifier: GPL-2.0-or-later. The complete GPL version 2 text is
+retained in the root LICENSE. PentaX modifications, 2026: static Rust data and
+bounded library-bound reference lookup, separate from exact-name lookup and
+callable providers. No SharpEmu service implementation is included; module,
+version, execution ABI and behavior are not inferred from these attributes.
+
+The public name-hash candidates in
+process/hle/kernel_startup/public_names/name_hashes.rs are derived only from:
+  https://github.com/sharpemu/sharpemu/blob/b0fa905fa10682107813dd4c53c48a18005859d6/scripts/ps5_names.txt
+  Git blob 53f57fa8affbe06af3882bb6b6167eee1b680ed1.
+The same revision's REUSE.toml assigns this corpus to SharpEmu Emulator Project
+under GPL-2.0-or-later; no copyright year is added to that corpus annotation.
+The root LICENSE retains the complete GPL version 2 text. PentaX modifications,
+2026: a bounded subset of unique, protocol-safe public name/hash pairs, with
+collision refusal and diagnostic-only lookup. Hash derivation follows the
+public Ps5Nid.cs and GenerateAerolibBinaryTask.cs rules at the same source pin.
+No input-only identifier is retained, and the data establishes no library,
+module, descriptor version, exported symbol type, execution ABI or behavior.
+
+Sysmodule application-file startup ordering additionally follows the public
+KytyPS5 libSysmodule.cpp revision1125a0013eea7bdf54cda852c515ae0c45ef7e06,
+Git blob10e43457331ef1a4b6d7475d864e90a003c07ee2, GPL version2. The explicit
+file-capability selection and existing Rust source-epoch/nested-return machinery
+replace global runtime access and ambient file lookup. Actual returns retain
+their source ownership; no module code, guessed layout or export stub is copied.
+
+The kernel provider additionally adapts the two libkernel OBJECT registrations,
+the stack-check guard's initial guest value and the 511-byte program-name bound
+from src/libs/libKernel.cpp at the same pinned revision below. PentaX replaces
+the source's host globals with per-owner R-W/NX guest storage, a genuine guest
+RELATIVE pointer relocation and transactional name initialization with main-entry
+arguments. No host pointer or guest data object becomes a callable marker.
+
+The graphics provider and gpu/driver module adapt registration identities,
+argument layouts and submit branches from KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de:
+  src/libs/libAgcDriver.cpp: Graphics5Driver/Graphics5 1, module 1.1 registrations
+  src/libs/agc.h: Packet size and address/dword-count/flags offsets
+  src/libs/agc.cpp: SubmitCommandBuffer, SubmitMultiCommandBuffers,
+    SubmitAcb, SubmitMultiAcbs, AgcSuspendPoint and queue-context offset/routing
+  src/graphics/guest_gpu/graphicsRun.{h,cpp}: bounded compute queue IDs and Done's
+    frame-boundary counter, next-graphics reset flag and completion-prefix contract
+
+Original retained copyright: Copyright (c) 2021 InoriRus.
+The source project specifies GPL version 2 only. The complete GPL text is
+retained in the root LICENSE; its full original MIT grant is retained in
+LICENSES/Kyty-MIT.txt. No additional copyright holder is invented.
+
+PentaX modifications, 2026: an original immutable scoped ELF provider,
+owner/source/live-marker attestation before library dispatch, checked guest
+data reads, bounded batch snapshots and cumulative session limits, synchronous
+compiler/Vulkan execution with same-owner fenced writeback, and typed stops
+for unsupported queues, commands or resource profiles. No C++ code, game
+program or game shader is distributed. Original x64 diagnostic consumers
+exercise the four imported functions. Known compute registers now persist
+independently per observed ACB queue. Bounded command plans include indirect
+call/chain frames and multiple dispatches; same-owner backing checks refuse GPU
+writes aliasing captured commands. Failures after possible GPU work are terminal.
+Ordered memory writes and fulfilled waits retain the same exclusive owner and
+transactional admission; failure after possible guest writes is also terminal.
+Indirect arguments are read after earlier effects, with explicit empty outcomes.
+Draw queues, asynchronous scheduling, general coherence and presentation remain
+unfinished.
+
+AgcSuspendPoint retains per-owner frame-boundary/reset state without clearing
+compute queues. The synchronous backend completes fenced GPU work and same-owner
+writeback before submission returns, so successful boundaries have no outstanding
+prefix to wait for; poisoned partial submissions cannot report success. Boundary
+count is not a presented-frame count. Exact Graphics5/Graphics5 and the separately
+verified libSceAgc/libSceAgc module/library 1.1/1 spellings are admitted; submit
+functions remain in their own Graphics5Driver namespace.
+
+The libc extension heap-trace registration, record layout and initial mask/table
+state adapt src/libs/libC.cpp (LibcInternalExt::LibcHeapGetTraceInfo) at pinned
+revision 209dffe9032d72749257ce18680d506b891284de. Original copyright:
+Copyright (c) 2021 InoriRus; GPL-2.0-only. PentaX replaces host globals/pointers
+with per-owner RW/NX guest storage and complete-span checked output publication.
+The new dispatch/heap_trace.rs implementation carries the matching SPDX notice.
+The matching libSce-prefixed module/library identity is derived from
+src/loader/symbolDatabase.cpp UpdateName at the same pinned revision. Only the
+reviewed trace-query pair is added; ordinary linker names remain byte-exact.
+
+The owned video-port lifecycle adapts graphics/presentation/videoOut.cpp/h,
+libs/libVideoOut.cpp and errno.h at the same pinned209dffe revision. Original
+copyright: Copyright (c)2021 InoriRus; GPL-2.0-only. PentaX replaces global
+contexts, mutexes and pointers with three fixed per-driver ports, checked
+generation/reference changes, bounded work and exact transactional guest output.
+Source-aborting user/index/master-close branches stay typed failures. Normal
+and libSce-prefixed namespace descriptors remain exact. Port opening/configuring
+does not claim a presented image, vblank tick or submitted asynchronous work;
+buffer/event/flip owners must join these same retained port lifetimes.
+
+VideoOutGetOutputStatus additionally retains the pinned48-byte layout, null-before-
+handle ordering, ATTRIBUTE3 resolution-detection bit and selected-mode/follow-tick
+refresh rules. Explicit caller-admitted display policy replaces global host
+environment/metadata lookup; missing ATTRIBUTE3 retains the source zero fallback.
+All record bytes preflight and publish transactionally on the same native owner.
+
+The same source's VideoOutSetBufferAttribute2 and AddBufferAttributeOption retain
+their80-byte field layout and exact option-field OR. Captured source SysV stack
+words supply arguments7/8 through checked guest reads before any output. Atomic
+publication replaces raw pointer/memset stores, preserving source argument
+widths and aliasing. Source void transport results convey no success code.
+
+AgcInit additionally retains pinned src/libs/agc.cpp's no-state-access return
+contract and exact libAgcDriver.cpp registration in Graphics5. The reviewed
+libSceAgc namespace uses its explicit descriptor spelling, without a global
+NID fallback. PentaX keeps shared admission/poisoning and emits no guest-derived
+pointer/version logging. This library no-op does not imply renderer startup.
+
+AGC register defaults adapt pinned src/libs/agc.cpp, agc.h,
+agcRegisterDefaults.inc and graphics/shader/shader.h. Exact source data blob:
+f02dff5f6b023c25e30bec79343d1ee83692be1b at revision
+209dffe9032d72749257ce18680d506b891284de; original copyright and GPL-2.0-only
+terms above apply. PentaX translates static arrays and reviewed version-derived
+patches into Rust little-endian data, checked same-owner guest pointers and
+bounded per-owner storage. Separate version descriptors/pointer tables retain
+shared register/type-array aliases; transactional RW/NX materialization replaces
+native global pointers and vectors. No game data is included.
+
+AgcGetIsTrinityMode additionally adapts agc.cpp's fixed false base-console
+profile and exact one-byte void output, with checked transactional publication
+instead of a raw guest pointer store. Neighbor preservation and bounded/poisoned
+refusal replace unchecked host memory access; no host GPU identity is inferred.
+
+AgcDriverRegisterOwner/RegisterResource/UnregisterOwnerAndResources/
+UnregisterResource additionally retain the pinned agc.cpp int32 error0x8a6c9018.
+Exact wrapper identities remain in Graphics5 despite their Driver function
+prefix. No output writes, host handles or successful registrations are invented.
+
+The same four registry contracts additionally use the explicitly reviewed
+AgcDriver/libSceAgcDriver ABI namespace with exact module1.1/library1 versions.
+The prefixed declaration was confirmed for the known public owner/resource
+identities in the selected startup input; the normal spelling follows pinned
+SymbolDatabase::UpdateName. Neither aliases Graphics5Driver nor enables NID-only
+resolution. Guest identifiers/paths/addresses are not included in source.
+
+AgcCreateShader additionally adapts pinned agc.cpp612..677 and its program-
+address helper, shader.h Shader/ShaderUserData layouts and shader.cpp's normal
+ShaderMapUserData contract. PentaX uses bounded source-ordered byte staging,
+checked same-owner transactions and per-owner retained metadata instead of
+unchecked native pointer writes and a process-global map. The source program
+error preserves its observable header/map effects without a successful output.
+Host/admission failures and unsupported physical aliasing remain typed stops.
+Matching registered code sizes constrain actual Rust compute preparation;
+title-specific hash/codegen overrides and general graphics execution are not
+claimed by this API port. No private game shader bytes are included.
+
+Video buffer registration, attribute replacement and unregister additionally
+adapt pinned videoOut.cpp1592..1758, its four-group/sixteen-buffer port lifetime,
+imageInfo.h's seven pixel-format policies and DCC classifier, tile.cpp's one-level
+RenderTarget64KB/DCC footprints, and image.cpp's40-bit range validation. Source
+tile.cpp blob16d86b8cb6b2ac6248fe81ddbab3091c0763788e and imageInfo.h blob
+89c3958c887e3a8ba3a196d9fd4c3d05213f8853 retain the same upstream GPL terms.
+Fixed Rust arrays and staged validation replace raw pointers, global state and
+host vectors. Source geometry/return domains, ignored descriptor reserves and
+retained raw attributes remain exact; no guest pointer logging is copied.
+Normalized geometry confers no backing authority or successful presentation.
+Future consumers must validate live same-owner memory before reading pixels.
+
+Fused shader sizing and both shader-half fusion contracts additionally adapt
+agc.cpp680..824, its register-search/address-patch helpers, Shader/SizeAlign
+layouts and pm4.h register identities at the same pinned209dffe revision.
+Original copyright and GPL-2.0-only terms above apply. Rust retains conditional
+field reads, exact guest errors and their copied-header prefix, both checksum
+occurrences, source VGPR/resource rules, optional scratch and program relocation,
+and modern/legacy userdata differences. Bounded staged edits and contiguous
+transaction outputs replace unchecked stores/memcpy; hard failures and distinct
+physical aliases publish no state. No source pointer logging or game data is
+included, and this contract does not claim GS/HS execution or presentation.
+
+Both interpolant-mapping variants additionally adapt the same pinned agc.cpp's
+semantic/default/F16 helpers and AgcCreateInterpolantMapping/2 at1215..1443,
+ShaderSemantic's32-bit layout and SPI_PS_INPUT_CNTL_0. Rust retains first-match
+selection, variant-specific fields, missing/default outputs, identity tails,
+conditional guest reads and ordered overlays under finite work/staging bounds.
+Independent original synthetic cases were checked against compiled pinned C++
+reference functions; no C++ reference runtime or game data enters the project.
+
+Bounded source-profile snprintf formatting
+
+The libc snprintf registration, captured guest variadic argument layout, parser,
+integer/floating conversion and UTF-16 string behavior adapt public KytyPS5
+revision f186b35706ddbc3faf5513f326e2335d224802f7:
+  src/libs/libC.cpp       blob 7ed98856bb8d3bc972875525b3d8e7e6fd85b47a
+  src/libs/guestPrintf.cpp blob afc61624f385f2e223625db1ff5777c2367c8197
+  src/libs/guestPrintf.h  blob 0e71438e6d32cf6d14a6fa4ce68dc1eeab1b7184
+  src/libs/vaContext.h   blob 399d0cc06f43449b88f1627572b2566fa9917445
+  src/common/stringUtils.h blob 89f7217e51a29425e4b13f95677ee35bb0b9191a
+  src/loader/symbolDatabase.cpp blob 992e43f9b5a81c29e6c4ca614105934c8cfcde78
+Source project: https://github.com/KytyPS5/KytyPS5
+The KytyPS5 source tree uses GPL version 2, retained in the root LICENSE.
+
+guestPrintf.cpp attributes its original formatting algorithm to Marco Paland,
+2014-2019, PALANDesign Hannover, Germany, https://github.com/mpaland/printf,
+under the MIT License. Its exponential floating-point conversion credits
+Martijn Jasperse. Those algorithm contributions are not original PentaX work.
+
+PentaX modifications, 2026: bounded Rust parsing/conversion over checked guest
+memory, actual captured GP/XMM arguments and a shared guest stack cursor,
+fallible staging and one complete checked destination write. Source-undefined,
+unsafe or aborting cases remain typed pre-write refusals. No host snprintf,
+host va_list, raw guest pointer dereference or title-specific format is used.
+
+The MIT License (MIT)
+
+Copyright (c) 2014-2019 Marco Paland
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

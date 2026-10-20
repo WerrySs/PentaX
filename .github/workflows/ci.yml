@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_HOME: ${{ runner.temp }}/pentax-cargo
+  RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/source --remap-path-prefix=${{ runner.temp }}/pentax-cargo=/cargo
+
+jobs:
+  portable:
+    name: Portable checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install desktop build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev
+      - name: Use the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check all targets with Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test portable library contracts
+        run: cargo test --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --lib -- --test-threads=2
+
+  windows:
+    name: Windows build and CPU contracts
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Use the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Build the desktop, CLI and worker
+        run: cargo build --locked --release -p pentax-desktop -p pentax-cli -p pentax-worker
+      - name: Test timestamp admission and state
+        run: cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1
+      - name: Test live stack permissions
+        run: cargo test --locked -p pentax-platform --lib combined_stack_preflight_checks_live_full_spans_cpu_rights_holes_and_poison -- --test-threads=1
+      - name: Test the native CPU and kernel counter boundary
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: cargo test --locked -p pentax-worker --test image_probe kernel_results::timestamp_counter:: -- --test-threads=1

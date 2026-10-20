@@ -1,0 +1,36 @@
+[package]
+name = "pentax-platform"
+description = "Audited Windows native memory and original-fixture execution boundary for PentaX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-2.0-only"
+repository.workspace = true
+
+[dependencies]
+pentax-gpu = { path = "../pentax-gpu" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock"] }
+
+[target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_SystemServices", "Win32_System_WindowsProgramming"] }
+cap-std = "=4.0.3"
+# Used by original diagnostics and reusable source-bound native stepping.
+# Planning/linking stay in crates that forbid unsafe code.
+pentax-codegen = { path = "../pentax-codegen" }
+pentax-linker = { path = "../pentax-linker" }
+pentax-loader = { path = "../pentax-loader" }
+ash = { version = "=0.38.0", default-features = false, features = ["loaded", "std"] }
+pentax-shader = { path = "../pentax-shader" }
+pentax-shader-compiler = { path = "../pentax-shader-compiler" }
+
+# Native allocation/ABI/Vulkan unsafe code is reviewed at this platform boundary.
+# Portable crates forbid unsafe. The dedicated worker separately denies it except
+# in its reviewed native-session module, which propagates this unsafe contract.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "warn"
+undocumented_unsafe_blocks = "deny"

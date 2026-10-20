@@ -1,0 +1,556 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+//! Exact factory/source binding and live PRE-SYSCALL graphics admission.
+use super::{
+    KernelStartupError, KernelStartupLimits, NativeServiceRequest, PreparedNativeKernelStartup,
+    UnavailableProviderPlacement, charge, require,
+};
+use crate::{
+    gpu::driver,
+    memory::{ADDRESS_LIMIT, PAGE_SIZE},
+    process::hle::{
+        GeneratedGraphicsProvider, HleError, ProviderPlacement, graphics_provider::GraphicsMarker,
+    },
+};
+use pentax_linker::{ModuleInput, Resolution, SymbolicLinkPlan};
+use pentax_loader::open_executable;
+use pentax_platform::native_memory::{NativeMemoryError, PausedNativeMemory};
+
+#[derive(Clone, Copy, Debug)]
+pub struct GraphicsStartupOptions<'image> {
+    pub provider: &'image GeneratedGraphicsProvider,
+    pub placement: ProviderPlacement,
+    pub limits: driver::Limits,
+    pub unavailable: Option<UnavailableProviderPlacement<'image>>,
+}
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GraphicsBinding<'image> {
+    pub factory: &'image GeneratedGraphicsProvider,
+    pub index: usize,
+    pub bias: u64,
+    pub limits: driver::Limits,
+}
+impl GraphicsBinding<'_> {
+    pub fn contains(&self, pc: u64) -> bool {
+        pc.checked_sub(self.bias).is_some_and(|rva| rva < PAGE_SIZE)
+    }
+}
+pub(super) fn append<'image>(
+    inputs: &mut Vec<ModuleInput<'image>>,
+    options: GraphicsStartupOptions<'image>,
+) -> Result<GraphicsBinding<'image>, KernelStartupError> {
+    let bias = options.placement.load_bias;
+    require(
+        bias.is_multiple_of(PAGE_SIZE)
+            && bias
+                .checked_add(PAGE_SIZE)
+                .is_some_and(|v| v <= ADDRESS_LIMIT),
+        "graphics provider placement",
+    )?;
+    let index = inputs.len();
+    let view = open_executable(options.provider.image())
+        .map_err(|e| KernelStartupError::Hle(HleError::Load(e)))?;
+    inputs.push(ModuleInput::new(view, bias));
+    Ok(GraphicsBinding {
+        factory: options.provider,
+        index,
+        bias,
+        limits: options.limits,
+    })
+}
+pub(super) fn validate(
+    plan: &SymbolicLinkPlan<'_>,
+    binding: &GraphicsBinding<'_>,
+    limits: &KernelStartupLimits,
+    work: &mut u64,
+) -> Result<(), KernelStartupError> {
+    let cost = (plan.patch_count() as u64)
+        .checked_add(4)
+        .ok_or(KernelStartupError::Budget("graphics provider work"))?;
+    charge(work, cost, limits.max_provider_work)?;
+    let module = &plan.modules()[binding.index];
+    let runtime = module.runtime_plan();
+    require(
+        module.load_bias() == binding.bias
+            && runtime.segments.len() == 1
+            && runtime.tls.is_none()
+            && runtime.relro.is_empty(),
+        "graphics module mapping",
+    )?;
+    let segment = &runtime.segments[0];
+    require(
+        std::ptr::eq(segment.file_bytes, binding.factory.image())
+            && segment.vaddr == 0
+            && segment.mem_size == PAGE_SIZE
+            && segment.flags.raw() == 5,
+        "graphics factory source identity",
+    )?;
+    for patch in plan.patches() {
+        require(
+            patch.consumer().index() != binding.index,
+            "graphics provider relocation",
+        )?;
+        let Resolution::Definition(symbol) = patch.resolution() else {
+            continue;
+        };
+        if symbol.module.index() != binding.index {
+            continue;
+        }
+        charge(
+            work,
+            binding.factory.function_count() as u64,
+            limits.max_provider_work,
+        )?;
+        let record = patch.source().record;
+        let addend = if record.kind() == 1 { record.addend } else { 0 };
+        require(
+            binding.factory.markers().any(|m| {
+                m.symbol == symbol.symbol
+                    && (binding.bias + m.rva()).wrapping_add_signed(addend) == patch.value()
+            }),
+            "graphics binding outside manifest",
+        )?;
+    }
+    Ok(())
+}
+fn attest_marker(
+    memory: &PausedNativeMemory<'_>,
+    binding: &GraphicsBinding<'_>,
+    marker: GraphicsMarker,
+) -> Result<(), KernelStartupError> {
+    let expected = marker.bytes();
+    let at = marker.rva() as usize;
+    require(
+        binding.factory.image().get(at..at + 8) == Some(&expected),
+        "graphics source marker",
+    )?;
+    let mut actual = [0; 8];
+    let address = binding.bias + marker.rva();
+    require(
+        matches!(
+            memory.preflight_write(address, 8),
+            Err(NativeMemoryError::PermissionDenied(_))
+        ),
+        "graphics marker immutable permission",
+    )?;
+    memory
+        .fetch_source(address, &mut actual)
+        .map_err(|_| KernelStartupError::InvalidProvider("graphics marker fetch permission"))?;
+    require(actual == expected, "graphics live marker bytes")
+}
+pub(super) fn attest_all(
+    memory: &PausedNativeMemory<'_>,
+    binding: &GraphicsBinding<'_>,
+    work: &mut u64,
+    maximum: u64,
+) -> Result<(), KernelStartupError> {
+    charge(
+        work,
+        binding.factory.function_count() as u64 * 8 + 1,
+        maximum,
+    )?;
+    for marker in binding.factory.markers() {
+        attest_marker(memory, binding, marker)?;
+    }
+    Ok(())
+}
+pub(super) fn stop(
+    session: &mut PreparedNativeKernelStartup<'_, '_>,
+    request: NativeServiceRequest,
+) -> Result<u64, KernelStartupError> {
+    let binding = session
+        .plan
+        .graphics
+        .ok_or(KernelStartupError::InvalidProvider(
+            "missing graphics provider",
+        ))?;
+    charge(
+        &mut session.provider_work,
+        binding.factory.function_count() as u64 + 8,
+        session.plan.limits.max_provider_work,
+    )?;
+    let marker = binding
+        .factory
+        .markers()
+        .find(|m| binding.bias + m.rva() + 5 == request.syscall_pc)
+        .ok_or(KernelStartupError::SiteMismatch {
+            syscall_pc: request.syscall_pc,
+        })?;
+    if request.service_id != u64::from(marker.id()) {
+        return Err(KernelStartupError::ServiceIdMismatch {
+            expected: marker.id(),
+            actual: request.service_id,
+        });
+    }
+    let mut paused = session.hle.pause().map_err(KernelStartupError::Hle)?;
+    attest_marker(&paused, &binding, marker)?;
+    let driver = session
+        .graphics
+        .as_mut()
+        .ok_or(KernelStartupError::InvalidProvider(
+            "missing graphics state",
+        ))?;
+    if matches!(
+        marker.function,
+        driver::Function::AgcGetRegisterDefaults | driver::Function::AgcGetRegisterDefaultsInternal
+    ) {
+        let owner = paused.owner_id();
+        let mut guest = super::super::kernel_adapter::KernelMemory {
+            paused: &mut paused,
+            source: None,
+            supplied_modules: 0,
+            lookup_limits: None,
+            lookup_work: None,
+            loaded_modules: None,
+            thread_tls: None,
+            initial_entry: None,
+        };
+        driver.register_defaults(
+            owner,
+            &mut session.kernel,
+            &mut guest,
+            marker.function == driver::Function::AgcGetRegisterDefaultsInternal,
+            request.args[0],
+        )
+    } else {
+        driver.submit_with_kernel(
+            &mut paused,
+            marker.function,
+            request.args,
+            request.stack_pointer,
+            &mut session.kernel,
+        )
+    }
+    .map_err(KernelStartupError::Graphics)
+}
+impl PreparedNativeKernelStartup<'_, '_> {
+    pub fn graphics_usage(&self) -> driver::Usage {
+        self.graphics
+            .as_ref()
+            .map_or_else(driver::Usage::default, driver::Driver::usage)
+    }
+    pub fn graphics_frame_state(&self) -> Option<driver::FrameState> {
+        self.graphics.as_ref().map(driver::Driver::frame_state)
+    }
+    pub fn graphics_video_port(&self, handle: i32) -> Option<crate::gpu::video::PortState> {
+        self.graphics
+            .as_ref()
+            .and_then(|driver| driver.video_port(handle))
+    }
+    /// Registered geometry for this session; consumers still need live backing
+    /// admission before accessing color or metadata bytes.
+    pub fn graphics_video_surface(
+        &self,
+        handle: i32,
+        buffer: i32,
+    ) -> Option<crate::gpu::video::Surface> {
+        self.graphics
+            .as_ref()
+            .and_then(|driver| driver.video_surface(handle, buffer))
+    }
+    /// Retained guest-address metadata, not a memory or executable capability.
+    pub fn graphics_shader_metadata(
+        &self,
+        address: u64,
+    ) -> Option<crate::gpu::shaders::MappedShader> {
+        self.graphics
+            .as_ref()
+            .and_then(|driver| driver.shader_mapping(self.owner_id(), address))
+    }
+}
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod defaults_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod interrupt_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod tests {
+    use super::*;
+    use crate::process::hle::{
+        NativeImageLimits, unavailable::tests::original_input, with_native_image_session,
+    };
+    use pentax_platform::native_memory::{
+        NativeAddressSpace, NativeMemoryEffect, NativeMemoryTransaction, NativePermissions,
+    };
+    #[test]
+    fn graphics_imports_keep_exact_namespaces_and_version_conflicts() {
+        for (module, library, version, nid, missing) in [
+            ("Graphics5Driver", "Graphics5Driver", 1, "b4fpgH5ZXxQ", 0),
+            ("libkernel", "libkernel", 1, "b4fpgH5ZXxQ", 1),
+            ("Graphics5Driver", "Graphics5Driver", 2, "b4fpgH5ZXxQ", 0),
+            ("Graphics5", "Graphics5", 1, "h9z6+0hEydk", 0),
+            ("libSceAgc", "libSceAgc", 1, "h9z6+0hEydk", 0),
+            ("libSceAgc", "libSceAgc", 2, "h9z6+0hEydk", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "h9z6+0hEydk", 1),
+            ("Graphics5", "Graphics5", 1, "b4fpgH5ZXxQ", 1),
+            ("Graphics5", "Graphics5", 1, "23LRUSvYu1M", 0),
+            ("libSceAgc", "libSceAgc", 1, "23LRUSvYu1M", 0),
+            ("Graphics5", "Graphics5", 2, "23LRUSvYu1M", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "23LRUSvYu1M", 1),
+            ("Graphics5", "Graphics5", 1, "2JtWUUiYBXs", 0),
+            ("libSceAgc", "libSceAgc", 1, "wRbq6ZjNop4", 0),
+            ("Graphics5", "Graphics5", 2, "wRbq6ZjNop4", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "2JtWUUiYBXs", 1),
+            ("Graphics5", "Graphics5", 1, "BfBDZGbti7A", 0),
+            ("libSceAgc", "libSceAgc", 1, "BfBDZGbti7A", 0),
+            ("Graphics5", "Graphics5", 2, "BfBDZGbti7A", 0),
+            ("Graphics5", "Graphics5", 1, "X-Nm5KLREeg", 0),
+            ("libSceAgc", "libSceAgc", 1, "pWLG7WOpVcw", 0),
+            ("Graphics5", "Graphics5", 2, "W5z4eZrjEas", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "X-Nm5KLREeg", 1),
+            ("AgcDriver", "AgcDriver", 1, "X-Nm5KLREeg", 0),
+            ("libSceAgcDriver", "libSceAgcDriver", 1, "W5z4eZrjEas", 0),
+            ("libSceAgcDriver", "libSceAgcDriver", 2, "X-Nm5KLREeg", 0),
+            ("Graphics5", "Graphics5", 1, "f3dg2CSgRKY", 0),
+            ("libSceAgc", "libSceAgc", 1, "f3dg2CSgRKY", 0),
+            ("libSceAgc", "libSceAgc", 2, "f3dg2CSgRKY", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "f3dg2CSgRKY", 1),
+        ] {
+            let mut input = original_input(1);
+            let strings = u64::from_le_bytes(input[0x208..0x210].try_into().unwrap()) as usize;
+            input[strings + 1..strings + 17].fill(0);
+            input[strings + 1..strings + 1 + module.len()].copy_from_slice(module.as_bytes());
+            input[strings + 17..strings + 34].fill(0);
+            input[strings + 17..strings + 17 + library.len()].copy_from_slice(library.as_bytes());
+            let name = u32::from_le_bytes(input[0x418..0x41c].try_into().unwrap()) as usize;
+            input[strings + name..strings + name + 11].copy_from_slice(nid.as_bytes());
+            input[0x258..0x260]
+                .copy_from_slice(&(1_u64 | (1 << 32) | (1 << 40) | (2 << 48)).to_le_bytes());
+            input[0x268..0x270]
+                .copy_from_slice(&(17_u64 | (version << 32) | (3 << 48)).to_le_bytes());
+            let result = with_native_image_session(
+                &[&input],
+                &NativeImageLimits {
+                    stack_bytes: PAGE_SIZE,
+                    kernel_window_bytes: 65536,
+                    ..Default::default()
+                },
+                |session, layout| {
+                    assert_eq!(layout.unavailable_functions, missing);
+                    assert_eq!(session.graphics_usage(), driver::Usage::default());
+                    Ok::<_, ()>(())
+                },
+            );
+            if version == 2 {
+                assert_eq!(result.unwrap_err().code(), "import-version-mismatch");
+            } else {
+                result.unwrap();
+            }
+        }
+    }
+    #[test]
+    fn video_requests_retain_same_owner_ports_and_refuse_forged_calls_before_effects() {
+        let input = original_input(0);
+        with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
+            let binding = session.plan.graphics.unwrap();
+            assert_eq!(binding.factory.function_count(), 106);
+            let open = binding
+                .factory
+                .markers()
+                .find(|m| m.function == driver::Function::VideoOpen)
+                .unwrap();
+            let close = binding
+                .factory
+                .markers()
+                .find(|m| m.function == driver::Function::VideoClose)
+                .unwrap();
+            let request = NativeServiceRequest {
+                stack_pointer: None,
+                vector_args: None,
+                owner_id: session.owner_id(),
+                syscall_pc: binding.bias + open.rva() + 5,
+                next_pc: binding.bias + open.rva() + 7,
+                service_id: u64::from(open.id()),
+                args: [255, 0, 0, u64::MAX, 0, 0],
+            };
+            let other = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
+            let mut bad = request;
+            bad.owner_id = other.owner_id();
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::NativeOwnerMismatch)
+            ));
+            assert_eq!(session.graphics_video_port(1), None);
+            bad = request;
+            bad.service_id |= 1 << 32;
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::ServiceIdMismatch { .. })
+            ));
+            assert_eq!(session.graphics_video_port(1), None);
+            assert_eq!(session.service_request(request).unwrap(), 1);
+            assert_eq!(session.graphics_video_port(1).unwrap().generation, 1);
+            let close_request = NativeServiceRequest {
+                syscall_pc: binding.bias + close.rva() + 5,
+                next_pc: binding.bias + close.rva() + 7,
+                service_id: u64::from(close.id()),
+                args: [1, 0, 0, 0, 0, 0],
+                ..request
+            };
+            assert_eq!(session.service_request(close_request).unwrap(), 0);
+            assert_eq!(session.graphics_video_port(1), None);
+            assert_eq!(session.service_request(request).unwrap(), 1);
+            assert_eq!(session.graphics_video_port(1).unwrap().generation, 3);
+            assert_eq!(session.graphics_frame_state().unwrap().boundaries, 0);
+            assert_eq!(session.graphics_usage().dispatches, 0);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn graphics_requests_attest_owner_site_full_id_permissions_and_budgets_before_gpu() {
+        let input = original_input(0);
+        let limits = NativeImageLimits {
+            stack_bytes: PAGE_SIZE,
+            kernel_window_bytes: 65536,
+            graphics: driver::Limits {
+                max_calls: 10,
+                max_batch_buffers: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        with_native_image_session(&[&input], &limits, |session, layout| {
+            let binding = session.plan.graphics.unwrap();
+            // This case exercises the original four submit/two boundary APIs;
+            // video ports have separate stateful request coverage below.
+            let markers: Vec<_> = binding.factory.markers().take(6).collect();
+            let request = |marker: GraphicsMarker, args| NativeServiceRequest {
+                stack_pointer: None,
+                vector_args: None,
+                owner_id: session.owner_id(),
+                syscall_pc: binding.bias + marker.rva() + 5,
+                next_pc: binding.bias + marker.rva() + 7,
+                service_id: u64::from(marker.id()),
+                args,
+            };
+            let requests: Vec<_> = markers.iter().map(|m| request(*m, [0; 6])).collect();
+            let mut bad = requests[0];
+            bad.service_id |= 1 << 32;
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::ServiceIdMismatch { .. })
+            ));
+            bad = requests[0];
+            bad.next_pc += 1;
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::ContinuationMismatch { .. })
+            ));
+            bad = requests[0];
+            bad.syscall_pc += 1;
+            bad.next_pc += 1;
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::SiteMismatch { .. })
+            ));
+            let other = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
+            bad = requests[0];
+            bad.owner_id = other.owner_id();
+            assert!(matches!(
+                session.service_request(bad),
+                Err(KernelStartupError::NativeOwnerMismatch)
+            ));
+            for (i, request) in requests.iter().enumerate() {
+                assert_eq!(
+                    session.service_request(*request).unwrap(),
+                    if i == 0 { 0x8002_0016 } else { 0 }
+                );
+            }
+            assert_eq!(session.graphics_frame_state().unwrap().boundaries, 2);
+            let mut bad = requests[2];
+            bad.args = [0x20, 1, 0, 0, 0, 0];
+            assert_eq!(
+                session.service_request(bad),
+                Err(KernelStartupError::Graphics(driver::Failure::Memory))
+            );
+            let base = layout.entry.stack.address + 0x100;
+            let mut packet = [0; 16];
+            packet[..8].copy_from_slice(&(base + 64).to_le_bytes());
+            packet[8..12].copy_from_slice(&1_u32.to_le_bytes());
+            {
+                let mut paused = session.pause().unwrap();
+                // The packet fixture is CPU data, while its command payload
+                // requires an explicitly admitted GPU-readable backing page.
+                paused
+                    .apply_transaction(
+                        NativeMemoryTransaction {
+                            effect: NativeMemoryEffect::Protect {
+                                address: layout.entry.stack.address,
+                                size: PAGE_SIZE,
+                                permissions: NativePermissions::READ_WRITE.with_gpu(true, true),
+                            },
+                            writes: &[],
+                        },
+                        &Default::default(),
+                    )
+                    .unwrap();
+                paused.write(base, &packet).unwrap();
+                paused
+                    .write(base + 64, &0x8000_0000_u32.to_le_bytes())
+                    .unwrap();
+            }
+            bad = requests[2];
+            bad.args = [0x1f, base, 0, 0, 0, 0];
+            assert_eq!(
+                session.service_request(bad),
+                Err(KernelStartupError::Graphics(
+                    driver::Failure::UnsupportedQueue
+                ))
+            );
+            bad = requests[3];
+            bad.args = [0x20, 1, 1, 3, 0, 0];
+            assert_eq!(
+                session.service_request(bad),
+                Err(KernelStartupError::Graphics(driver::Failure::Limit))
+            );
+            // Live writable code cannot gain authority from its original bytes.
+            session
+                .pause()
+                .unwrap()
+                .apply_transaction(
+                    NativeMemoryTransaction {
+                        effect: NativeMemoryEffect::Protect {
+                            address: binding.bias,
+                            size: PAGE_SIZE,
+                            permissions: NativePermissions::new(true, true, true),
+                        },
+                        writes: &[],
+                    },
+                    &Default::default(),
+                )
+                .unwrap();
+            assert!(matches!(
+                session.service_request(requests[2]),
+                Err(KernelStartupError::InvalidProvider(_))
+            ));
+            session
+                .pause()
+                .unwrap()
+                .apply_transaction(
+                    NativeMemoryTransaction {
+                        effect: NativeMemoryEffect::Protect {
+                            address: binding.bias,
+                            size: PAGE_SIZE,
+                            permissions: NativePermissions::new(true, false, true),
+                        },
+                        writes: &[],
+                    },
+                    &Default::default(),
+                )
+                .unwrap();
+            assert_eq!(session.service_request(requests[2]).unwrap(), 0);
+            assert_eq!(
+                session.service_request(requests[2]),
+                Err(KernelStartupError::Graphics(driver::Failure::Limit))
+            );
+            assert_eq!(session.graphics_usage().calls, 10);
+            assert_eq!(session.graphics_usage().dispatches, 0);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+    }
+}

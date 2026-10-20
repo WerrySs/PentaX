@@ -1,0 +1,24 @@
+The network backend startup hook is a modified Rust adaptation of a portion of
+KytyPS5-Performance.
+
+Source project: https://github.com/WerrySs/KytyPS5-Performance
+Pinned source: 209dffe9032d72749257ce18680d506b891284de
+Upstream project: https://github.com/KytyPS5/KytyPS5
+
+Adapted source:
+  src/libs/network.cpp, Net::EnsureSocketBackend and NetInit: Windows
+  WSAStartup(MAKEWORD(2, 2)), retaining successful initialization and allowing
+  retry after failure. The guest NetInit wrapper preserves the pinned zero
+  return even if platform initialization fails. PentaX exposes this operation
+  through its checked platform boundary;
+  no guest integer is converted to a host function or socket pointer.
+
+This hook performs actual backend initialization only. It does not create a
+connection, execute DNS, allocate guest network pools or send/receive packets.
+The pinned NetTerm performs no cleanup and has no registration in the reviewed
+libNet.cpp export table; no WSACleanup behavior is attributed to it.
+
+The adapted implementation is distributed under GPL-2.0-only; the full license
+is in ../../LICENSE. Existing original files retain their individual SPDX
+grants. The Vulkan adaptation has its separate notice in src/vulkan/NOTICE;
+this notice does not replace that attribution or dependency license notices.

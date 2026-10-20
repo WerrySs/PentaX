@@ -1,0 +1,21 @@
+[package]
+name = "pentax-core"
+description = "Guest memory, process loading and reference CPU execution for PentaX"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pentax-config.workspace = true
+pentax-gpu = { path = "../pentax-gpu" }
+pentax-loader.workspace = true
+pentax-linker = { path = "../pentax-linker" }
+pentax-platform = { path = "../pentax-platform" }
+pentax-kernel = { path = "../pentax-kernel" }
+pentax-codegen = { path = "../pentax-codegen" }
+
+[lints]
+workspace = true
+

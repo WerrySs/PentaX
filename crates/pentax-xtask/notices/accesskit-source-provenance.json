@@ -1,0 +1,1086 @@
+{
+  "schema_version": 1,
+  "scope": "Confirmed original AccessKit copyright/derived-source headers for the six locked MIT-option packages. Retain beside complete MIT and BSD terms. Does not relabel whole crates.",
+  "upstream_revision": "ce8164ba92995cfa86005b6259115e08c8244253",
+  "verification_archive_url": "https://codeload.github.com/AccessKit/accesskit/tar.gz/ce8164ba92995cfa86005b6259115e08c8244253",
+  "verification_archive_sha256": "7f3de38b2a46d46483f5385cb21917b3b9d0c7ab360c62e723f210db360a6707",
+  "records": [
+    {
+      "file": "accesskit-source-header-01.txt",
+      "sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71",
+      "bytes": 221,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/lib.rs",
+      "source_sha256": "3791dbc253d60a2c5dc7020b6f49e483d3ea3f7d8ff4244966e1bd9c08270581",
+      "source_bytes": 7373,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/lib.rs",
+            "src/tree.rs"
+          ]
+        },
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/lib.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/lib.rs",
+          "source_sha256": "3791dbc253d60a2c5dc7020b6f49e483d3ea3f7d8ff4244966e1bd9c08270581",
+          "source_bytes": 7373,
+          "header_sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71"
+        },
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/tree.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/tree.rs",
+          "source_sha256": "8b600cfb981db3c41d88619db30a93293d8fa8fca6dd37853b4b3e746129f0c5",
+          "source_bytes": 115195,
+          "header_sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/lib.rs",
+          "source_sha256": "8a6f20ed5354c9834d88a59091c764f65aa31359f81c57386fe06e9d806e9396",
+          "source_bytes": 501,
+          "header_sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-02.txt",
+      "sha256": "39e7c03e4e604262cb89b837faa1b50a4cede98164db77787210fb9a865b2b01",
+      "bytes": 450,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit/src/lib.rs",
+      "source_sha256": "f77ed125614c6e735141bdc5fe8551cfc8dbc2d16ffccf4d52880c2c2bdfeffd",
+      "source_bytes": 129213,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.1",
+          "resources": [
+            "src/lib.rs"
+          ]
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/iterators.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit",
+          "version": "0.25.1",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit/src/lib.rs",
+          "source_sha256": "f77ed125614c6e735141bdc5fe8551cfc8dbc2d16ffccf4d52880c2c2bdfeffd",
+          "source_bytes": 129213,
+          "header_sha256": "39e7c03e4e604262cb89b837faa1b50a4cede98164db77787210fb9a865b2b01"
+        },
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/iterators.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/iterators.rs",
+          "source_sha256": "454de6ccb571e7bd831c721b8ba4eb76dbefbe97043abfc727b917c2bcc28a1a",
+          "source_bytes": 32869,
+          "header_sha256": "39e7c03e4e604262cb89b837faa1b50a4cede98164db77787210fb9a865b2b01"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-03.txt",
+      "sha256": "37d1e23e66a24d308ac1f7f47b07d636687b470696b7764d201e302390298ed0",
+      "bytes": 450,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/node.rs",
+      "source_sha256": "79686e8c6867cff462dd7920bba8774dc01163829f1cfb75d46af07cbf2ec6a2",
+      "source_bytes": 67182,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/node.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/node.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/node.rs",
+          "source_sha256": "79686e8c6867cff462dd7920bba8774dc01163829f1cfb75d46af07cbf2ec6a2",
+          "source_bytes": 67182,
+          "header_sha256": "37d1e23e66a24d308ac1f7f47b07d636687b470696b7764d201e302390298ed0"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-04.txt",
+      "sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e",
+      "bytes": 221,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/action.rs",
+      "source_sha256": "36d0787759c74a16a0718a81bd9b10d73d03c1114610c7c7d529ef8f2bd8efb5",
+      "source_bytes": 432,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/action.rs",
+            "src/error.rs",
+            "src/events.rs",
+            "src/lib.rs",
+            "src/rect.rs",
+            "src/util.rs"
+          ]
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/text.rs"
+          ]
+        },
+        {
+          "name": "accesskit_macos",
+          "version": "0.27.1",
+          "resources": [
+            "src/adapter.rs",
+            "src/context.rs",
+            "src/event.rs",
+            "src/lib.rs",
+            "src/subclass.rs",
+            "src/util.rs"
+          ]
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.0",
+          "resources": [
+            "src/adapter.rs",
+            "src/atspi/bus.rs",
+            "src/atspi/interfaces/accessible.rs",
+            "src/atspi/interfaces/action.rs",
+            "src/atspi/interfaces/application.rs",
+            "src/atspi/interfaces/component.rs",
+            "src/atspi/interfaces/mod.rs",
+            "src/atspi/interfaces/value.rs",
+            "src/atspi/mod.rs",
+            "src/atspi/object_address.rs",
+            "src/atspi/object_id.rs",
+            "src/lib.rs",
+            "src/util.rs"
+          ]
+        },
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/adapter.rs",
+            "src/subclass.rs",
+            "src/tests/mod.rs",
+            "src/tests/simple.rs",
+            "src/tests/subclassed.rs",
+            "src/text.rs",
+            "src/util.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/action.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/action.rs",
+          "source_sha256": "36d0787759c74a16a0718a81bd9b10d73d03c1114610c7c7d529ef8f2bd8efb5",
+          "source_bytes": 432,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/error.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/error.rs",
+          "source_sha256": "9905c653b2b86274331ba783f6ed3f37acf9bd3f450e59811bdc6b7522c51ff7",
+          "source_bytes": 1011,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/events.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/events.rs",
+          "source_sha256": "151b7ac8a6ccd2b4ab7ad81dc4c8618f4270182d6def747ce31b1bd30d039ee0",
+          "source_bytes": 1597,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/lib.rs",
+          "source_sha256": "2cdd44a13d5403fb8327f6b0fdb6761066c910d603de5c441bb15c17830b070e",
+          "source_bytes": 906,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/rect.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/rect.rs",
+          "source_sha256": "b24337632621ee6bfa6397525bbd864b08b94e23c9201ebefd0fd73d1aa112e2",
+          "source_bytes": 898,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/util.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/util.rs",
+          "source_sha256": "a20bc2230e983c79dd0a0ce38508b580a5041829b2eafcebd8933387f45b248c",
+          "source_bytes": 4631,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/text.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/text.rs",
+          "source_sha256": "fa7b185e22782ab9c84fe1bbc132f0d39a51b3664ad4ab332ebc69f2f98559e2",
+          "source_bytes": 102786,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/adapter.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/adapter.rs",
+          "source_sha256": "622334ba9d79d695bd320a6da0be4d6b4476f3031dcd8b2f0e0f358bcbc9b122",
+          "source_bytes": 10510,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/context.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/context.rs",
+          "source_sha256": "044150b753eeed39855a9bf5893c7eb20f06183068a697bca529407e2b989261",
+          "source_bytes": 3163,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/event.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/event.rs",
+          "source_sha256": "e3cc2226539c79b4153fbbdf17963db91699fe1f0a9827326f2f919578d75335",
+          "source_bytes": 11663,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/lib.rs",
+          "source_sha256": "b1df68dc7181efe2f833df5367493a3d2cc06dc2993202f612c4bf18285f7972",
+          "source_bytes": 557,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/subclass.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/subclass.rs",
+          "source_sha256": "54bfb61ddd2f8f10d5b2d632849c20a2f6b0d6716cae5091ae4122d8afbb42b9",
+          "source_bytes": 9925,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/util.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/util.rs",
+          "source_sha256": "35a164c335ff88a7e83bd8890f05e1cd64ec4c672aa5edb9a6e9d8ee4a10c239",
+          "source_bytes": 3766,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/adapter.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/adapter.rs",
+          "source_sha256": "b7dee572fc62eb56b79474d3ef1bfec8ac14ba4540a032a2f147cf73c2c9150f",
+          "source_bytes": 9058,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/bus.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/bus.rs",
+          "source_sha256": "ed7f35016b3df2cd2ebcaa2ca8a401e36b3b609c51155d45e8b241c9756acc9d",
+          "source_bytes": 18289,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/accessible.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/accessible.rs",
+          "source_sha256": "b60a1c989be3edf03e9661df8663cdd1b3930ac40db40058cafabb322ce38626",
+          "source_bytes": 6978,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/action.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/action.rs",
+          "source_sha256": "7ffa334b1cace21aa567a074d0c1ba59dd2229449af02ffc329bfd4671940903",
+          "source_bytes": 1453,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/application.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/application.rs",
+          "source_sha256": "530316441ee42b415605f6f50526ac776d8ab038aff24dfa02d4352dedcf2db0",
+          "source_bytes": 1054,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/component.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/component.rs",
+          "source_sha256": "bb95115fe289aa2b92b6fce76a7a60df9a93a06a32281192aa4fdd6e75373fc3",
+          "source_bytes": 2359,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/mod.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/mod.rs",
+          "source_sha256": "a3f7875a51c3f69de9a6cbbf03044fa588270d6095c00446525308d84a5172fb",
+          "source_bytes": 1178,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/value.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/value.rs",
+          "source_sha256": "829dfa73ab581da1be9210c1a6a0361bbb8563fb8d49c7057557cc1ddefafbab",
+          "source_bytes": 1417,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/mod.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/mod.rs",
+          "source_sha256": "2ea8e56ae5d3fde6a380582890597d49a0390a86dfddcb275df5281ad46cd90e",
+          "source_bytes": 418,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/object_address.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/object_address.rs",
+          "source_sha256": "71f293f5de1c46e5e2a2503053baa3c1fe7c62c13cc7c957dbf2843dfa531e79",
+          "source_bytes": 1341,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/object_id.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/object_id.rs",
+          "source_sha256": "d0046b00da17de03c1aecbe6b50b1eb6cad5d7c3f28235f7abe263cc4d483d3f",
+          "source_bytes": 2290,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/lib.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/lib.rs",
+          "source_sha256": "4416ce59366d321c3dbd29a1054c3ad6c426168c97f7b237ff3e818de6c3168c",
+          "source_bytes": 972,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/util.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/util.rs",
+          "source_sha256": "2a043a60ea1d76c5603d65d5a9844586f00d1d310902032214a10c70b80750c5",
+          "source_bytes": 1616,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/adapter.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/adapter.rs",
+          "source_sha256": "f4342311058a86cb67aa7526bce5f874dddf11c9295c160591b46781387a6376",
+          "source_bytes": 26726,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/subclass.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/subclass.rs",
+          "source_sha256": "69bb742d5451f2cff1c2110e77782948cb751aaad3302c5b1453ebf8b3d20a9e",
+          "source_bytes": 6721,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/tests/mod.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/tests/mod.rs",
+          "source_sha256": "de33703d001a741529e6248c5165a5f3effa1115d1ef2db6f115adcc45ca5d04",
+          "source_bytes": 11724,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/tests/simple.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/tests/simple.rs",
+          "source_sha256": "828c3c036bebb9113cb289dd033d6163345c8e746015f4b15fc80fdfc2b5479f",
+          "source_bytes": 6907,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/tests/subclassed.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/tests/subclassed.rs",
+          "source_sha256": "065da83e1db3e53ccbade3eff8bbbb4891d23085a3a4ac308c513de24d8df80d",
+          "source_bytes": 5483,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/text.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/text.rs",
+          "source_sha256": "7f2493b559f0b04884e201d897981a3cce47b2c571863d37ffddb1bb695e5c55",
+          "source_bytes": 22508,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/util.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/util.rs",
+          "source_sha256": "9a8eda748e568ea480d7bc5d406d868f4ca0fd245ed18557707d219d43ddcd9a",
+          "source_bytes": 14687,
+          "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-05.txt",
+      "sha256": "87f103ecd13595337188f42308adae80b6836c129f41674d7ec02b9bd6a39624",
+      "bytes": 450,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/adapter.rs",
+      "source_sha256": "2f1a7498903790b4a00934a322d1a363389acb7c6664ecf6ba58e5de08ef3a20",
+      "source_bytes": 28853,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/adapter.rs",
+            "src/node.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/adapter.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/adapter.rs",
+          "source_sha256": "2f1a7498903790b4a00934a322d1a363389acb7c6664ecf6ba58e5de08ef3a20",
+          "source_bytes": 28853,
+          "header_sha256": "87f103ecd13595337188f42308adae80b6836c129f41674d7ec02b9bd6a39624"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/node.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/node.rs",
+          "source_sha256": "8fafcc4f13a061cc46ea070a7b4e240027487f8f5507d75c449253c95136e4cf",
+          "source_bytes": 71166,
+          "header_sha256": "87f103ecd13595337188f42308adae80b6836c129f41674d7ec02b9bd6a39624"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-06.txt",
+      "sha256": "e5d5f3bf49016cd81474090cab638534295fbd9a30ef2b2b973f184ea420489d",
+      "bytes": 450,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/node.rs",
+      "source_sha256": "cbed75a2f4ba8ddb73fcd6c9415288cceafcece764ba062763b0bb0aa5c67571",
+      "source_bytes": 59203,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_macos",
+          "version": "0.27.1",
+          "resources": [
+            "src/node.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/node.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/node.rs",
+          "source_sha256": "cbed75a2f4ba8ddb73fcd6c9415288cceafcece764ba062763b0bb0aa5c67571",
+          "source_bytes": 59203,
+          "header_sha256": "e5d5f3bf49016cd81474090cab638534295fbd9a30ef2b2b973f184ea420489d"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-07.txt",
+      "sha256": "08bad96b130d3e10a514214db837e40a8de4904083e6a8682ebe8473afbc99ba",
+      "bytes": 450,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/node.rs",
+      "source_sha256": "160ff7058edfcb84b8651d4f0111e8839cd1e63c2f08bb309ef65c9e028efb67",
+      "source_bytes": 58423,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/node.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/node.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/node.rs",
+          "source_sha256": "160ff7058edfcb84b8651d4f0111e8839cd1e63c2f08bb309ef65c9e028efb67",
+          "source_bytes": 58423,
+          "header_sha256": "08bad96b130d3e10a514214db837e40a8de4904083e6a8682ebe8473afbc99ba"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-08.txt",
+      "sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad",
+      "bytes": 221,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/callback.rs",
+      "source_sha256": "17c178506a151d0341f4f7eb0824daf57cfd6190170a6af2627701237a805d12",
+      "source_bytes": 604,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/callback.rs",
+            "src/context.rs",
+            "src/filters.rs"
+          ]
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/filters.rs"
+          ]
+        },
+        {
+          "name": "accesskit_macos",
+          "version": "0.27.1",
+          "resources": [
+            "src/filters.rs",
+            "src/patch.rs"
+          ]
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.0",
+          "resources": [
+            "src/context.rs"
+          ]
+        },
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/context.rs",
+            "src/filters.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/callback.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/callback.rs",
+          "source_sha256": "17c178506a151d0341f4f7eb0824daf57cfd6190170a6af2627701237a805d12",
+          "source_bytes": 604,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/context.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/context.rs",
+          "source_sha256": "096ad72a261a919876c158f78e2b606d7a5813973ba6e5cca685c486cb516eed",
+          "source_bytes": 3846,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/filters.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/filters.rs",
+          "source_sha256": "cfe74d16da43ccfda209f11107faf78442c6830fa126cf2d48ffdcdf14c65288",
+          "source_bytes": 282,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_consumer",
+          "version": "0.39.1",
+          "resource": "src/filters.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/filters.rs",
+          "source_sha256": "0511ef395f702095a0add38d3659492bf646dfd120eaa75232275bcfadb963b3",
+          "source_bytes": 13999,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/filters.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/filters.rs",
+          "source_sha256": "cfe74d16da43ccfda209f11107faf78442c6830fa126cf2d48ffdcdf14c65288",
+          "source_bytes": 282,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_macos",
+          "version": "0.27.1",
+          "resource": "src/patch.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/patch.rs",
+          "source_sha256": "66cd13504699cb38789cdb07f7cb2c7878c0ef0f867a4f6040b3d014ef63d7d6",
+          "source_bytes": 3146,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/context.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/context.rs",
+          "source_sha256": "b3b34f0e0262d64c65edf1989f9f668047abd4ccd045aa7971f053f27d8cffa9",
+          "source_bytes": 9659,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/context.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/context.rs",
+          "source_sha256": "c03df25bdec7f70c0b2fd90ea5308d9dc27032bec73005ac57712d33f12e6a73",
+          "source_bytes": 3062,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/filters.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/filters.rs",
+          "source_sha256": "744374b547065b153123c80028f129f5c6bb53052660205e1a2f231c3e169f64",
+          "source_bytes": 356,
+          "header_sha256": "3b5387d4c4b55856c2416cb6f2d03fad8c68e6dca756eecf8a684ca80543c2ad"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-09.txt",
+      "sha256": "cb908f6fee8d90f44979b32715de36c1694c6d091fae167ce567631a0b958501",
+      "bytes": 441,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit/src/geometry.rs",
+      "source_sha256": "2f2c37da6a856f1463c593bd2c01d07f237951556c3f72594cb05a2561afa7ed",
+      "source_bytes": 22258,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.1",
+          "resources": [
+            "src/geometry.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit",
+          "version": "0.25.1",
+          "resource": "src/geometry.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit/src/geometry.rs",
+          "source_sha256": "2f2c37da6a856f1463c593bd2c01d07f237951556c3f72594cb05a2561afa7ed",
+          "source_bytes": 22258,
+          "header_sha256": "cb908f6fee8d90f44979b32715de36c1694c6d091fae167ce567631a0b958501"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-10.txt",
+      "sha256": "2a6062ba12c0e404396121b51a2d622391a5134a6cc658aab91be89b92f50848",
+      "bytes": 221,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/selection.rs",
+      "source_sha256": "980d556b2620de481146580744d80f3bde0631b148d1330aed268a0a5a6b7905",
+      "source_bytes": 2669,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.0",
+          "resources": [
+            "src/atspi/interfaces/selection.rs",
+            "src/atspi/interfaces/text.rs"
+          ]
+        },
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/window_handle.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/selection.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/selection.rs",
+          "source_sha256": "980d556b2620de481146580744d80f3bde0631b148d1330aed268a0a5a6b7905",
+          "source_bytes": 2669,
+          "header_sha256": "2a6062ba12c0e404396121b51a2d622391a5134a6cc658aab91be89b92f50848"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/text.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/text.rs",
+          "source_sha256": "3e36eb6bdd8dcdb7d9831474aec4d0cc86ba281d65addbbb52e72aa165b64ed9",
+          "source_bytes": 4796,
+          "header_sha256": "2a6062ba12c0e404396121b51a2d622391a5134a6cc658aab91be89b92f50848"
+        },
+        {
+          "package": "accesskit_windows",
+          "version": "0.35.1",
+          "resource": "src/window_handle.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/window_handle.rs",
+          "source_sha256": "dec1d78c81784a18c50f066e89d57d0fe02a7c9199a11e47a0833f8b9113d8c2",
+          "source_bytes": 753,
+          "header_sha256": "2a6062ba12c0e404396121b51a2d622391a5134a6cc658aab91be89b92f50848"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-11.txt",
+      "sha256": "623433e34979043126484a4d950322e777f51e50daf7dfd754e221558273703d",
+      "bytes": 347,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/executor.rs",
+      "source_sha256": "38e4a47fc2afd555d91d8e74156165d7da632c381e488a1c7693ed140ff278fa",
+      "source_bytes": 4452,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.0",
+          "resources": [
+            "src/executor.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/executor.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/executor.rs",
+          "source_sha256": "38e4a47fc2afd555d91d8e74156165d7da632c381e488a1c7693ed140ff278fa",
+          "source_bytes": 4452,
+          "header_sha256": "623433e34979043126484a4d950322e777f51e50daf7dfd754e221558273703d"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-12.txt",
+      "sha256": "ddd257914fade282cf2bd525ac2c58158b133813268df57653f7cf433cfbe7ba",
+      "bytes": 370,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/simplified.rs",
+      "source_sha256": "f5da65c5f7f92e54747ad0f957522fc2bf7f6e215a1b1582b0ea1526f9404bb5",
+      "source_bytes": 32528,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/simplified.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/simplified.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/simplified.rs",
+          "source_sha256": "f5da65c5f7f92e54747ad0f957522fc2bf7f6e215a1b1582b0ea1526f9404bb5",
+          "source_bytes": 32528,
+          "header_sha256": "ddd257914fade282cf2bd525ac2c58158b133813268df57653f7cf433cfbe7ba"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-source-header-13.txt",
+      "sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f",
+      "bytes": 221,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/text_attributes.rs",
+      "source_sha256": "eeeb55273de1e21aca136a2f082cd2a91354f5166c15fa7fa5924aff60577f04",
+      "source_bytes": 2157,
+      "extraction": "Verbatim leading source copyright/license comment block, outer blank lines omitted and one final LF retained. Identical header in every listed resource. Full source bytes independently matched the exact pinned upstream archive. Additional per-source hashes are recorded below.",
+      "packages": [
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/text_attributes.rs"
+          ]
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.0",
+          "resources": [
+            "src/atspi/interfaces/cache.rs",
+            "src/atspi/interfaces/document.rs",
+            "src/atspi/interfaces/editable_text.rs",
+            "src/atspi/interfaces/hyperlink.rs",
+            "src/atspi/interfaces/image.rs"
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "package": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resource": "src/text_attributes.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/text_attributes.rs",
+          "source_sha256": "eeeb55273de1e21aca136a2f082cd2a91354f5166c15fa7fa5924aff60577f04",
+          "source_bytes": 2157,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/cache.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/cache.rs",
+          "source_sha256": "abf640927b5dc79cae1ff19a1562721ffc833ffe3a4bede0e07f66d54e8314e2",
+          "source_bytes": 9866,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/document.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/document.rs",
+          "source_sha256": "61cde20381ea0966adb5ed67ad262a7d8231c10c44cbeecda639316154618f1a",
+          "source_bytes": 1718,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/editable_text.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/editable_text.rs",
+          "source_sha256": "3df430f88fadb310ca29ff62e19c8f7d995eedb9105886b505729d3e71fd6e49",
+          "source_bytes": 1548,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/hyperlink.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/hyperlink.rs",
+          "source_sha256": "9a53b1d164208963ed047326f12ab380700807a3338b8c76f4edd8a492cd35d8",
+          "source_bytes": 1930,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        },
+        {
+          "package": "accesskit_unix",
+          "version": "0.24.0",
+          "resource": "src/atspi/interfaces/image.rs",
+          "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/atspi/interfaces/image.rs",
+          "source_sha256": "29cbbe368afbbbb8bfe9a8ede4dc4a2154c329e136e6aa5f115a37aa5b403b0e",
+          "source_bytes": 1519,
+          "header_sha256": "5fcb4e92cdce04bc98b756ed305a2c8ea0d2b82961f024234658e7abbf4c4d7f"
+        }
+      ],
+      "basis": "Original source attributions and their explicit derived-code licensing notices; no holder inferred from author metadata."
+    },
+    {
+      "file": "accesskit-chromium-BSD.txt",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "bytes": 1559,
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/LICENSE.chromium",
+      "source_sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "source_bytes": 1559,
+      "extraction": "entire_file",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.1",
+          "resources": [
+            "src/lib.rs"
+          ]
+        },
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.0",
+          "resources": [
+            "src/adapter.rs",
+            "src/node.rs"
+          ]
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.1",
+          "resources": [
+            "src/iterators.rs",
+            "src/node.rs"
+          ]
+        },
+        {
+          "name": "accesskit_macos",
+          "version": "0.27.1",
+          "resources": [
+            "src/node.rs"
+          ]
+        },
+        {
+          "name": "accesskit_windows",
+          "version": "0.35.1",
+          "resources": [
+            "src/node.rs"
+          ]
+        }
+      ],
+      "basis": "Seven original source headers expressly refer to LICENSE.chromium. The full upstream file has Copyright 2015 The Chromium Authors; the individual sources separately retain their 2017, 2018 and 2021 notices."
+    }
+  ],
+  "six_lib_rs_sources": [
+    {
+      "package": "accesskit",
+      "version": "0.25.1",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit/src/lib.rs",
+      "source_sha256": "f77ed125614c6e735141bdc5fe8551cfc8dbc2d16ffccf4d52880c2c2bdfeffd",
+      "source_bytes": 129213,
+      "header_sha256": "39e7c03e4e604262cb89b837faa1b50a4cede98164db77787210fb9a865b2b01"
+    },
+    {
+      "package": "accesskit_atspi_common",
+      "version": "0.21.0",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/atspi-common/src/lib.rs",
+      "source_sha256": "2cdd44a13d5403fb8327f6b0fdb6761066c910d603de5c441bb15c17830b070e",
+      "source_bytes": 906,
+      "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+    },
+    {
+      "package": "accesskit_consumer",
+      "version": "0.39.1",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/accesskit_consumer/src/lib.rs",
+      "source_sha256": "3791dbc253d60a2c5dc7020b6f49e483d3ea3f7d8ff4244966e1bd9c08270581",
+      "source_bytes": 7373,
+      "header_sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71"
+    },
+    {
+      "package": "accesskit_macos",
+      "version": "0.27.1",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/macos/src/lib.rs",
+      "source_sha256": "b1df68dc7181efe2f833df5367493a3d2cc06dc2993202f612c4bf18285f7972",
+      "source_bytes": 557,
+      "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+    },
+    {
+      "package": "accesskit_unix",
+      "version": "0.24.0",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/unix/src/lib.rs",
+      "source_sha256": "4416ce59366d321c3dbd29a1054c3ad6c426168c97f7b237ff3e818de6c3168c",
+      "source_bytes": 972,
+      "header_sha256": "fb8474da2353b6070cfa4c5b817231fe0550cede45ec1dfcae494bac7ea0e56e"
+    },
+    {
+      "package": "accesskit_windows",
+      "version": "0.35.1",
+      "resource": "src/lib.rs",
+      "source_url": "https://raw.githubusercontent.com/AccessKit/accesskit/ce8164ba92995cfa86005b6259115e08c8244253/adapters/windows/src/lib.rs",
+      "source_sha256": "8a6f20ed5354c9834d88a59091c764f65aa31359f81c57386fe06e9d806e9396",
+      "source_bytes": 501,
+      "header_sha256": "4f4962081b527daaf69ab962c0cf657a7b4ce0fefe26bbec6ddba15267ac1a71"
+    }
+  ]
+}

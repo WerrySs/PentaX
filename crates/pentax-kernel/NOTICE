@@ -1,0 +1,556 @@
+pentax-kernel is a modified Rust port of portions of KytyPS5-Performance.
+
+The seven SystemService notice/identity/lifecycle roles additionally adapt
+src/libs/libSystemService.cpp at revision
+209dffe9032d72749257ce18680d506b891284de, independently verified Git blob
+690b813be6ceac9c707e06c5fff6ec3c70d13acb, under the same GPLv2 terms.
+PentaX modifications in 2026 preserve the one-byte configured notice flag,
+source no-op setters, ignored opaque report input, exact string error ordering
+and full-width capacity. The source's fixed system name "Kyty" becomes the
+explicit PentaX profile "PentaX"; only its seven NUL-terminated bytes are
+written. The additive skip_notice_screen setting defaults to false, following
+emulatorConfig.h and Config::SkipNoticeScreen, and passes through the existing
+owned configuration path. Checked atomic guest writes replace raw stores.
+Only independently observed full-prefix notice-getter and splash aliases are
+added alongside seven canonical registrations. No actual host splash/power/
+termination operation or mutable source setter state is invented.
+
+The seven thread-priority roles additionally adapt PthreadGetprio/Setprio,
+the POSIX scheduling wrappers and GuestPriorityToHost/LowerCoreBoundThread
+from src/kernel/pthread.cpp at revision
+209dffe9032d72749257ce18680d506b891284de, Git blob
+a7fa3003f534af01a119f117954ffe899c982351, under the same GPLv2 terms.
+Their nine canonical registrations follow libKernel.cpp, Git blob
+b02a4d77404f839371d96d1f549b53043e77d25e. PentaX modifications in 2026 retain
+exact signed guest metadata, output ordering, source error domains and the
+once-at-start single-core class demotion. Owned handles, bounded work and
+atomic checked writes replace unchecked host thread pointers and stores.
+Host priority calls are replaced with explicit fair cooperative guest turns:
+4096/2048/1024 blocks for high/normal/low, preserving runnable round-robin
+admission. These ratios are PentaX policy, not a claim of identical Windows
+scheduling. POSIX setschedparam changes attributes only; running effective
+priority changes through Setprio. No host scheduling policy is changed and
+host-call failures are not fabricated. See upstream provenance.
+
+Created-thread cleanup additionally adapts CleanupThread and
+DestructPthreadSpecific from src/kernel/pthread.cpp at owner-authorized revision
+209dffe9032d72749257ce18680d506b891284de, verified Git blob
+a7fa3003f534af01a119f117954ffe899c982351; the header blob is
+f5930a4aeae3f79a80d362f81a68862e48730871, under the same GPLv2 terms.
+PentaX modifications in 2026 use fixed per-thread cursors, live generation-aware
+scanning and owner/context/serial-bound callback tickets. Actual native return
+attestation replaces host function-pointer invocation; four source passes and
+clear-before-call behavior are retained. Count/Report module-unload hooks remain
+outside thread cleanup. Unavailable thread-local Cxa registration admits no
+records, and process-wide cxa_atexit storage is not consumed by this operation.
+Host pthread/TLS deletion, stack unwinding and join/detach reclamation are not
+copied into this bounded cooperative runtime. See README and provenance.
+
+PlayGo additionally adapts src/libs/libPlayGo.cpp and the package readers in
+src/loader/systemContent.cpp at owner-authorized revision
+209dffe9032d72749257ce18680d506b891284de, verified Git blobs
+94f0093bd0013d266ed2e32c877f11393ba84a9c and
+b86fcff76047852df9fe10b47c6a8c070602e640, under the same GPLv2 terms.
+PentaX modifications in 2026 replace raw guest stores and global state with
+checked atomic outputs and process-owned metadata, explicit read-only file
+capabilities, complete binary-prefix validation and bounded raw-byte parsers.
+Eighteen canonical roles and seven observed matching aliases retain exact
+source widths/errors/output ordering. The default-disabled source count hack
+remains disabled. No downloader, writable package access, lifecycle registry
+or fabricated installation success is added. See README and upstream provenance.
+
+The four Mouse and six raw Keyboard roles additionally adapt
+src/libs/libPad.cpp at owner-authorized revision
+209dffe9032d72749257ce18680d506b891284de, verified Git blob
+ab9a861fed955b3a30e12275c9b60f312c6478f3, under the same GPLv2 terms.
+PentaX modifications in 2026 retain the disconnected, stateless source
+profile while replacing unchecked memset destinations with bounded atomic
+guest writes. Ten canonical Mouse/Keyboard identities and only the three
+observed libSceMouse Init/Open/Read identities are admitted. Positive integer
+handles are accepted without an invented device registry; zero-filled
+records and zero sample/character results do not establish physical input,
+character translation, host device access or IME event delivery. Mouse's
+uncapped positive source count is subject to an explicit implementation byte
+budget, with typed refusal before any write rather than a fabricated source
+error or silent truncation. This authorized-fork evidence is not an
+independently public firmware specification.
+
+The three content initialization roles adapt src/libs/libs.cpp:156..283 from
+the owner-authorized reference at 209dffe9032d72749257ce18680d506b891284de,
+verified Git blob c366dadb7c02e94ed3f67c1c951dec53bd294694, under its GPLv2 terms.
+The logging macro in src/common/logging/log.h (blob
+56416cbc800c84e753c941bf3c73644430d24b08) guards all diagnostic argument reads
+with IsSilent. PentaX's silent profile preserves exact null errors and three
+process-owned fixed initialization flags, omitting logging-only pointer reads.
+No allocation callbacks, host media export, content search or deletion backend
+is implemented by these source functions. ContentSearch is module 1.0, not 1.1;
+only ContentExport has an independently observed full-prefix alias.
+
+Share's two legacy lifecycle calls adapt src/libs/libNet.cpp:2622..2658,
+verified Git blob d540a4d0f62a9c0fa8393e83164717ae5e6dcbcb. Its fifteen extended
+roles adapt src/libs/libShare.cpp, blob a38efbeefac2742da3dbe8248651a983150abb07.
+Both use the owner-authorized revision 209dffe9032d72749257ce18680d506b891284de
+under the same GPLv2 terms. InitAll registers libShare after libNet; the original
+SymbolDatabase uses insert_or_assign, so the later FeaturePermit wins and rejects
+zero flags. PentaX corrects that existing role without moving its marker or
+creating an ambiguous duplicate. Source callbacks are not retained or invoked;
+capture/menu requests explicitly return NOT_SUPPORTED. PentaX modifications in
+2026 add bounded atomic request/status outputs and preserve exact error ordering,
+silent opaque inputs and independent resource/work limits. Only four separately
+observed media aliases and the existing two lifecycle aliases are admitted.
+No host capture, recorded media or sharing backend is implied by these contracts.
+
+The thirteen IME roles additionally adapt src/libs/ime.cpp, ime.h and
+imeCommon.cpp/h from the owner-authorized reference fork at revision
+209dffe9032d72749257ce18680d506b891284de under the same GPLv2 terms.
+Verified Git blobs respectively are 08c196095ba5ef49b07a4fca8af7d82916abde3a,
+c53e1d706705e29f7ad6d721ae955e682800ed1f,
+61ff36c53aaf5f4f952a152f3aeea4d7c087b68e and
+c527b691af7322a9ab06cf53a43121222ca9be90. PentaX modifications in 2026
+replace unchecked pointers/global containers with bounded process-owned UTF16
+state, atomic guest outputs and authenticated native callback continuations.
+Thirteen canonical Ime identities and only the independently observed
+libSceIme Update/KeyboardOpen identities are registered. Source keyboard
+queries describe a disconnected device: cleared resource output and an error
+are intentional; no connected device or interactive host-input integration is
+implied. This private-fork source evidence is not independent firmware ABI
+documentation. Host input/filter continuations remain separate capabilities.
+
+The Font and FontFt catalogue and source contracts additionally adapt
+src/libs/libFont.cpp and libFontFt.cpp at the same authorized revision
+209dffe9032d72749257ce18680d506b891284de under the same GPLv2 terms.
+Verified Git blobs are c3b58f805f0781105a9a7cf216bf4750b3e57d5e and
+3cfee91fb323157c0bdc07572cb44fb6ad26a5dc respectively. PentaX modifications
+2026 preserve exact FUNC identities, GP/SSE/stack distinctions, guest structure
+fields and explicit no-op contracts through bounded owned Rust services.
+Seventy-two canonical NID rows and only fifty-four independently observed
+matching libSce-prefixed NIDs are admitted; the three horizontal-render NIDs
+share one function but only one has a demonstrated prefixed identity. No host
+pointer, ambient source/CWD font search, donor font asset or bitmap table is
+included by these registrations. Actual glyph parsing/rasterization and its
+separate dependency/asset attribution must be assessed independently of binding.
+
+The Rust font backend uses skrifa0.44.0 and the bundled Hack-Regular fallback
+from epaint_default_fonts0.37.0 with their separate dependency/font notices.
+PentaX's bounded4x4 grayscale rasterizer and owned guest writing/line view
+storage are original Rust modifications. The single regular fallback is an
+explicit change from donor ambient Roboto/VGA selection; identical font metrics,
+pixels, style variants, full shaping or a presented frame are not claimed.
+Writing reinitialization and bounded4096-step lines use atomic ownership/output
+publication and stable guest views rather than donor host vector pointers.
+
+The five Entitlement Access exports additionally adapt src/libs/libNet.cpp,
+lines 1596-1737, at revision 209dffe9032d72749257ce18680d506b891284de,
+Git blob d540a4d0f62a9c0fa8393e83164717ae5e6dcbcb, under the same GPLv2
+terms. PentaX modifications 2026 replace unchecked guest pointers with bounded
+atomic output and explicit owned local records. The local virtual full-package
+profile retains SKU value3; the default addon catalogue is empty rather than
+copying the donor's three hardcoded GTA-V records. Configured local records do
+not establish PSN authentication, purchases, account ownership or backend access.
+Exact null/error/output ordering and the no-key result remain source-derived.
+Five canonical registrations and only the two independently observed matching
+libSce-prefixed Initialize/List identities are admitted; no wildcard is added.
+
+The forty-one Universal Data System exports additionally adapt the same
+src/libs/libTrophy.cpp, lines 548-1323, and common/trophies.cpp/h at the exact
+revision and blobs below, under the same GPLv2 terms. PentaX modifications 2026
+replace host container pointers with authenticated owned guest RW/NX mappings,
+bounded typed event properties and deep-copied event state. UDS contexts share
+the actual Trophy2 package/user records; supported direct-latest unsigned rules
+and explicit unlock events update real trophy/timestamp/platinum state. Numeric
+per-title save records use staged atomic replacement before RAM publication.
+The stronger rollback-on-save-failure policy is explicit, rather than copying
+the source's RAM-first update and diagnostic-only save failure. Source empty
+arrays, integer-key erasure, placeholder serialization/statistics and lifecycle
+no-ops are retained; host logging, popup/audio and PSN delivery are excluded.
+
+The fifteen Trophy2 lifecycle/query exports and their package/unlock readers
+adapt the same pinned fork's src/libs/libTrophy.cpp (Git blob
+216922e65cb8736f0bb663931d38764cf89dde76), src/common/trophies.h (Git blob
+d30211cea048bc1941618a1d25717f8fb48b5c32) and src/common/trophies.cpp (Git blob
+cec6e76b553fb253e64ff946c292a9c5c6a0c6f1). The repository GPLv2 terms apply.
+PentaX modifications 2026 replace process-global maps, raw guest stores and
+ambient files with bounded owner-local contexts/caches, fallible JSON/UCP
+parsing, exact atomic output, actual native stack arguments, explicit read-only
+package mounts and the selected per-title save capability. Source package,
+locale, progress, unlock/timestamp and direct UDS-rule semantics are retained.
+Host logging, global legacy-save discovery and callback/PSN delivery
+are not copied or fabricated. Source icon and handle/callback no-op behavior
+remains explicit. See docs/upstream-provenance.md for pins and policy limits.
+
+The four Game Intent exports additionally adapt src/libs/libNet.cpp lines
+1996..2081 at the pinned KytyPS5-Performance revision below (Git blob
+d540a4d0f62a9c0fa8393e83164717ae5e6dcbcb). PentaX preserves the source's
+offline no-event results and exact output fields, including the data offset
+308 and untouched structure padding. Checked bounded staging and one atomic
+guest transaction replace raw pointer stores. Host diagnostic pointer/key
+logging is excluded; initialization does not invent retained service state.
+These fallback exports do not implement event production, PSN or delivery.
+
+The caller-backed libc mspace family additionally adapts boykopovar/AnyPS5:
+  https://github.com/boykopovar/AnyPS5
+  commit 68323bae7494bc4b5d19776c02b4be86f35536c9
+  core/libs/prx/libc/src/Mspace.cpp
+  Git blob 01e8de2a22cb1bfd13a5a2441dc96e3a0e3e28f3
+The pinned source is distributed under GNU GPL version 2; the complete terms
+are retained in the repository LICENSE. Related public MallocManagedSize.hpp,
+VabiMacros.hpp and generated export tooling establish layout and ABI contracts.
+PentaX modifications 2026 replace global host pointers, maps and direct stores
+with bounded owner-local guest coordinates, checked RW/NX backing, fallible
+staged metadata, single-output transactions and actual per-thread guest errno.
+Allocation, coalescing, alignment, nesting, reallocation and statistics retain
+the pinned source behavior. No host allocator address is returned to a guest.
+
+Source project: https://github.com/WerrySs/KytyPS5-Performance
+Pinned source: 209dffe9032d72749257ce18680d506b891284de
+Upstream project: https://github.com/KytyPS5/KytyPS5
+
+Ported sources:
+  src/kernel/eventQueue.cpp/h: owner-local queue/event state, default coalescing
+    and delivery order, user level/edge events, periodic/high-resolution timers,
+    exact field getters and source error ordering. Bounded cooperative caller
+    continuations and transactional output replace host objects, pointer casts
+    and blocking condition variables. Optional unbounded legacy delivery and
+    GPU/video/AMPR filter producers are not fabricated by these exports.
+  src/kernel/memory.cpp DecodeMemoryProtection: CPU-write implies CPU-readable
+    mapping/protection effects on x86 while retaining original query metadata;
+    PentaX keeps GPU-only access on its independent checked GPU paths
+  src/libs/libKernel.cpp: KernelIsTrinityMode base-console result and exact
+    KernelGetOperationMode mode/submode words; PentaX replaces raw pointer
+    stores with fault-atomic normalized spans preserving source alias order
+  src/libs/controller.cpp and libPad.cpp: source-no-op initialization/close,
+    configured user/port/index validation, numeric handle/error contracts and
+    exact one-byte remote-controller query; PentaX does not infer a connected
+    device, host input snapshot, motion/haptic effect or OS controller handle
+  src/libs/libAmpr.cpp: 24-byte command-buffer headers, lifecycle and live
+    queries, APR reserved words, retained bindings/aliases, reset/clear ordering
+    and direct int32 kernel errors; PentaX uses bounded per-owner metadata and
+    atomic same-owner guest transactions instead of host globals/raw pointers
+    APR path/ID/size resolution further retains sequential live inputs, unique
+    IDs, cached misses, directory size and first-error outputs with POSIX errno;
+    PentaX substitutes existing read-only mount capabilities and independently
+    bounded owner caches for ambient host paths and unbounded global maps
+    AMPR read-record construction/measurement further retains exact record and
+    header effects, queued arguments, gather state and lookup/reset ordering;
+    PentaX uses bounded owned queues and ordered transactional overlays rather
+    than raw guest pointers or detached host-global command records
+    APR submit/wait further retains pre-execution receipt allocation, ordered
+    ID/result stores, inner execution errors/record offsets and consuming waits;
+    PentaX executes reads through existing read-only capabilities, with bounded
+    current-size positional chunks and exact-name indexed identities instead of
+    ambient host paths, per-ID handles or unbounded completion maps
+  src/libs/libSaveData.cpp and errno.h: normal/native initialization and
+    termination receipts, monotonic transaction identifiers, reviewed prepare
+    and commit behavior, bounded completion-event FIFO and exact event layout,
+    save-memory Setup2/Get2/Set2/Sync layouts, limits, range/error ordering,
+    metadata timestamps and completion status; PentaX's directory capability,
+    exclusive locking and atomic checksummed bundle format are original Rust
+  src/libs/network.cpp/h, libNet.cpp and errno.h: reviewed NP offline account outputs,
+    scoped registrations and bounded sync/async request lifecycle, completion,
+    poll, cancellation and premium-result error ordering
+    and the NetCtl forced-disconnected profile, eight callback slots, source
+    lifecycle/error ordering, state/result/NAT/info output layouts and callback
+    iteration; PentaX substitutes owned state, checked outputs and prepared
+    actual-return callback continuations for globals/raw guest function calls
+    The thirteen NetInit/GetNetErrorAddr, pool/resolver lifecycle, SSL lifecycle
+    and CA-output, and HTTP lifecycle exports further retain lowest-free source
+    identities, reuse, dependency/error ordering and non-cascading destruction.
+    Bounded owner tables and checked guest strings replace globals/raw pointers;
+    pool sizes remain metadata without allocating pool backing. NetInit requests
+    actual platform socket-backend initialization and retains the source zero
+    result even if that initialization fails. The separate guest-thread net errno
+    cell preserves successes and source negative-result conversion, independently
+    of POSIX errno. SSL CA calls clear the exact 24-byte guest object; Get returns
+    NOT_FOUND after that write, while Free returns zero without loading/freeing
+    certificates. Unsupported flags, zero pool sizes and unsafe null pool names
+    remain typed refusals. No connectivity, DNS execution, sockets, packets or
+    certificate loading is provided by this startup subset
+    Pinned libNet.cpp declares SSL module1.1/library1. The two additional
+    SslInit/SslTerm bindings for module libSceSsl version 2.1 and library
+    libSceSsl version 1 are a PentaX compatibility inference from exact observed
+    import scopes, using
+    the same reviewed single-argument ABI and owned lifecycle state. They are
+    not source-declared 2.1 exports and grant no other 2.1 SSL operations,
+    alternate namespace spellings or complete SSL SDK compatibility
+  src/libs/libNet.cpp, LibHttp2: the twenty-one context/template/request
+    lifecycle and metadata registrations, independent monotonic IDs, cascading
+    deletion, request-first options, independent request defaults, opaque byte
+    strings, append-only headers, content length, flags, callbacks and timeouts.
+    PentaX replaces global maps and unchecked strings with bounded process-owned
+    records, actual retained string-capacity accounting and checked guest reads.
+    Aggregate text capacity is bounded by max_io_bytes, header records by
+    max_handles, and all three object families share the kernel live-handle
+    budget. These are PentaX policies; source counter overflow is refused.
+    Callback words remain data, never host or guest calls. No send/read,
+    response/async operation, pool backing, transport or TLS guarantee is supplied
+    by this metadata subset; Net/POSIX errno and guest outputs remain unchanged
+  src/libs/libRudp.cpp: the three RudpInit, RudpEnableInternalIOThread and
+    RudpSetEventHandler bootstrap exports; PentaX replaces global initialization
+    and handler/argument storage with owned state. Pool arguments remain ignored,
+    initialization preserves the handler, and enabling the internal I/O thread
+    remains the source's explicit no-op. No thread, packet or event delivery is
+    implemented, and retained guest handler words never become host pointers
+  src/libs/libUserService.cpp and errno.h: initialization, configured guest user
+    identity/name/list, one-time login event, user-number aliases, partial game
+    preset output and the explicit local accessibility/age preference getters
+  src/libs/libAppContent.cpp: optional boot-object initialization and repeated
+    entitlement-update notifications without additional metadata-file intake
+    and integer-parameter queries with source FULL SKU constant, absent-metadata
+    zero values, exact int32 outputs and explicit source-abort branch refusals;
+    PentaX uses checked stores without raw pointers or invented entitlement data
+  src/libs/libSystemService.cpp and errno.h: bounded process-owned event FIFO,
+    exact event/status output layouts and parameter/no-event error codes
+  src/libs/dialog.cpp and libDialog.cpp: common-dialog base initialization,
+    unused-state query and explicit module/library registration identities
+  src/libs/libKernel.cpp: exact registration identities and process/GPO APIs
+    and process-owned thread-atexit count/report callback registration
+    and KernelRtldSetApplicationHeapAPI ten-pointer table convention
+    including KernelGetProcParam's image-bound query, without host-pointer casts
+    and KernelDlsym's bounded output/explicit int32 return-domain behavior
+    and KernelLoadStartModule's existing-program count/result/handle branch
+    and separately scoped libkernel/Posix wrappers and getpagesize constant
+    and Fiber initialization/internal/options, source object and information ABI,
+    name truncation, version flags, context marker and retained finalization state
+  src/loader/runtimeLinker.cpp and runtimeLinker.h: application-heap callback
+    slots, null/required-pair clearing and replacement semantics
+  src/libs/libs.h: qualified library/module version registration semantics
+  src/libs/errno.h and errno.cpp: kernel errno encodings, KernelToPosix
+    conversion and stable initially zero per-thread errno storage
+  src/common/abi.h: AMD64 SysV library-call convention
+  src/common/hash.h: directory inode hash, including its reversed tail bytes
+  src/common/file.cpp and file.h: directory entry name/type collection
+  src/common/platform/sysWindowsFileIO.cpp and sysLinuxFileIO.cpp:
+    observed dot entries, host enumeration order and entry classification
+  src/kernel/memory.cpp and memory.h: direct allocation, flexible/direct
+    mapping, subrange protection/unmap, query and release validation/state
+  src/kernel/fileSystem.cpp and fileSystem.h: descriptors, read/pread/seek,
+    read-only mount lookup, FileStat layout and errors, packed directory records,
+    directory read/seek/status, KernelGetdirentries and KernelGetdents
+  src/kernel/semaphore.cpp and semaphore.h: count/attribute/cancel/poll and
+    immediate/zero-timeout and queued FIFO/priority waits, signal-time count
+    reservation, remaining deadlines and cancel/delete completion semantics
+  src/kernel/eventFlag.cpp and eventFlag.h: attributes, AND/OR waits, result
+    pattern ordering, set, mask-keep clear, consume modes and cancellation
+  src/kernel/pthread.cpp and pthread.h: guest thread prefix, clock IDs,
+    thread attribute defaults, stack/affinity/scheduling metadata, getters,
+    setters, per-thread affinity snapshots/targeted queries, owned lifetime
+    and scoped POSIX wrappers,
+    timespec/timeval layout, elapsed time and sleep validation, mutex/attribute
+    pointer-slot API, lazy zero/adaptive initializers, type/owner/count state,
+    Windows priority-protocol metadata and copy-on-initialization,
+    lock/try/unlock/destroy results and relative/absolute timedlock conversion,
+    condition/attribute reserved prefixes, lazy zero initialization, copied clock
+    selection, FIFO condition enrollment/signal/broadcast, complete recursive
+    mutex release/reacquisition, destruction and scoped POSIX errors,
+    256-entry key allocation, odd/even generations and per-thread specific values,
+    POSIX pthread_once validation, states, void callback and completion ordering,
+    KernelSetThreadDtors process-context registration and nonnull replacement refusal
+
+The source project specifies GNU General Public License version 2 only.
+The full unmodified license text is retained in LICENSE. The original Kyty
+copyright and complete MIT permission and warranty notice retained by the
+source project are reproduced in Kyty-MIT.txt:
+
+Copyright (c) 2021 InoriRus
+
+The adapted source files have no additional per-file copyright notices. No
+additional source copyright holder attribution has been invented.
+
+PentaX modifications, 2026-10-18:
+  Added whole-span admission and bounded pre-effect metadata staging for
+  subrange unmap/protect, retaining ProtectMemory's outward rounding and
+  zero-length ordering. Split records preserve allocation identity, names
+  and physical offsets; compatible pieces from the same allocation rejoin.
+  Shared handles, work and scratch are admitted before backing mutation.
+  The native adapter decommits anonymous pages while retaining reservation
+  ownership; partial irreversible decommit is a fatal poisoned-owner stop.
+  Added actual native physical sections and shared direct views at 16 KiB
+  offsets. Placeholder ownership prevents address release during view changes;
+  removing views preserves bytes until whole physical release. Private and
+  section commitments share a bounded backing budget. Prospective output
+  overlap checks include physical aliases. Added GetAllocatedSpan/FindMappings
+  and ReleaseDirectMemoryInternal semantics for completely allocated physical
+  spans, partial release and removal of all alias intersections. Fallible split
+  metadata and shared resource totals precede the backing transaction. Native
+  rollback retains section offsets, bytes and permissions until irreversible
+  closure; failed restoration or partial closure poisons the owner. Retained
+  partial section commitment stays charged until its last piece is freed.
+  Pools, unowned unchecked-release no-op and GPU/cache modes remain unsupported.
+  Added bounded owned directory snapshots, checked little-endian 512-byte
+  block packing and exact source name hashes/record lengths/types. Logical
+  dot entries require no host parent lookup; link classification uses each
+  Windows entry's own attributes without following its target. Source int32
+  getdirentries/getdents registrations retain exact scope and return width.
+  Payload/base outputs preflight and commit together before the cursor;
+  unsupported overlapping outputs and backing failures never become fake
+  register results. EOF avoids unused buffer access. Independent directory
+  descriptors retain their captured bytes for reads/seek/fstat, while stat
+  enumerates a fresh bounded view and reports actual packed size. Aggregate
+  retained directory storage, scratch, work and handles are bounded; allocation
+  failure never publishes a partial descriptor. Directory pread remains an
+  explicit unsupported source branch. No writable filesystem is introduced.
+  Added explicit read-only directory capabilities alongside the finite file
+  inventories. Caller-selected directory handles are reopened and requested
+  files are resolved through pinned cap-std 4.0.3, without ambient guest-derived
+  host paths or recursive admission discovery. Descriptor state, positional
+  reads, actual metadata and transactional guest outputs share existing bounds.
+  Path aliases/devices and ambiguous intake overlays are refused. Directory
+  reachability is supported; directory enumeration/stat/descriptors remain
+  unsupported rather than fabricating source packed-dirent sizes. The cap-std
+  dependency's applicable full notices are included in binary distribution.
+  Added invoke_library for the audited direct-library return signatures in
+  fileSystem.h, memory.h, semaphore.h, eventFlag.h and pthread.h, with kernel
+  errno values from errno.h. Supported int64 error returns sign-extend the
+  source negative int; int32 results use PentaX's zero-extended RAX policy.
+  Raw invoke keeps typed errno outcomes. Unsupported/unbound semantics,
+  allocation, limits and checked backing failures do not become register
+  results. Output-overlap admission remains an explicit Unsupported policy.
+  Direct kernel calls do not write POSIX errno; raw-syscall flag conventions
+  remain outside the library-call profile.
+  Added the exact libkernel/Posix wrapper exports with source-specific -1
+  widths, including the int64 fstat wrapper, and source stdio validation.
+  Replaced host thread_local errno with a stable initially zero four-byte
+  guest cell in a separately budgeted, protected internal RW/NX page. Only
+  the bound initial guest thread is admitted; no host pointer or firmware
+  TCB offset is exposed. Success preserves errno; non-errno delegate and
+  backing failures remain typed stops. Two explicit library declarations
+  preserve qualified scopes without NID-only or namespace fallback.
+  Added checked POSIX once admission and four-byte state transitions. Callback
+  data is not execution evidence: the prepared core/worker owner validates
+  source, live permissions, actual nested-call identity and opaque return
+  evidence before publishing DONE. Calls preserve the same stack/TLS/limits,
+  and the callback's void result is ignored. Contended waits, signals and
+  cancellation remain unsupported. No host function-pointer call is retained.
+  Added process-owned pthread keys with source-sized four-byte outputs,
+  lowest-free-index allocation, lazy initial-thread value storage and
+  generation checks preventing stale values after deletion/reuse. Callback
+  words and values remain opaque guest integers. Key deletion does not invoke
+  callbacks; thread-exit/destructor execution stays unsupported. The source's
+  global/host-thread state is replaced by bounded process/initial-thread Rust
+  ownership, shared resources, checked output publication and no host pointers.
+  Source capacity errno, direct int32 errors, positive POSIX pthread errors
+  and pointer-returning getspecific remain separate domains; errno is unchanged.
+  Added checked guest-thread mutex and attribute state with opaque u64
+  guest tokens, copied attributes, recursive counts and transactional slot
+  publication/destruction. Direct errors retain their int32 kernel domain;
+  POSIX_PTHREAD_CALL wrappers return positive errors without changing errno.
+  Lazy zero/adaptive slots and bounded actual timeouts retain observed behavior.
+  Cooperative wait tickets preserve the original pending syscall while another
+  admitted guest thread owns the mutex. Readiness and ownership transfer remain
+  separate; finite relative/POSIX deadlines, real exclusion for stored protocol
+  metadata and exact result domains retain the pinned Windows source contract.
+  Native executor phase validation precedes ownership changes. Bounded waiter
+  identities, per-thread enrollment and destruction guards replace host CVs.
+  Host pthread layouts/pointers, fabricated priority scheduling, live-object
+  reinitialization leaks and static-unload tracking are not copied. Invalid
+  source-aborting protocols remain typed refusals; shared resource/work/I/O
+  limits still apply.
+  Added an explicitly image-bound process-parameter query contract. Its default
+  remains Unsupported; the actual core owner derives and preflights the complete
+  live primary range without copying or guessing parameter fields. Source null
+  results are retained only for known primary-header absence.
+  Ported selected real service state to safe Rust with checked guest integer
+  addresses, fallible bounded storage, typed handles, exact scoped lookups,
+  shared attempt/byte/work/resource accounting and atomic backing/output
+  transactions. No host-pointer casts, guest execution, native thread starts,
+  source success placeholders, unchecked callbacks or arbitrary host paths are
+  retained. Read-only guest mounts contain explicitly supplied host file
+  capabilities. Physical aliases require the same real backing from the
+  adapter. The initial pthread guest prefix is materialized in owned memory;
+  host pthread internals and TCB/DTV execution are not claimed.
+
+  Unimplemented source branches, actual blocking guest waits, thread/loader/
+  TLS execution, raw native counters, host clock resolution, writable/device/
+  unsupported directory profiles and partial/fixed-replacement virtual-memory behavior
+  return explicit typed Unsupported results. Runtime clocks use std with a
+  documented runtime-owned monotonic epoch. Bounded host sleeps use the
+  no-guest-signals/no-additional-guest-threads profile. See README.md for the
+  complete integration contract, policies and supported subsets.
+
+Original tests use generated memory and original private temporary file data.
+No proprietary game inputs, firmware binaries or SDK source are included.
+
+KernelMapNamedDirectMemory additionally adapts src/kernel/memory.cpp and its
+seven-argument libKernel.cpp registration. Checked guest stack access supplies
+the name pointer; bounded byte-label validation preserves null and length errors
+before the existing physical mapping transaction. Mapping labels do not require
+UTF-8. No host pointer dereference, guessed argument or placeholder is retained.
+
+Memory protection decoding follows pinned DecodeMemoryProtection: access derives
+from CPU/GPU bits only, while range queries retain the original protection word.
+Nonzero words with no defined access bits return EINVAL. Metadata cannot add
+native permissions; unsupported GPU access still refuses the backing effect.
+KernelIsAddressSanitizerEnabled follows the pinned disabled profile and the
+absence of guest ASan instrumentation, independently of host build sanitizers.
+
+Read/write locks additionally adapt the pinned PthreadRwlock/attr implementation
+and exact libKernel.cpp registrations. PentaX retains recursive readers, writer
+ownership, reader-first unlock order, lazy initialization differences, attribute
+storage, ignored initializer attributes and error domains. Checked owned guest
+prefixes and atomic backing transactions replace host object pointers. Contended
+waits and additional guest thread scheduling remain unsupported.
+
+Standard output additionally adapts the pinned libKernel.cpp write wrapper,
+fileSystem.cpp KernelWrite and their exact library registrations. PentaX keeps
+the direct int64 kernel and POSIX -1/errno domains distinct. Checked binary
+copies into bounded owned buffers replace discarded standard output and host
+stdio writes. Descriptor-zero wrapper compatibility is retained; source fatal
+branches, unchecked size truncation, sockets and writable files are not ported.
+Pending output is retrievable by the owning application and never enters the
+worker's diagnostics. Tests use only original generated payloads.
+
+This modified port is distributed under GPL-2.0-only.
+
+SystemServiceParamGetInt additionally adapts pinned src/libs/libSystemService.cpp,
+src/libs/errno.h and common/emulatorConfig.h. Namespace spellings follow the
+explicit SystemService/libSceSystemService normalization in symbolDatabase.cpp.
+Process-owned validated configuration and atomic checked guest writes replace
+global configuration, direct pointer writes and fixed source preferences.
+Unknown parameter IDs do not inherit the source's generic zero-success fallback.
+
+Timezone queries and UTC/local conversion adapt pinned kernel/pthread.cpp and
+pthread.h, including exact record widths, optional outputs, required inverse
+timezone output and ignored reserved argument. Fixed process-owned base/DST
+configuration replaces current host timezone calls. Atomic checked guest writes
+and checked timestamp arithmetic replace direct pointer stores and potentially
+overflowing signed operations. POSIX errno is not changed.
+
+System-module activation references additionally adapt pinned
+src/libs/libSysmodule.cpp and the namespace normalization in
+src/loader/symbolDatabase.cpp. PentaX replaces global mutex/map storage with
+bounded process-owned references sharing the kernel handle/work budgets.
+Checked uint32 reference increments and atomic int32 guest output replace
+wrapping counters and direct stores. Unsupported argument branches remain
+typed stops instead of fatal assertions. Firmware loading, unwind-info lookup
+and guest-image unloading are outside this activation-table profile.
+
+The thirteen application-module IDs/paths and load-before-reference ordering
+additionally adapt src/libs/libSysmodule.cpp from the public KytyPS5 change
+1125a0013eea7bdf54cda852c515ae0c45ef7e06 (pull1266), Git blob
+10e43457331ef1a4b6d7475d864e90a003c07ee2, under the same GPL version2 terms.
+PentaX modifications2026: fixed public paths, explicit retained-file authority,
+separate admission/completion and actual nested initialization. Directory
+searches, global runtime objects, raw pointers and missing-import stubs are not
+copied. The source change is independently pinned; no merge status is implied.
+
+POSIX and PthreadSem semaphore APIs additionally adapt pinned
+src/kernel/semaphore.cpp/h and their exact libKernel.cpp registrations.
+PentaX retains the16-byte guest prefix, replacement initialization, signed
+count maximum, field-preservation rules, immediate acquisition, try/expired
+wait outcomes and separate POSIX/kernel error domains. Bounded owned records
+and atomic prefix/errno transactions replace guest pointer keys into a global
+host object map and unchecked stores. Blocking waits, signal polling and
+cross-process synchronization remain unsupported instead of host blocking.
+
+Virtual range set/clear names additionally adapt pinned kernel/memory.cpp/h,
+VirtualRanges::Rename/EditUnlocked and exact libKernel.cpp registrations.
+PentaX uses checked bounded byte strings and independent owner-bound semantic
+labels instead of guest string pointers or arbitrary-byte splits of physical
+backing records. Mapping lifetimes prevent stale names after address reuse;
+query extents honor name boundaries without granting memory access.
+
+Loaded-image protection additionally follows pinned memory.cpp ProtectMemory's
+whole committed-range validation and retained protection metadata. PentaX uses
+bounded transactional adoption of already committed input-image pages through
+its same-owner adapter, rather than a global host virtual-range registry. This
+does not admit generated service providers, runtime-owned storage or holes.

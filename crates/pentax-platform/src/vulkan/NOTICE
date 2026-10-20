@@ -1,0 +1,58 @@
+PentaX Vulkan subsystem port
+
+Source repository: WerrySs/KytyPS5-Performance
+Pinned source revision: 209dffe9032d72749257ce18680d506b891284de
+Source root license: GNU General Public License, version 2 only.
+Original retained notice: Copyright (c) 2021 InoriRus.
+The complete original MIT grant is retained in Kyty-MIT.txt.
+The complete GPL version 2 is in the repository root LICENSE.
+
+Adapted subsystem contracts and implementation paths:
+
+* src/graphics/presentation/window/vulkanWindow.cpp:
+  Vulkan instance/device lifetime, physical device/queue selection, physical
+  memory properties and shader floating-point capability admission.
+* src/graphics/host_gpu/graphicContext.h and vulkanCommon.cpp:
+  retained device/queue/property ownership and compiled SPIR-V module creation.
+* src/graphics/host_gpu/renderer/pipeline/pipelineLayoutCache.cpp:
+  descriptor set/pipeline layouts and the stage-scoped 128-byte push block.
+* src/graphics/host_gpu/renderer/pipeline/descriptors.cpp:
+  manifest/resource binding number, storage-buffer descriptor count/range and
+  actual retained resource ownership.
+* src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp:
+  compute/graphics pipeline create-info composition and shader-module lifetime.
+* src/graphics/host_gpu/renderer/commandRecorder.cpp, commandScheduler.cpp,
+  masterSemaphore.cpp, renderCompute.cpp and queueSubmission.cpp:
+  recording, queue submission, completion ownership and write visibility before
+  host readback.
+* src/graphics/shader/shaderBindings.h and the separately licensed compiler port:
+  explicit original V# specialization, native bindings and shader-data offsets.
+
+PentaX modifications (2026): safe public closed-original factories, checked
+opaque compiler outputs/required-feature manifests, bounded Rust host arenas
+and dedicated Vulkan allocations, fallible staging/readback buffers, fixed
+driver enumeration arrays, private resource borrows and RAII rollback, absolute
+Windows system-loader path, a synchronous queue/fence profile, explicit typed
+unsupported features, and original AMD compute/vertex/pixel test programs.
+Added an opaque prepared-compute entry over the same owned resources, checked
+compiler feature/push contracts, actual single-buffer extents, host-supported
+dispatch geometry and explicit fenced readback. Core keeps the original guest
+owner paused through permission/alias preflight and transactional writeback.
+Dedicated memory replaces the source renderer's VMA/cache allocation layer.
+No source guest-pointer casting, unbounded caches, global renderer state,
+environment-controlled compatibility behavior or guest command parser is ported.
+This is a ported subsystem profile, not the complete renderer.
+
+Vulkan binding dependency:
+ash 0.38.0+1.3.281, source revision
+b724b78dac8d83879ed7a1aad2b91bb9f2beb5cf (ash-rs/ash tag 0.38.0).
+Copyright (c) 2016 ASH; MIT option selected, retained in ASH-MIT.txt.
+Only loaded/std features are enabled; no SDK linking or system installation.
+
+Primary API contracts used when adapting ownership/synchronization:
+https://github.com/ash-rs/ash/releases/tag/0.38.0
+https://github.com/ash-rs/ash/tree/b724b78dac8d83879ed7a1aad2b91bb9f2beb5cf
+https://docs.vulkan.org/spec/latest/chapters/memory.html
+https://docs.vulkan.org/spec/latest/chapters/synchronization.html
+https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFloatControlsProperties.html
+https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceSubgroupProperties.html

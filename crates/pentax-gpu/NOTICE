@@ -1,0 +1,36 @@
+PentaX compute submission preparation
+
+The compute module adapts portions of KytyPS5-Performance, pinned revision
+209dffe9032d72749257ce18680d506b891284de:
+  src/graphics/guest_gpu/pm4.h: compute SH register fields and packet opcodes
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+    HwShSetCsRegister, user SGPR writes and CpOpDispatchDirect
+  src/graphics/shader/shader.cpp: compute initial-register/profile derivation
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp: CpOpIndirectBuffer
+  src/graphics/guest_gpu/graphicsRun.cpp: ProcessPacket call/chain cursor handling
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp: CpOpSetBase,
+    CpOpDispatchIndirect, CpOpWriteData, CpOpWaitRegMemSized, ExecReleaseMem
+    Native/vendor RELEASE_MEM framing, data and interrupt selectors/context.
+    Immutable release actions defer label and notification effects to checked
+    runtime retirement; reference-clock and GDS modes remain explicit.
+  src/graphics/guest_gpu/graphicsRun.cpp: ExecWriteData, TestWaitRegMemValue
+
+Original retained copyright: Copyright (c) 2021 InoriRus.
+The source project specifies GPL version 2 only. The complete GPL text is
+retained in the repository root LICENSE; its retained full original MIT grant
+is in LICENSES/Kyty-MIT.txt. No additional copyright holder is invented.
+
+PentaX modifications, 2026: explicit known register state, complete flat-stream
+admission before resource reads, checked guest addresses and owned snapshots,
+bounded termination walking through the real decoder, compiler arena/work
+limits, typed unsupported paths, manifest-derived push data and opaque prepared
+compute products. The separate stateful command planner adds bounded owned
+indirect call/chain frames, active-cycle detection, multiple dispatch snapshots
+and explicit known queue register history. Ordered owned memory-write/wait
+actions, immediate completion labels, execution-time indirect dimensions and
+empty dispatch outcomes preserve bounded synchronous ordering. Unfulfilled waits
+remain distinct stops; interrupts and asynchronous scheduling are not imitated.
+Acyclic wave32, raw single-buffer
+compute is admitted; shader loops, conditional packets, asynchronous scheduling
+and broader GPU state remain gaps. Tests are original, not game data.
+The original flat inspector remains separately scoped original PentaX code.
