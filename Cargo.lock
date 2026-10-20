@@ -2372,6 +2372,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pentax-session"
+version = "0.32.0"
+
+[[package]]
 name = "pentax-shader"
 version = "0.32.0"
 

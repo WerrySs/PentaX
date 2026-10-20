@@ -51,9 +51,9 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check portable library targets with Clippy
         run: >-
-          cargo clippy --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --all-targets -- -D warnings
+          cargo clippy --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel -p pentax-session --all-targets -- -D warnings
       - name: Test portable library contracts
-        run: cargo test --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --lib -- --test-threads=2
+        run: cargo test --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel -p pentax-session --lib -- --test-threads=2
 
   windows:
     name: Windows build and CPU contracts
