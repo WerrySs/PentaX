@@ -73,9 +73,10 @@ impl Handle {
 }
 fn os(operation: &'static str) -> Error {
     // SAFETY: Capture the immediately preceding Win32 error, without payloads.
+    let code = unsafe { GetLastError() };
     Error::OperatingSystem {
         operation,
-        code: unsafe { GetLastError() },
+        code,
     }
 }
 fn inherited_attributes() -> SECURITY_ATTRIBUTES {
