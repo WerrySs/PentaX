@@ -378,10 +378,10 @@ impl Protocol {
                                 word.strip_prefix(b"runtime_failure=")
                                     .map(|value| (&mut failure, value))
                             };
-                            if let Some((field, value)) = field {
-                                if field.replace(value).is_some() {
-                                    return Err(Error::Protocol);
-                                }
+                            if let Some((field, value)) = field
+                                && field.replace(value).is_some()
+                            {
+                                return Err(Error::Protocol);
                             }
                         }
                         self.result = Some(match code {
@@ -442,10 +442,10 @@ impl Session {
     pub fn stop(&mut self) {
         self.cancelled = true;
         self.summary = Summary::Stopping;
-        if let Some(process) = &mut self.process {
-            if let Err(error) = process.request_cancel() {
-                self.failure(error);
-            }
+        if let Some(process) = &mut self.process
+            && let Err(error) = process.request_cancel()
+        {
+            self.failure(error);
         }
     }
     fn failure(&mut self, error: supervised_process::Error) {
@@ -488,7 +488,7 @@ impl Session {
                     State::Running => {}
                     State::Stopping => self.summary = Summary::Stopping,
                     State::Exited(code) => {
-                        self.summary = self.failed.unwrap_or_else(|| {
+                        self.summary = self.failed.unwrap_or({
                             if self.cancelled {
                                 Summary::Stopped
                             } else if self.protocol.used != 0 {

@@ -61,18 +61,16 @@ fn actual_private_diagnostic_pipe_preserves_partial_chunks_and_discards_excess_o
     let mut count = 0;
     // SAFETY: Fresh empty private pipe, a tiny bounded message fits its known
     // buffer, and no other writer exists. No guest or UI pause is involved.
-    assert_ne!(
-        unsafe {
-            WriteFile(
-                write.raw(),
-                original.as_ptr(),
-                original.len() as u32,
-                &mut count,
-                null_mut(),
-            )
-        },
-        0
-    );
+    let written = unsafe {
+        WriteFile(
+            write.raw(),
+            original.as_ptr(),
+            original.len() as u32,
+            &mut count,
+            null_mut(),
+        )
+    };
+    assert_ne!(written, 0);
     assert_eq!(count, original.len() as u32);
     assert_eq!(reader.read(&mut output, false), Ok(4));
     assert_eq!(output, [0, 1, 2, 0xff]);

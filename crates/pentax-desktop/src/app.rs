@@ -1169,17 +1169,17 @@ impl eframe::App for Desktop {
                             .size(11.0)
                             .color(warning_text(ui)),
                     );
-                    if self.session_active() || self.launch_preparing {
-                        if nav_button(
+                    if (self.session_active() || self.launch_preparing)
+                        && nav_button(
                             ui,
                             self.activate,
                             "Stop session",
                             false,
                             CORAL,
                             [105.0, 27.0],
-                        ) {
-                            self.stop_session();
-                        }
+                        )
+                    {
+                        self.stop_session();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let connected = self.controllers.names().len();
