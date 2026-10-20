@@ -18,8 +18,6 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
-  CARGO_HOME: ${{ runner.temp }}/pentax-cargo
-  RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/source --remap-path-prefix=${{ runner.temp }}/pentax-cargo=/cargo
 
 jobs:
   portable:
@@ -30,6 +28,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Configure isolated Cargo paths
+        shell: bash
+        env:
+          CI_CARGO_HOME: ${{ runner.temp }}/pentax-cargo
+          CI_SOURCE_ROOT: ${{ github.workspace }}
+        run: |
+          printf 'CARGO_HOME=%s\n' "$CI_CARGO_HOME" >> "$GITHUB_ENV"
+          printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
       - name: Install desktop build dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev
       - name: Use the pinned Rust toolchain
@@ -49,6 +55,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Configure isolated Cargo paths
+        shell: bash
+        env:
+          CI_CARGO_HOME: ${{ runner.temp }}/pentax-cargo
+          CI_SOURCE_ROOT: ${{ github.workspace }}
+        run: |
+          printf 'CARGO_HOME=%s\n' "$CI_CARGO_HOME" >> "$GITHUB_ENV"
+          printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Build the desktop, CLI and worker
