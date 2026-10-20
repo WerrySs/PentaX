@@ -1469,3 +1469,26 @@ exports plus their exact demonstrated full-prefix identities are finite;
 cross-axis or other aliases are not inferred. These calls create no owned state,
 host device or audio context. No AudioOutOpen, ContextCreate, playback or DSP
 success is implied.
+
+## AudioOut2 ownership and cooperative logical output
+
+The eleven additional lifecycle roles follow the same pinned `libAudio2.cpp`,
+with logical sink ownership and fractional output timing from
+[audio.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/audio.cpp)
+(`5af755acb8f7c4f04a0df3c485551a9e508699b6`) and
+[audio_internal.h](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/audio_internal.h)
+(`ca2a430e199aa7629273ad70a01ab9e8c19d49c8`). The kernel NOTICE retains
+the GPL version 2 terms and original Kyty MIT attribution.
+
+Rust records own contexts, users, ports, copied PCM and actual object stereo
+mixes. Opaque continuation tickets replace sleeping under the source mutex.
+Logical sinks retain sample-rate remainders and real process-clock deadlines;
+a paced submission holds its buffers until completion. Queue backpressure and
+global deferred operations use the existing guest scheduler and exact native
+continuation validation. Only primary contexts, users and ports enter the shared
+handle census; internal sinks are independently bounded components.
+
+This explicit headless profile does not provide physical playback or mastering.
+Its finite grain/PCM policies, refusal of blocking unknown contexts and stronger
+whole-operation serialization are documented compatibility limits. Additional
+aliases, device success, DSP operations and host race equivalence are not inferred.

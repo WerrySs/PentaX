@@ -111,6 +111,8 @@ mod acm_context;
 mod ampr;
 #[path = "audio_out2.rs"]
 mod audio_out2;
+#[path = "audio_out2_lifecycle.rs"]
+mod audio_out2_lifecycle;
 #[path = "calendar.rs"]
 mod calendar;
 #[path = "content_init.rs"]

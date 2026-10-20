@@ -11,6 +11,7 @@ mod acm;
 mod ampr;
 mod application_heap;
 mod audio_out2;
+pub use audio_out2::{AudioOut2Usage, AudioOut2Wait, AudioOut2WaitAction};
 mod budget;
 mod calendar;
 mod catalog;
@@ -486,6 +487,7 @@ pub struct Kernel {
     np: np::NpState,
     entitlements: entitlement::LocalEntitlements,
     acm: acm::AcmState,
+    audio_out2: audio_out2::AudioState,
     fonts: font::FontState,
     ime: ime::ImeState,
     content: content_init::ContentState,
@@ -543,6 +545,7 @@ impl Kernel {
             np: np::NpState::new(limits)?,
             entitlements: entitlement::LocalEntitlements::default(),
             acm: acm::AcmState::default(),
+            audio_out2: audio_out2::AudioState::default(),
             fonts: font::FontState::default(),
             ime: ime::ImeState::default(),
             content: content_init::ContentState::default(),
@@ -767,6 +770,17 @@ impl Kernel {
             | AudioOut2ContextResetParam
             | AudioOut2ContextQueryMemory
             | AudioOut2GetSpeakerInfo => audio_out2::invoke(service, args, guest, &mut self.budget),
+            AudioOut2ContextCreate
+            | AudioOut2ContextDestroy
+            | AudioOut2ContextAdvance
+            | AudioOut2ContextPush
+            | AudioOut2ContextGetQueueLevel
+            | AudioOut2UserCreate
+            | AudioOut2UserDestroy
+            | AudioOut2PortCreate
+            | AudioOut2PortDestroy
+            | AudioOut2PortGetState
+            | AudioOut2PortSetAttributes => self.invoke_audio_out2(service, args, guest),
             AcmContextCreate => self.acm_context_create(args, guest),
             SystemHideSplashScreen
             | SystemParamGetString

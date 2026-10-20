@@ -42,6 +42,9 @@ pub struct HandleUsage {
     pub ime: usize,
     /// Creation-only ACM contexts; no batch or audio execution is implied.
     pub acm: usize,
+    /// AudioOut2 contexts, ports and users. Logical sinks are bounded internal
+    /// components of those records and must never be added again.
+    pub audio2: usize,
 }
 impl HandleUsage {
     #[must_use]
@@ -62,6 +65,7 @@ impl HandleUsage {
             + self.fonts
             + self.ime
             + self.acm
+            + self.audio2
     }
 }
 impl Kernel {
@@ -98,6 +102,7 @@ impl Kernel {
             fonts: self.fonts.retained_handle_count(),
             ime: self.ime.retained_handle_count(),
             acm: self.acm.retained_handle_count(),
+            audio2: self.audio_out2.retained_handle_count(),
         }
     }
 }

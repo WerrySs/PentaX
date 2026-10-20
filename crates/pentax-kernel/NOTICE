@@ -584,3 +584,17 @@ PentaX modifications2026 use checked exact guest spans, a queue-depth snapshot
 and atomic outputs. Initialize preserves stateless success, not host device
 initialization. ContextResetParam, ContextQueryMemory and GetSpeakerInfo do not
 allocate a context or imply real playback, output, mixing or DSP completion.
+
+The AudioOut2 lifecycle, PCM attributes, object stereo mixer and cooperative
+logical headless sinks additionally adapt the same PUBLIC revision:
+  src/libs/audio.cpp, Git blob5af755acb8f7c4f04a0df3c485551a9e508699b6
+  src/libs/audio_internal.h, Git blobca2a430e199aa7629273ad70a01ab9e8c19d49c8
+  src/libs/libAudio2.cpp, Git blob91fb83671bec4e4c17a31a28476dbec9dadd43cc
+GPL-2.0-only and the retained original Kyty MIT attribution/grant apply.
+PentaX modifications2026 replace global host mutexes, unchecked guest pointers,
+SDL queues and sleeping dispatch with bounded process-owned records, copied
+PCM, checked transactional outputs and opaque cooperative pending operations.
+Physical-device availability is false. Logical sinks retain fractional sample
+clocks without claiming audible playback. The stronger whole-operation lease,
+4096-grain policy,16MiB retained PCM/mix ceiling and controlled unknown-blocking
+context refusal are explicit compatibility limits, not invented source errors.

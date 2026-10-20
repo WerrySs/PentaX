@@ -706,6 +706,11 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         self.kernel.handle_usage()
     }
 
+    /// Committed headless CPU mixing and logical batches; no playback claim.
+    pub fn audio_out2_usage(&self) -> pentax_kernel::AudioOut2Usage {
+        self.kernel.audio_out2_usage()
+    }
+
     pub fn memory_map_refusal(&self) -> Option<pentax_kernel::MemoryMapRefusal> {
         self.kernel.memory_map_refusal()
     }
@@ -973,6 +978,17 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                     | pentax_kernel::Service::PosixMutexLock
                     | pentax_kernel::Service::MutexTimedLock
                     | pentax_kernel::Service::PosixMutexTimedLock
+                    | pentax_kernel::Service::AudioOut2ContextCreate
+                    | pentax_kernel::Service::AudioOut2ContextDestroy
+                    | pentax_kernel::Service::AudioOut2ContextAdvance
+                    | pentax_kernel::Service::AudioOut2ContextPush
+                    | pentax_kernel::Service::AudioOut2ContextGetQueueLevel
+                    | pentax_kernel::Service::AudioOut2UserCreate
+                    | pentax_kernel::Service::AudioOut2UserDestroy
+                    | pentax_kernel::Service::AudioOut2PortCreate
+                    | pentax_kernel::Service::AudioOut2PortDestroy
+                    | pentax_kernel::Service::AudioOut2PortGetState
+                    | pentax_kernel::Service::AudioOut2PortSetAttributes
             )
         {
             pthread_wait::begin(

@@ -90,6 +90,8 @@ pub struct Usage {
     pub save_memory_bytes: u64,
     pub save_bytes_read: u64,
     pub save_bytes_written: u64,
+    /// Actual retained AudioOut2 PCM and stereo-mix capacities, not playback.
+    pub audio_bytes: usize,
 }
 
 pub(crate) struct Budget {
@@ -98,6 +100,9 @@ pub(crate) struct Budget {
 }
 
 impl Budget {
+    pub(crate) fn retained_audio_bytes(&mut self, bytes: usize) {
+        self.usage.audio_bytes = bytes;
+    }
     pub(crate) fn new(limits: Limits) -> Result<Self, Failure> {
         if limits.max_handles > 65_536
             || limits.max_apr_paths > 1_048_576

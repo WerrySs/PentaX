@@ -611,6 +611,17 @@ pub enum Service {
     AudioOut2ContextResetParam,
     AudioOut2ContextQueryMemory,
     AudioOut2GetSpeakerInfo,
+    AudioOut2ContextCreate,
+    AudioOut2ContextDestroy,
+    AudioOut2ContextAdvance,
+    AudioOut2ContextPush,
+    AudioOut2ContextGetQueueLevel,
+    AudioOut2UserCreate,
+    AudioOut2UserDestroy,
+    AudioOut2PortCreate,
+    AudioOut2PortDestroy,
+    AudioOut2PortGetState,
+    AudioOut2PortSetAttributes,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1612,6 +1623,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    let mut index = 0;
+    while index < AUDIO_OUT2_LIFECYCLE_REGISTRATIONS.len() {
+        entries[output] = AUDIO_OUT2_LIFECYCLE_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1700,6 +1717,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + SYSTEM_NOTICE_REGISTRATIONS.len()
             + ACM_REGISTRATIONS.len()
             + AUDIO_OUT2_REGISTRATIONS.len()
+            + AUDIO_OUT2_LIFECYCLE_REGISTRATIONS.len()
     },
 >();
 
@@ -1745,6 +1763,7 @@ use acm::ACM_REGISTRATIONS;
 
 #[path = "catalog/audio_out2.rs"]
 mod audio_out2;
+use audio_out2::AUDIO_OUT2_LIFECYCLE_REGISTRATIONS;
 use audio_out2::AUDIO_OUT2_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a

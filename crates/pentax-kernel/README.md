@@ -1234,4 +1234,44 @@ byte/work limits. Null source-fatal arguments produce typed Unsupported rather
 than invented numeric errors. Exact canonical AudioOut 1.1 / AudioOut2 1 and the
 demonstrated libSceAudioOut 1.1 / libSceAudioOut2 1 identities are admitted. These
 helpers allocate no handle, audio context, port or device and do not play or mix
-audio. ContextCreate, AudioOutOpen and real DSP/output remain separate work.
+audio.
+
+The remaining eleven demonstrated AudioOut2 lifecycle roles use an explicit
+logical headless profile: at most16 contexts,256 ports,32 internal sinks and
+4096 users (also subject to the shared handle quota). Contexts, ports and users
+count once in the independent `audio2` handle census; sinks are bounded internal
+components. No physical device is present and no audible playback is claimed.
+Metadata is admitted lazily, with each actual allocation capacity checked before
+the next allocation. Retained PCM and stereo mixes share a16MiB ceiling and the
+shared scratch ceiling includes old storage and simultaneous staging. Grains
+are capped at4096 before effects, avoiding the source's larger-u32 duration wrap.
+
+Ports own snapshots of accepted PCM; object ports actually mix signed16-bit or
+float mono into stereo with the pinned gain/ambisonics coefficients. Ordinary
+ports retain their PCM and gains for logical sink submission. Accepted silent
+ambisonics still produces the source's zero stereo batch. Committed-only
+`audio_mix_frames` and `audio_logical_output_batches` count evaluated object
+sample frames and nonempty accepted logical batches, respectively. They measure
+neither physical playback nor DSP completion. Counter overflow refuses before
+publishing the queue, mix or sink clock.
+
+Queue backpressure uses the existing process-microsecond clock and source grain
+duration. Each logical sink separately retains its exact fractional48kHz (or
+declared port-rate) sample remainder. Blocking operations retain opaque tickets
+and park the actual guest syscall; no host sleep occurs inside dispatch. A paced
+submission retains a global lease over its buffers and sink ownership until its
+deadline. Other stateful operations defer behind it, including other contexts.
+Readiness observes only clock/owner state; completion requires the enrolled
+thread and the native adapter's real pending-token proof. Raw synchronous calls
+refuse any needed continuation before effects. A blocking unknown context is
+explicitly unsupported instead of looping forever or returning fake success.
+
+The global lease deliberately serializes complete stateful publication more
+strongly than upstream's pre-lock work: GetState defaults and provisional opens
+wait with the operation, and PortCreate's ID order is determined at that point.
+Pure pre-lock null/error precedence remains immediate. Ordinary noncontended
+calls retain source-error PortCreate ID consumption; guest, allocation and
+policy failures retain all IDs and state. ContextCreate models its output store
+before its queue-depth read through an atomic staged overlay. Physical aliases
+that cannot prove this ordering refuse. This profile does not claim host race
+equivalence, physical-device queue behavior, mastering or additional DSP APIs.

@@ -4,8 +4,9 @@
 
 use super::*;
 use pentax_kernel::{
-    ConditionWait, ConditionWaitAction, EventFlagWait, EventFlagWaitAction, EventQueueWait,
-    EventQueueWaitAction, MutexWait, MutexWaitAction, SemaphoreWait, SemaphoreWaitAction, Service,
+    AudioOut2Wait, AudioOut2WaitAction, ConditionWait, ConditionWaitAction, EventFlagWait,
+    EventFlagWaitAction, EventQueueWait, EventQueueWaitAction, MutexWait, MutexWaitAction,
+    SemaphoreWait, SemaphoreWaitAction, Service,
 };
 use pentax_platform::native_memory::NativeOwnerId;
 
@@ -23,6 +24,7 @@ enum Ticket {
     Semaphore(SemaphoreWait),
     Mutex(MutexWait),
     EventFlag(EventFlagWait),
+    AudioOut2(AudioOut2Wait),
 }
 impl fmt::Debug for PendingThreadWait {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -44,6 +46,32 @@ pub(super) fn begin(
         .ok_or(KernelStartupError::InvalidProvider("thread wait TLS"))?
         .thread_pointer;
     let ticket = if matches!(
+        service,
+        Service::AudioOut2ContextCreate
+            | Service::AudioOut2ContextDestroy
+            | Service::AudioOut2ContextAdvance
+            | Service::AudioOut2ContextPush
+            | Service::AudioOut2ContextGetQueueLevel
+            | Service::AudioOut2UserCreate
+            | Service::AudioOut2UserDestroy
+            | Service::AudioOut2PortCreate
+            | Service::AudioOut2PortDestroy
+            | Service::AudioOut2PortGetState
+            | Service::AudioOut2PortSetAttributes
+    ) {
+        // Source state locking also covers lifecycle and PCM mutation. An
+        // in-flight paced submission may defer any of these calls, not only
+        // ContextPush; preserve its exact original syscall in the same adapter.
+        match kernel
+            .begin_audio_out2_wait(service, args, memory)
+            .map_err(KernelStartupError::Kernel)?
+        {
+            AudioOut2WaitAction::Returned(value) => {
+                return Ok(NativeServiceAction::Returned(value));
+            }
+            AudioOut2WaitAction::Waiting(ticket) => Ticket::AudioOut2(ticket),
+        }
+    } else if matches!(
         service,
         Service::WaitEventFlag
             | Service::SetEventFlag
@@ -131,6 +159,24 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
             Ticket::Mutex(ticket) => self.kernel.mutex_wait_ready(ticket),
             Ticket::EventFlag(ticket) => self.kernel.event_flag_wait_ready(ticket),
+            Ticket::AudioOut2(ticket) => {
+                let (mut paused, instances) =
+                    self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
+                let guest = KernelMemory {
+                    paused: &mut paused,
+                    source: None,
+                    supplied_modules: self.plan.kernel_provider_index(),
+                    lookup_limits: None,
+                    lookup_work: None,
+                    loaded_modules: None,
+                    thread_tls: instances.get(self.active_tls),
+                    initial_entry: None,
+                };
+                // This is an observation of the same process-microsecond
+                // clock, possibly while a different guest thread is selected.
+                // No PCM read, guest write or pending-ticket consumption occurs.
+                self.kernel.audio_out2_wait_ready(ticket, &guest)
+            }
         }
         .map_err(KernelStartupError::Kernel)
     }
@@ -160,6 +206,23 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .kernel
                 .event_flag_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
+            Ticket::AudioOut2(ticket) => {
+                let (mut paused, instances) =
+                    self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
+                let guest = KernelMemory {
+                    paused: &mut paused,
+                    source: None,
+                    supplied_modules: self.plan.kernel_provider_index(),
+                    lookup_limits: None,
+                    lookup_work: None,
+                    loaded_modules: None,
+                    thread_tls: instances.get(self.active_tls),
+                    initial_entry: None,
+                };
+                self.kernel
+                    .audio_out2_wait_delay(ticket, &guest)
+                    .map_err(KernelStartupError::Kernel)
+            }
         }
     }
 
@@ -222,7 +285,10 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .complete_condition_wait(ticket)
                 .map(|ready| ready.then_some(0))
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Semaphore(_) | Ticket::EventQueue(_) | Ticket::EventFlag(_) => {
+            Ticket::Semaphore(_)
+            | Ticket::EventQueue(_)
+            | Ticket::EventFlag(_)
+            | Ticket::AudioOut2(_) => {
                 let (mut paused, instances) =
                     self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
                 let mut guest = KernelMemory {
@@ -244,6 +310,9 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     }
                     Ticket::EventFlag(ticket) => {
                         self.kernel.complete_event_flag_wait(ticket, &mut guest)
+                    }
+                    Ticket::AudioOut2(ticket) => {
+                        self.kernel.complete_audio_out2_wait(ticket, &mut guest)
                     }
                     _ => unreachable!(),
                 }

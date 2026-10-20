@@ -722,6 +722,7 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 // Observe once after execution, including a typed refusal.
                 // Scanning owner tables is outside the per-block hot path.
                 progress.kernel_handles = Some(session.kernel_handle_usage());
+                progress.audio_out2 = Some(session.audio_out2_usage());
                 result
             },
         )

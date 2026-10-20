@@ -2,10 +2,18 @@
 // Adapted from public KytyPS5@f186b35706ddbc3faf5513f326e2335d224802f7,
 // src/libs/libAudio2.cpp, blob91fb83671bec4e4c17a31a28476dbec9dadd43cc.
 // Modified for PentaX: exact checked footprints and atomic guest outputs.
-//! Stateless parameter/speaker helpers. No host device, context or DSP exists.
+//! Checked parameter helpers and bounded logical headless output ownership.
 
 use crate::budget::Budget;
 use crate::{CallArgs, Failure, GuestAccess, GuestError, GuestWrite, Service};
+
+mod lifecycle;
+mod pcm;
+mod state;
+mod wait;
+pub use state::AudioOut2Usage;
+pub(crate) use state::AudioState;
+pub use wait::{AudioOut2Wait, AudioOut2WaitAction};
 
 pub(crate) fn invoke(
     service: Service,
@@ -84,3 +92,7 @@ pub(crate) fn invoke(
 #[cfg(test)]
 #[path = "audio_out2/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "audio_out2/lifecycle_tests.rs"]
+mod lifecycle_tests;

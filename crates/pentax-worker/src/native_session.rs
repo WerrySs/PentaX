@@ -159,6 +159,7 @@ pub(super) struct NativeSessionProgress {
     pub failed_kernel_service: Option<&'static str>,
     pub output_bytes: u64,
     pub kernel_handles: Option<pentax_kernel::HandleUsage>,
+    pub audio_out2: Option<pentax_kernel::AudioOut2Usage>,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
     dispatch_context: dispatch_context::DispatchContext,
@@ -238,6 +239,10 @@ impl NativeSessionProgress {
                 use std::fmt::Write;
                 let _ = write!(fields, ",acm:{}", usage.acm);
             }
+            if usage.audio2 != 0 {
+                use std::fmt::Write;
+                let _ = write!(fields, ",audio2:{}", usage.audio2);
+            }
             {
                 use std::fmt::Write;
                 let _ = write!(
@@ -249,8 +254,14 @@ impl NativeSessionProgress {
             }
             fields
         });
+        let audio = self.audio_out2.map_or_else(String::new, |usage| {
+            format!(
+                "\taudio_mix_frames={}\taudio_logical_output_batches={}",
+                usage.mix_frames, usage.logical_output_batches
+            )
+        });
         format!(
-            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}",
+            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}{audio}",
             self.dispatch.native_entries,
             self.dispatch.cache_publications,
             self.dispatch.cache_reuses,
