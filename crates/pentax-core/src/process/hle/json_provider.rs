@@ -24,6 +24,32 @@ use std::fmt;
 
 const CONSTRUCTOR_NID: &[u8; 11] = b"-hJRce8wn1U";
 const INITIALIZER_CONSTRUCTOR_NID: &[u8; 11] = b"cK6bYHf-Q5E";
+// Each NID has exactly its pinned source identity and independently observed
+// libSceJson/libSceJson2 identity, never an inferred prefix cross-product.
+const CONTAINER_NIDS: [&[u8; 11]; 22] = [
+    b"OJPTonqdg0I",
+    b"a+W7HHlwpBs",
+    b"5JmzZt8twAo",
+    b"ERuf9y0DY84",
+    b"JP-PtKMiI1E",
+    b"HJ8GpRT1aiw",
+    b"zQtLRTqceMY",
+    b"3xUXnmUkXfo",
+    b"iZeYfOxtMRg",
+    b"dFCphqnd+a4",
+    b"IlsmvBtMkak",
+    b"ONT8As5R1ug",
+    b"HwDt5lD9Bfo",
+    b"XlWbvieLj2M",
+    b"wLsJlmgEIaI",
+    b"bcH5EnFE2xY",
+    b"WXF2ihRF+B8",
+    b"5AZPp99ogrc",
+    b"wcgr5mte7T8",
+    b"w5+VCznos5E",
+    b"9yLjn46Ypfs",
+    b"S5JxQnoGF3E",
+];
 const VALUE_CONSTRUCTOR_NIDS: [&[u8; 11]; 2] = [b"qBMjqyBn3OM", b"-wa17B7TGnw"];
 const MODULES: [&[u8]; 3] = [b"Json2", b"libSceJson2", b"libSceJson"];
 const LIBRARIES: [&[u8]; 2] = [b"Json2", b"libSceJson2"];
@@ -231,13 +257,13 @@ const OLD_EXPORT_COUNT: usize =
     SCOPES.len() + VALUE_CONSTRUCTOR_NIDS.len() * VALUE_SCOPES.len() + 1;
 // Retain the original allocator rows 1..=5 and Value constructor rows 6..=14.
 // New primitives append after them; the terminal marker has no symbol or NID.
-const EXPORTS: [JsonExport; OLD_EXPORT_COUNT + PRIMITIVE_EXPORT_COUNT + 2] = {
+const EXPORTS: [JsonExport; OLD_EXPORT_COUNT + PRIMITIVE_EXPORT_COUNT + 2 + 44] = {
     let mut exports = [JsonExport {
         nid: CONSTRUCTOR_NID,
         module: 0,
         library: 0,
         marker: 0,
-    }; OLD_EXPORT_COUNT + PRIMITIVE_EXPORT_COUNT + 2];
+    }; OLD_EXPORT_COUNT + PRIMITIVE_EXPORT_COUNT + 2 + 44];
     let mut index = 0;
     while index < SCOPES.len() {
         let (module, library) = SCOPES[index];
@@ -307,6 +333,24 @@ const EXPORTS: [JsonExport; OLD_EXPORT_COUNT + PRIMITIVE_EXPORT_COUNT + 2] = {
         library: 1,
         marker: 34,
     };
+    index += 2;
+    let mut container = 0;
+    while container < CONTAINER_NIDS.len() {
+        exports[index] = JsonExport {
+            nid: CONTAINER_NIDS[container],
+            module: 0,
+            library: 0,
+            marker: container + 35,
+        };
+        exports[index + 1] = JsonExport {
+            nid: CONTAINER_NIDS[container],
+            module: 2,
+            library: 1,
+            marker: container + 35,
+        };
+        index += 2;
+        container += 1;
+    }
     exports
 };
 pub(super) const CODE_FILE_BYTES: usize = 0x3800;
@@ -362,6 +406,28 @@ pub(crate) enum JsonFunction {
     ValueToString,
     ValueSerialize,
     InitializerCtor,
+    ObjectCtor,
+    ObjectCopyCtor,
+    ObjectDtor,
+    ObjectIndex,
+    ArrayCtor,
+    ArrayDtor,
+    ArrayPushBack,
+    ValueObjectCtor,
+    ValueArrayCtor,
+    ValueSetObject,
+    ValueGetObject,
+    ValueGetArray,
+    ValueIndexString,
+    ValueIndexUInt,
+    ValueReferValueKey,
+    ArrayBegin,
+    ArrayEnd,
+    ArrayIteratorNotEqual,
+    ArrayIteratorDereference,
+    ArrayIteratorIncrement,
+    ArrayIteratorDtor,
+    ParserParse,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,12 +442,12 @@ impl JsonMarker {
         [0xb8, a, b, c, d, 0x0f, 0x05, 0xc3]
     }
 }
-const MARKERS: [JsonMarker; 35] = {
+const MARKERS: [JsonMarker; 57] = {
     let mut markers = [JsonMarker {
         function: JsonFunction::MemAllocatorCtor,
         service_id: 0x5058_4a01,
         rva: 0x100,
-    }; 35];
+    }; 57];
     markers[1] = JsonMarker {
         function: JsonFunction::VirtualCall,
         service_id: 0x5058_4a02,
@@ -425,6 +491,28 @@ const MARKERS: [JsonMarker; 35] = {
         JsonFunction::ValueToString,
         JsonFunction::ValueSerialize,
         JsonFunction::InitializerCtor,
+        JsonFunction::ObjectCtor,
+        JsonFunction::ObjectCopyCtor,
+        JsonFunction::ObjectDtor,
+        JsonFunction::ObjectIndex,
+        JsonFunction::ArrayCtor,
+        JsonFunction::ArrayDtor,
+        JsonFunction::ArrayPushBack,
+        JsonFunction::ValueObjectCtor,
+        JsonFunction::ValueArrayCtor,
+        JsonFunction::ValueSetObject,
+        JsonFunction::ValueGetObject,
+        JsonFunction::ValueGetArray,
+        JsonFunction::ValueIndexString,
+        JsonFunction::ValueIndexUInt,
+        JsonFunction::ValueReferValueKey,
+        JsonFunction::ArrayBegin,
+        JsonFunction::ArrayEnd,
+        JsonFunction::ArrayIteratorNotEqual,
+        JsonFunction::ArrayIteratorDereference,
+        JsonFunction::ArrayIteratorIncrement,
+        JsonFunction::ArrayIteratorDtor,
+        JsonFunction::ParserParse,
     ];
     let mut index = 0;
     while index < functions.len() {
@@ -478,7 +566,7 @@ impl GeneratedJsonProvider {
     pub(super) const fn address_point(&self) -> u64 {
         self.load_bias + self.table_rva() + 16
     }
-    pub(crate) const fn markers(&self) -> &[JsonMarker; 35] {
+    pub(crate) const fn markers(&self) -> &[JsonMarker; 57] {
         &MARKERS
     }
     pub(super) const fn scalar_default_rva(&self, function: JsonFunction) -> Option<u64> {

@@ -1076,8 +1076,9 @@ raw XMM0 bits from its actual PRE-SYSCALL snapshot, without a host float cast or
 normalization. Both functions append four canonical rows plus their independently
 confirmed distinct module/library row, preserving every earlier export and marker.
 Null payload cleanup/count follows the source's nullable
-helpers; nonzero Array/Object payloads stop explicitly until real ownership and
-destruction are implemented. Unknown type defaults follow source dispatch.
+helpers. Owned nonzero Array/Object payloads now use the checked container
+implementation below; foreign storage still stops explicitly. Unknown type
+defaults follow source dispatch.
 
 Seventeen appended primitive markers use eighteen public NIDs, including two
 destructor identities. Their four reviewed canonical/prefixed pairs are finite;
@@ -1097,8 +1098,8 @@ impl through the mutable helper. Const null/zero wrappers instead read empty.
 Constructors initialize in source order and do not implicitly destroy previous
 contents. ToString(String) returns raw contents, and Serialize retains the
 source's raw quote wrapping rather than adding unimplemented escaping.
-Unported Real/container formatting remains explicit instead of using a guessed
-Rust float representation. Twelve new public identities append exact canonical
+The later container batch adds source fixed-six-digit Real and recursive
+container formatting. Twelve String public identities append exact canonical
 rows; eleven gain the independently observed fifth scope, while StringAssign
 remains canonical-only. Earlier export rows and guest marker/table/default
 addresses remain stable during metadata growth within the original code page.
@@ -1117,6 +1118,60 @@ The source's adjacent return-zero Initialize/InitializeV1 placeholders do not
 establish real configuration or allocator initialization; those operations and
 Initializer termination/destruction remain unavailable. This constructor does
 not grant a complete JSON lifecycle or an executable module capability.
+
+The owning container/parser batch follows this same exact pinned public
+`libJson2.cpp`: Array/Object helper overloads95-144, allocation/destruction
+168-220/229-251, Value copy277-294/conversion313-376, serialization378-424,
+Value container constructors604-624, SetObject626-636, getters735-746,
+index/ref methods773-801, Array878-917 and Object963-1014 lifecycle,
+iterator operations919-961 and Parser1016-1034. The manifest appends22 functions
+and44 exact rows: each known public NID has only the source `Json2` module and
+library pair plus its independently corroborated `libSceJson` module /
+`libSceJson2` library pair at1.1/1. All previous ordinals, marker RVAs, service
+IDs, allocator/default addresses and earlier scope decisions remain unchanged.
+
+PentaX substitutes checked guest wrappers, implementation identities, children,
+sorted key spans and iterator pointer cells for upstream host C++ containers.
+Copies own independent subtrees; SetObject snapshots before Clear, preserving
+copies from descendants. The public helper's const/mutable zero-impl distinction
+and source field-write order remain observable. Iterators authenticate the live
+current Array table; table replacement/destruction invalidates earlier views.
+Foreign tokens, unsupported address-dependent partial overlaps and physical
+aliases that cannot preserve staged ordering refuse before effects.
+
+The parser uses pinned serde1.0.229/serde_json1.0.154 with float_roundtrip and
+custom fallible deserialize seeds, rather than a serde_json::Value DOM. It
+preserves signed/unsigned/real types, exact lexical integer `-0` versus real
+negative zero, Unicode decoding, duplicate-member last-wins behavior and sorted
+object order. Source scalar/recursive serialization retains unescaped string
+and key wrapping and fixed-six-digit Real formatting. Limits are explicit
+PentaX policy:256 KiB input/individual text, depth64,4096 structural nodes and
+retained container records,1 MiB container metadata,64 MiB simultaneously held
+host buffers and64 MiB cumulative quarantined guest storage. Actual custom Vec
+capacities, old/new metadata, input, copies and output staging are counted.
+Before entering serde, a conservative4*input+4096 library-scratch allowance and
+finite input work are admitted; private serde allocations retain their
+infallible host-OOM boundary. This allowance does not claim actual per-buffer
+instrumentation of the library or recoverable allocator failure inside it.
+
+The tree and all caller outputs are prepared before one guest-memory
+transaction. Metadata commits only after success; input/permission/alias/work
+or quota failures retain the prior destination and live ownership. Failed
+staging work remains consumed. Retired mappings stay accounted until process
+teardown; these policies deliberately strengthen the source's host-allocation
+failure behavior. They do not infer external allocator callbacks, Initializer
+readiness or unimplemented initialization/termination/destruction semantics.
+Serde/serde_json MIT OR Apache-2.0 attribution is retained in the core NOTICE
+and generated dependency notices.
+
+The exact upstream nlohmann submodule revision is
+[`272411c5e6ea45919af7673524e74e60c62116df`](https://github.com/nlohmann/json/tree/272411c5e6ea45919af7673524e74e60c62116df),
+recorded by KytyPS5's pinned `3rdparty/nlohmann_json` gitlink. Its
+[`lexer.hpp`](https://github.com/nlohmann/json/blob/272411c5e6ea45919af7673524e74e60c62116df/include/nlohmann/detail/input/lexer.hpp#L1490)
+treats an unquoted raw NUL as end-of-input, while a raw NUL inside a quoted
+string is invalid. A bounded quote-aware prefix pass retains that sized-buffer
+convention before the mature Rust lexer; escaped Unicode NUL remains string
+data and incomplete container prefixes still fail.
 
 `LibcInternalExt::LibcHeapGetTraceInfo` adapts the same pinned `libC.cpp` source:
 the exact extension-library registration, 32-byte Info record, 64-bit mask and

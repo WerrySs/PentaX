@@ -6,6 +6,9 @@ use super::*;
 use pentax_kernel::{Kernel, Limits, ProcessIdentity};
 use pentax_platform::native_memory::{NativeAddressSpace, NativePermissions};
 
+#[path = "containers/tests.rs"]
+mod containers;
+
 struct Fixture {
     memory: NativeAddressSpace,
     kernel: Kernel,
@@ -302,7 +305,7 @@ fn empty_type_and_clear_method_have_real_storage_and_source_link_semantics() {
 }
 
 #[test]
-fn serializer_retains_pinned_unescaped_and_self_append_behavior_and_refuses_real_atomically() {
+fn serializer_retains_pinned_unescaped_self_append_and_fixed_real_formatting() {
     use JsonFunction::*;
     let mut f = Fixture::new();
     let value = f.base + 0x100;
@@ -325,16 +328,13 @@ fn serializer_retains_pinned_unescaped_and_self_append_behavior_and_refuses_real
     f.call(ValueSerialize, value, dst).unwrap();
     assert_eq!(f.text(dst), b"18446744073709551615");
     f.put(value + 28, &4_u32.to_le_bytes());
-    let before = f.text(dst);
+    f.put(value + 16, &1.25_f64.to_bits().to_le_bytes());
     let token = f.word(dst);
     let handles = f.kernel.usage().handles_live;
-    assert_eq!(
-        f.call(ValueToString, value, dst),
-        Err(KernelStartupError::UnavailableJsonFormat)
-    );
+    assert_eq!(f.call(ValueToString, value, dst), Ok(0));
     assert_eq!(f.word(dst), token);
-    assert_eq!(f.text(dst), before);
-    assert_eq!(f.kernel.usage().handles_live, handles);
+    assert_eq!(f.text(dst), b"1.250000");
+    assert_eq!(f.kernel.usage().handles_live, handles + 1);
 }
 
 #[test]

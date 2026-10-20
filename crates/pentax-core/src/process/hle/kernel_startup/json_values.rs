@@ -157,7 +157,7 @@ impl StagedValue {
                 if kind == 5 {
                     storage.clear_string(memory, self, pointer, work, maximum)?;
                 } else {
-                    return Err(KernelStartupError::UnavailableJsonValueStorage);
+                    storage.clear_container(memory, self, kind, pointer)?;
                 }
             }
         }
@@ -189,7 +189,10 @@ impl StagedValue {
                 let pointer = u64::from_le_bytes(self.read(memory, at(source, UNION)?)?);
                 storage.copy_string(memory, self, pointer, work, maximum)?;
             }
-            6 | 7 => return Err(KernelStartupError::UnavailableJsonValueStorage),
+            kind @ (6 | 7) => {
+                let pointer = u64::from_le_bytes(self.read(memory, at(source, UNION)?)?);
+                storage.copy_container(memory, self, kind, pointer)?;
+            }
             _ => self.write(UNION, &[0; 8]),
         }
         Ok(())
@@ -257,6 +260,39 @@ impl StagedValue {
 }
 
 pub(super) trait ValueStorage {
+    fn clear_container(
+        &mut self,
+        _: &PausedNativeMemory<'_>,
+        _: &StagedValue,
+        _: u32,
+        _: u64,
+    ) -> Result<(), KernelStartupError> {
+        Err(KernelStartupError::UnavailableJsonValueStorage)
+    }
+    fn copy_container(
+        &mut self,
+        _: &PausedNativeMemory<'_>,
+        _: &mut StagedValue,
+        _: u32,
+        _: u64,
+    ) -> Result<(), KernelStartupError> {
+        Err(KernelStartupError::UnavailableJsonValueStorage)
+    }
+    fn empty_container(&mut self, _: &mut StagedValue, _: u32) -> Result<(), KernelStartupError> {
+        Err(KernelStartupError::UnavailableJsonValueStorage)
+    }
+    fn count_container(
+        &mut self,
+        _: &PausedNativeMemory<'_>,
+        _: u32,
+        pointer: u64,
+    ) -> Result<u64, KernelStartupError> {
+        if pointer == 0 {
+            Ok(0)
+        } else {
+            Err(KernelStartupError::UnavailableJsonValueStorage)
+        }
+    }
     fn clear_string(
         &mut self,
         memory: &PausedNativeMemory<'_>,
@@ -402,11 +438,7 @@ pub(super) fn prepare(
                 memory
                     .read(at(object, UNION)?, &mut pointer)
                     .map_err(|error| guest(error, false))?;
-                if u64::from_le_bytes(pointer) == 0 {
-                    Ok(0)
-                } else {
-                    Err(KernelStartupError::UnavailableJsonValueStorage)
-                }
+                storage.count_container(memory, kind, u64::from_le_bytes(pointer))
             }
             ValueCount => Ok(0),
             ValueGetBoolean if object != 0 && kind == 1 => at(object, UNION),
@@ -434,9 +466,6 @@ pub(super) fn prepare(
     }
     if function == ValueAssign && (args[1] == 0 || args[1] == object) {
         return Ok(ValueAction::Return(result));
-    }
-    if function == ValueTypeCtor && matches!(args[1] as u32, 6 | 7) {
-        return Err(KernelStartupError::UnavailableJsonValueStorage);
     }
     let mut staged = StagedValue::new(object)?;
     match function {
@@ -469,13 +498,12 @@ pub(super) fn prepare(
             staged.write(UNION, &real_payload);
         }
         ValueTypeCtor | ValueSetType => {
-            if matches!(args[1] as u32, 6 | 7) {
-                return Err(KernelStartupError::UnavailableJsonValueStorage);
-            }
             staged.set_type(args[1] as u32);
             staged.write(UNION, &[0; 8]);
             if args[1] as u32 == 5 {
                 storage.empty_string(&mut staged)?;
+            } else if matches!(args[1] as u32, 6 | 7) {
+                storage.empty_container(&mut staged, args[1] as u32)?;
             }
         }
         ValueCopyCtor | ValueAssign => staged.copy(memory, args[1], storage, work, maximum)?,

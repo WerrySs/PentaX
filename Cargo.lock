@@ -2310,6 +2310,8 @@ dependencies = [
  "pentax-linker",
  "pentax-loader",
  "pentax-platform",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

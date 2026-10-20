@@ -361,3 +361,22 @@ PentaX modifications, 2026: append-only exact canonical and independently
 observed module/library bindings with existing immutable-provider attestation.
 The constructor returns its opaque self word without guest memory effects;
 no allocator initialization or complete JSON lifecycle is claimed.
+
+The owning JSON container/parser/iterator implementation additionally adapts
+the same PUBLIC KytyPS5/KytyPS5 f186b35706ddbc3faf5513f326e2335d224802f7
+src/libs/libJson2.cpp, blob d6e968f019fa61e0adc5224cd20be1ecd3261487.
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT
+grant continue to apply. PentaX modifications, 2026: checked guest-backed
+Object/Array storage, deep-copy ownership, iterator views, transactional
+publication and finite parsing/formatting policies. Twenty-two public NIDs
+append only their source and separately corroborated exact scope pairs;
+existing service markers and immutable defaults are unchanged. Source C++
+container pointers are replaced with private authenticated guest identities.
+No external allocator initialization or Initializer lifecycle is inferred.
+
+JSON syntax and numeric decoding use serde 1.0.229 and serde_json 1.0.154
+(float_roundtrip), Copyright David Tolnay and the serde/serde_json contributors,
+under MIT OR Apache-2.0. Their retained upstream licenses are supplied through
+the project's dependency notices. Custom deserialize seeds bound and allocate
+the PentaX tree fallibly; the pinned parser's private scratch is pre-admitted
+under a conservative envelope, retaining its infallible allocator boundary.

@@ -19,6 +19,7 @@ use super::{KernelStartupError, charge};
 use crate::process::hle::json_provider::JsonFunction;
 use pentax_platform::native_memory::{NativeMemoryError, NativeOwnerId, PausedNativeMemory};
 
+mod containers;
 mod plan;
 use plan::{Plan, StringRef};
 
@@ -49,6 +50,7 @@ pub(super) struct JsonStrings {
     records: Vec<StringRecord>,
     wrappers: Vec<WrapperRecord>,
     guest_bytes: u64,
+    containers: containers::Containers,
 }
 
 pub(super) struct JsonCall {
@@ -79,6 +81,7 @@ impl JsonStrings {
             records: Vec::new(),
             wrappers: Vec::new(),
             guest_bytes: 0,
+            containers: containers::Containers::new(),
         }
     }
 
@@ -92,6 +95,9 @@ impl JsonStrings {
     ) -> Result<u64, KernelStartupError> {
         if self.owner.is_some_and(|owner| owner != memory.owner_id()) {
             return Err(KernelStartupError::NativeOwnerMismatch);
+        }
+        if containers::handles(memory, &call, work, maximum)? {
+            return containers::service(self, memory, kernel, call, work, maximum);
         }
         self.owner = Some(memory.owner_id());
         charge(work, CALL_WORK, maximum)?;

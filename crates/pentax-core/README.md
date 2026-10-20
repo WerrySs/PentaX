@@ -639,13 +639,12 @@ library pair. Each export binds its own exact marker through the private symbol
 manifest. Whole-span admission precedes the 32-byte write, including unaligned
 destinations; failed boundary, permission or budget checks preserve all bytes.
 This representation follows Kyty's explicit size/offset assertions, without
-using AnyPS5's incompatible host-owned Node representation. It does not implement
-parsing or dynamically owned Array/Object values. String lifecycle support uses
-the separate process-owned implementation described below.
+using AnyPS5's incompatible host-owned Node representation. Strings and dynamic
+Array/Object values use the process-owned storage described below.
 
 The JSON primitive batch adds boolean/integer/type construction, scalar setters,
 reference getters, copy/assignment, cleanup, count and allocator destruction.
-The provider has35 private markers and172 exact export rows. Existing rows and
+The provider has57 private markers and216 exact export rows. Existing rows and
 marker addresses remain stable; metadata moves within its original code page.
 Three separate read-only zero words back the boolean, integer and real default
 references. GetBoolean/GetInteger/GetReal return actual guest addresses; GetReal
@@ -664,9 +663,11 @@ physical-alias checks and finite work before effects. Owned Strings use one
 bounded process owner across their constructor, assignment, CStr/length queries,
 destruction and Value copy/set/clear paths. CStr returns actual guest bytes;
 String defaults have a separate immutable empty wrapper and NUL byte. Scalar
-and String formatting preserves the reviewed source profile; unported Real
-and container formatting refuses explicitly. Nonzero Array/Object payloads
-retain their explicit storage-unavailable stop. Calls keep constant-work source validation and
+and String formatting preserves the reviewed source profile. Real formatting
+uses six fractional digits, including source nonfinite spellings. Arrays and
+objects serialize their actual owned children with the source's raw string/key
+quote wrapping. Foreign or stale container storage refuses explicitly.
+Calls keep constant-work source validation and
 live marker/default attestation; full binding validation occurs at plan/epoch
 publication instead of scanning unrelated relocations for every scalar call.
 
@@ -684,3 +685,35 @@ independent storage. Retired addresses are quarantined and remain accounted;
 stale tokens cannot become live objects again. Unsupported address-dependent
 partial-wrapper overlap refuses before effects, rather than inventing pointer
 bytes. Existing ordered Value overlap semantics remain unchanged.
+
+Twenty-two appended functions provide owning Object/Array construction,
+deep copy, destruction, indexed access, Array push-back and iterators, Value
+container conversions and the sized parser. Each NID adds only its source
+`Json2` pair and its separately observed `libSceJson` / `libSceJson2` pair at
+module1.1/library1. Every earlier marker, service ID, export ordinal and immutable
+default address remains stable. Iterator positions refer to real guest pointer
+cells and become invalid after the underlying Array table grows or is destroyed.
+Copies own independent children; SetObject snapshots its source before clearing
+the destination, including copies from its own descendants.
+
+The parser uses serde_json's mature lexer with fallible custom deserialize
+seeds rather than an unchecked library DOM. It preserves integer/unsigned/real
+types, lexical integer `-0`, signed real zero, Unicode strings, last duplicate
+members and bytewise sorted object keys. Malformed input returns the source
+parse error without changing the destination. Explicit policies bound input
+and individual text to256 KiB, depth to64, structural nodes and retained
+container records to4096, container metadata to1 MiB and simultaneous retained
+plus staged host storage to64 MiB. Actual custom-buffer capacities are counted;
+a conservative `4 * input + 4096` allowance covers the pinned library's internal
+scratch before parsing. Its internal allocator still has Rust's infallible OOM
+boundary; the envelope is not a recoverable host-OOM guarantee. All variable
+work, including failed staging attempts, remains charged.
+
+Children, keys and iterator cells live in bounded guest mappings, with a shared
+64 MiB JSON guest-storage cap and the kernel's mapping/handle quotas. Mutations
+publish the new blob and caller fields in one transaction, then commit private
+metadata without further fallible work. Failed reads, writes, ownership checks,
+quotas or staging leave previous bytes and ownership intact. Retired mappings
+remain quarantined and accounted until process teardown. This container/parser
+support does not initialize an external allocator or implement Initializer
+initialization, termination, destruction or user callbacks.

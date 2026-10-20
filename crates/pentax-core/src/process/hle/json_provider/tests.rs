@@ -89,7 +89,7 @@ fn link<'a>(
 #[test]
 fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
     let provider = factory(BIAS);
-    assert_eq!(provider.function_count(), 172);
+    assert_eq!(provider.function_count(), 216);
     assert_eq!(provider.mapped_bytes(), 2 * PAGE_SIZE);
     assert_eq!(provider.load_bias(), BIAS);
     let view = open_executable(provider.image()).unwrap();
@@ -157,7 +157,7 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
         );
     }
     let symbols = metadata.link().symbols();
-    assert_eq!(symbols.len(), 173);
+    assert_eq!(symbols.len(), 217);
     assert_eq!(
         (symbols[0].info, symbols[0].value, symbols[0].size),
         (0, 0, 0)
@@ -177,13 +177,13 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
     for symbol in 6..=14 {
         assert_eq!(provider.export_marker(symbol), Some(provider.markers()[2]));
     }
-    for symbol in [0, 173, usize::MAX] {
+    for symbol in [0, 217, usize::MAX] {
         assert!(provider.export_marker(symbol).is_none());
     }
     assert!(!symbols.iter().any(|symbol| symbol.value == 0x110));
     assert!(metadata.link().rela().is_empty());
     assert!(metadata.link().plt_rela().is_empty());
-    assert_eq!(provider.markers().len(), 35);
+    assert_eq!(provider.markers().len(), 57);
     for marker in provider.markers() {
         assert_eq!(
             &provider.image()[marker.rva as usize..marker.rva as usize + 8],
@@ -219,8 +219,8 @@ fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
         (0x3800, 0x1800, 0x3868)
     );
     assert_eq!((DYNAMIC_AT, STRINGS_AT), (0x600, 0x800));
-    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x12de);
-    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2838);
+    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x159e);
+    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2c58);
     for (row, symbol) in symbols.iter().enumerate().skip(1) {
         let marker = provider.export_marker(row).unwrap();
         assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);
@@ -331,6 +331,89 @@ fn json_initializer_constructor_appends_only_two_exact_scopes_without_lifecycle_
         b"R7FDWtcN6f8#C#D"
     );
     assert_eq!(symbols[170].value, 0x310);
+}
+
+#[test]
+fn json_container_manifest_appends_exact_public_functions_and_refuses_unobserved_authority() {
+    let expected = [
+        (b"OJPTonqdg0I", JsonFunction::ObjectCtor),
+        (b"a+W7HHlwpBs", JsonFunction::ObjectCopyCtor),
+        (b"5JmzZt8twAo", JsonFunction::ObjectDtor),
+        (b"ERuf9y0DY84", JsonFunction::ObjectIndex),
+        (b"JP-PtKMiI1E", JsonFunction::ArrayCtor),
+        (b"HJ8GpRT1aiw", JsonFunction::ArrayDtor),
+        (b"zQtLRTqceMY", JsonFunction::ArrayPushBack),
+        (b"3xUXnmUkXfo", JsonFunction::ValueObjectCtor),
+        (b"iZeYfOxtMRg", JsonFunction::ValueArrayCtor),
+        (b"dFCphqnd+a4", JsonFunction::ValueSetObject),
+        (b"IlsmvBtMkak", JsonFunction::ValueGetObject),
+        (b"ONT8As5R1ug", JsonFunction::ValueGetArray),
+        (b"HwDt5lD9Bfo", JsonFunction::ValueIndexString),
+        (b"XlWbvieLj2M", JsonFunction::ValueIndexUInt),
+        (b"wLsJlmgEIaI", JsonFunction::ValueReferValueKey),
+        (b"bcH5EnFE2xY", JsonFunction::ArrayBegin),
+        (b"WXF2ihRF+B8", JsonFunction::ArrayEnd),
+        (b"5AZPp99ogrc", JsonFunction::ArrayIteratorNotEqual),
+        (b"wcgr5mte7T8", JsonFunction::ArrayIteratorDereference),
+        (b"w5+VCznos5E", JsonFunction::ArrayIteratorIncrement),
+        (b"9yLjn46Ypfs", JsonFunction::ArrayIteratorDtor),
+        (b"S5JxQnoGF3E", JsonFunction::ParserParse),
+    ];
+    let provider = factory(BIAS);
+    for (index, (nid, function)) in expected.into_iter().enumerate() {
+        let marker = provider.markers()[35 + index];
+        assert_eq!(
+            (marker.function, marker.service_id, marker.rva),
+            (
+                function,
+                0x5058_4a24 + index as u32,
+                0x330 + index as u64 * 16
+            )
+        );
+        for (scope, module, library) in [
+            (0, b"Json2".as_slice(), b"Json2".as_slice()),
+            (1, b"libSceJson".as_slice(), b"libSceJson2".as_slice()),
+        ] {
+            let mut original = consumer(module, library);
+            original.imports[0].nid = *nid;
+            let bytes = original.build().unwrap();
+            let source = link(&bytes, &provider).unwrap();
+            assert_eq!(source.patches()[0].value(), BIAS + marker.rva);
+            assert!(
+                matches!(source.patches()[0].resolution(), Resolution::Definition(reference)
+                if reference.module.index() == 1 && reference.symbol == 173 + index * 2 + scope)
+            );
+            assert_eq!(
+                provider.export_marker(173 + index * 2 + scope),
+                Some(marker)
+            );
+            original.minor = 2;
+            assert!(matches!(
+                link(&original.build().unwrap(), &provider),
+                Err(SymbolicError::VersionMismatch { .. })
+            ));
+            original.minor = 1;
+            original.imports[0].symbol_type = 1;
+            original.imports[0].relocation = 6;
+            assert!(matches!(
+                link(&original.build().unwrap(), &provider),
+                Err(SymbolicError::UnsupportedSymbol {
+                    reason: UnsupportedSymbol::TypeMismatch,
+                    ..
+                })
+            ));
+        }
+        let mut unobserved = consumer(b"libSceJson2", b"libSceJson2");
+        unobserved.imports[0].nid = *nid;
+        assert!(matches!(
+            link(&unobserved.build().unwrap(), &provider),
+            Err(SymbolicError::MissingProvider { .. })
+        ));
+    }
+    assert_eq!(provider.export_marker(172).unwrap().rva, 0x320);
+    assert_eq!(provider.export_marker(170).unwrap().rva, 0x310);
+    assert_eq!(provider.table_rva(), PAGE_SIZE);
+    assert_eq!(provider.empty_cstr_rva(), PAGE_SIZE + 96);
 }
 
 #[test]
