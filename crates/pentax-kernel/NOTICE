@@ -598,3 +598,13 @@ Physical-device availability is false. Logical sinks retain fractional sample
 clocks without claiming audible playback. The stronger whole-operation lease,
 4096-grain policy,16MiB retained PCM/mix ceiling and controlled unknown-blocking
 context refusal are explicit compatibility limits, not invented source errors.
+
+The finite POSIX pthread_self bindings additionally follow PUBLIC
+KytyPS5/KytyPS5 revision f186b35706ddbc3faf5513f326e2335d224802f7:
+  src/libs/libKernel.cpp, Git blob c6fb3d76c9df124274d28f51da9b1fd3d9183b61
+  src/kernel/pthread.cpp, Git blob bdb125ab7e77969821928985da0dfaff4c929070
+GPL-2.0-only and the retained original Kyty copyright/MIT grant apply.
+PentaX modifications2026 append only the exact libkernel1.1/Posix1 binding
+and selected libScePosix1 spelling, retaining every old marker and the existing
+process-owned selected-thread implementation. No host pthread pointer, wildcard
+namespace normalization or new thread lifecycle behavior is introduced.

@@ -1527,3 +1527,25 @@ transfer conversion, GPU-EOP event, flip acknowledgement or game frame.
 
 Copyright(c)2021 InoriRus, GPL-2.0-only and the retained original Kyty MIT grant
 continue to apply. The packet/shader/pixel fixtures are original PentaX data.
+
+## Finite POSIX thread-self bindings
+
+The additional zero-argument `pthread_self` binding follows public
+KytyPS5/KytyPS5 revision `f186b35706ddbc3faf5513f326e2335d224802f7`:
+[libKernel.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/libKernel.cpp#L1858),
+blob `c6fb3d76c9df124274d28f51da9b1fd3d9183b61`, declares module `libkernel`
+1.1/library `Posix` 1 and registers NID `EotR8a3ASf4` at line2190.
+[pthread.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/kernel/pthread.cpp#L4069),
+blob `bdb125ab7e77969821928985da0dfaff4c929070`, directly delegates the POSIX
+wrapper to `LibKernel::PthreadSelf`. Both files were independently Git-blob
+verified. Existing GPL version2 terms and original Kyty MIT attribution remain
+in the kernel/core NOTICE files.
+
+PentaX appends that exact source binding and the selected `libScePosix` library
+spelling under the same module/version. It reuses the existing selected guest
+thread service; no resolver wildcard, new service semantics or host pointer is
+introduced. Metadata evidence establishes these finite import identities, not
+which ambiguous imported symbol caused a particular dynamic stop. Original
+consumers compare canonical and POSIX self values on two actual scheduled
+threads, with independently distinct TLS snapshots; pthread prefixes are not
+assumed equal to TLS pointers.

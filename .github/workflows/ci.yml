@@ -168,3 +168,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_audio_out2_headless_pcm_lease_and_full_queue_preserve_real_thread_continuations -- --test-threads=1
+      - name: Test POSIX self on actual selected guest threads
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_posix_self_uses_each_actual_selected_thread_and_keeps_tls_distinct -- --test-threads=1

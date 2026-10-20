@@ -302,3 +302,12 @@ under GPL-2.0-only and the retained original Kyty MIT grant. PentaX appends four
 canonical AudioOut/AudioOut2 functions and their four exact demonstrated
 full-prefix identities, preserving all prior marker/data RVAs. No context,
 port, device or playback capability is supplied by these stateless helpers.
+
+The POSIX pthread_self provider aliases additionally follow PUBLIC
+KytyPS5/KytyPS5@f186b35706ddbc3faf5513f326e2335d224802f7,
+src/libs/libKernel.cpp, Git blob c6fb3d76c9df124274d28f51da9b1fd3d9183b61,
+and src/kernel/pthread.cpp, Git blob bdb125ab7e77969821928985da0dfaff4c929070.
+GPL-2.0-only and the retained original Kyty copyright/MIT grant apply.
+PentaX modifications2026 add two finite exact FUNC bindings to the existing
+selected-thread service, preserving old marker/data addresses and all dispatch
+authority checks. Original consumers distinguish pthread identity from TLS.

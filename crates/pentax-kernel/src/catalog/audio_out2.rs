@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn audio_out2_appends_only_four_stateless_roles_under_two_exact_identities() {
-        assert_eq!(REGISTRATIONS.len(), 1313);
+        assert_eq!(REGISTRATIONS.len(), 1315);
         assert_eq!(
             Service::AudioOut2Initialize as usize,
             Service::AcmContextCreate as usize + 1
@@ -203,7 +203,10 @@ mod tests {
 
     #[test]
     fn headless_lifecycle_appends_only_eleven_proven_roles_and_keeps_old_ordinals() {
-        assert_eq!(&REGISTRATIONS[1291..], &AUDIO_OUT2_LIFECYCLE_REGISTRATIONS);
+        assert_eq!(
+            &REGISTRATIONS[1291..1313],
+            &AUDIO_OUT2_LIFECYCLE_REGISTRATIONS
+        );
         assert_eq!(
             Service::AudioOut2ContextCreate as usize,
             Service::AudioOut2GetSpeakerInfo as usize + 1

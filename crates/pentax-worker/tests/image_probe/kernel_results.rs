@@ -46,6 +46,8 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
 
 #[path = "posix.rs"]
 mod posix;
+#[path = "posix_self.rs"]
+mod posix_self;
 
 #[path = "thread_priority.rs"]
 mod thread_priority;

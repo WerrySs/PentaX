@@ -24,6 +24,9 @@ mod acm;
 #[path = "audio_out2_tests.rs"]
 mod audio_out2;
 
+#[path = "posix_self_tests.rs"]
+mod posix_self;
+
 const OLD_REGISTRATIONS: usize = 862;
 const SCOPES: [(&[u8], &[u8]); 4] = [
     (b"NpWebApi2", b"NpWebApi2"),
