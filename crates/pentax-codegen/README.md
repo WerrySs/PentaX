@@ -13,6 +13,20 @@ The existing legacy byte/word/dword comparison admission remains unchanged;
 EVEX mask-destination comparisons require separate semantics and stay outside
 the runtime's three-form qword comparison profile.
 
+Saturating PACKSSWB, PACKSSDW and PACKUSWB retain their existing SSE2 legacy
+native admission; this change does not force those instructions through a
+software exit. Legacy PACKUSDW and all VEX.128/256 versions remain mediated,
+including when SSE4.1/AVX/AVX2 features are declared. Their exact source operands,
+16/32-byte read widths and RIP targets survive planning. The runtime implements
+the twelve non-MMX, non-EVEX forms with signed source values, saturation to the
+selected signed/unsigned destination range, and independent 128-bit halves for
+YMM packing. Checked mediation requires 16-byte alignment for legacy memory
+sources and permits unaligned VEX sources. Legacy upper state is preserved;
+VEX.128 clears the upper half. Flags and MXCSR are unchanged. MMX/EVEX state is
+not admitted by sharing a mnemonic; see the
+[Intel instruction reference](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf)
+entries for PACKSSWB/PACKSSDW, PACKUSDW and PACKUSWB.
+
 ## Source and ownership
 
 `plan_block(&SymbolicLinkPlan, module_index, guest_pc, CachePlacement,

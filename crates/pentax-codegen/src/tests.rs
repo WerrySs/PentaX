@@ -12,6 +12,7 @@ mod memory;
 mod minimum_position;
 mod packed_convert;
 mod qword_comparisons;
+mod saturating_packs;
 mod source_window;
 mod timestamp_counter;
 mod vector_masks;

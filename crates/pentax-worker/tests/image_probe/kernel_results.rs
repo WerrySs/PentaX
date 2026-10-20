@@ -51,6 +51,8 @@ mod minimum_position;
 mod packed_convert;
 #[path = "qword_comparisons.rs"]
 mod qword_comparisons;
+#[path = "saturating_packs.rs"]
+mod saturating_packs;
 
 #[path = "directory_abi.rs"]
 mod directory_abi;

@@ -28,6 +28,8 @@ mod float_arithmetic;
 mod float_comparisons;
 #[path = "tests/qword_comparisons.rs"]
 mod qword_comparisons;
+#[path = "tests/saturating_packs.rs"]
+mod saturating_packs_tests;
 
 #[path = "tests/cpu_identification.rs"]
 mod cpu_identification_tests;
