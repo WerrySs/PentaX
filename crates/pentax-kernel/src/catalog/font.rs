@@ -643,7 +643,6 @@ mod tests {
 
     #[test]
     fn font_catalogue_preserves_gp_classes_and_exact_per_nid_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::FontAttachDeviceCacheBuffer as usize,
             Service::EntitlementAccessGetEntitlementKey as usize + 1

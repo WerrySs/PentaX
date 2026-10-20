@@ -40,7 +40,6 @@ fn link<'a>(
 #[test]
 fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry() {
     let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[41..43],
         &[("NpTrophy2", (1, 1)), ("libSceNpTrophy2", (1, 1))]

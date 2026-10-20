@@ -42,7 +42,6 @@ fn ime_exact_bindings_append_without_changing_old_sites_data_or_caps() {
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
     );
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(&MODULES[51..53], &[("Ime", (1, 1)), ("libSceIme", (1, 1))]);
     assert_eq!(&LIBRARIES[52..54], &[("Ime", 1), ("libSceIme", 1)]);
     for (index, marker) in provider.markers().iter().enumerate() {

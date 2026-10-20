@@ -41,7 +41,6 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
     );
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[53..56],
         &[

@@ -31,7 +31,6 @@ const CASES: [(Service, &str, u8); 23] = [
 
 #[test]
 fn mspace_catalog_appends_exact_public_roles_nids_and_argument_counts_once() {
-    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(REGISTRATIONS[937].service, Service::NpWebApi2Terminate);
     assert_eq!(
         Service::MspaceCreate as usize,

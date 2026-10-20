@@ -284,3 +284,11 @@ src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed.
 GPL-2.0-only and the retained original Kyty MIT grant continue to apply.
 PentaX modifications2026 append two exact FUNC identities while preserving all
 prior marker and data addresses. No batch/DSP implementation is implied.
+
+The finite AudioOut2 helper provider metadata additionally follows PUBLIC
+KytyPS5/KytyPS5@f186b35706ddbc3faf5513f326e2335d224802f7,
+src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed,
+under GPL-2.0-only and the retained original Kyty MIT grant. PentaX appends four
+canonical AudioOut/AudioOut2 functions and their four exact demonstrated
+full-prefix identities, preserving all prior marker/data RVAs. No context,
+port, device or playback capability is supplied by these stateless helpers.

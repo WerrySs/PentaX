@@ -1221,3 +1221,17 @@ The source ignores FIFO/priority attributes, so no priority wake order is
 claimed. Multi-waiter Poll during a cancel/delete drain is explicitly unsupported
 instead of reproducing the source race that can mutate cancellation bits. Live
 Poll remains immediate; its Single EPERM precedence is preserved during a drain.
+
+The four stateless AudioOut2 helpers follow the pinned source without opening
+audio hardware. Initialize only returns zero and retains no initialization flag.
+ContextResetParam writes exactly 64 bytes, including the six source defaults and
+zero reserved words. ContextQueryMemory reads only the four-byte queue_depth at
+offset 12 before writing its eight-byte size; zero depth selects 4 and every other
+uint32 depth uses the source formula. Input/output overlap observes that snapshot.
+GetSpeakerInfo writes exactly 80 bytes with the source stereo availability/angles,
+zero padding and ignored flags. Each output commits atomically under the shared
+byte/work limits. Null source-fatal arguments produce typed Unsupported rather
+than invented numeric errors. Exact canonical AudioOut 1.1 / AudioOut2 1 and the
+demonstrated libSceAudioOut 1.1 / libSceAudioOut2 1 identities are admitted. These
+helpers allocate no handle, audio context, port or device and do not play or mix
+audio. ContextCreate, AudioOutOpen and real DSP/output remain separate work.

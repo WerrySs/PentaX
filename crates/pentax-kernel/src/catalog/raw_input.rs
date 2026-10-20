@@ -130,7 +130,6 @@ mod tests {
 
     #[test]
     fn raw_input_exact_catalogue_appends_ten_roles_and_three_observed_mouse_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::MouseClose as usize,
             Service::ImeKeyboardSetMode as usize + 1

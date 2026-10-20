@@ -100,7 +100,6 @@ mod tests {
 
     #[test]
     fn ime_exact_catalogue_preserves_order_gp_arities_and_observed_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::ImeSetText as usize,
             Service::FontSelectRendererFt as usize + 1

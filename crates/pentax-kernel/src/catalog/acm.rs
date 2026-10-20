@@ -36,8 +36,7 @@ mod tests {
             Service::AcmContextCreate as usize,
             Service::SystemReportAbnormalTermination as usize + 1
         );
-        assert_eq!(REGISTRATIONS.len(), 1283);
-        assert_eq!(&REGISTRATIONS[1281..], &ACM_REGISTRATIONS);
+        assert_eq!(&REGISTRATIONS[1281..1283], &ACM_REGISTRATIONS);
         for (index, name) in ["Acm", "libSceAcm"].into_iter().enumerate() {
             let entry = &ACM_REGISTRATIONS[index];
             assert_eq!((entry.module, entry.library), (name, name));

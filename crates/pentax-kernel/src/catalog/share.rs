@@ -69,7 +69,6 @@ mod tests {
 
     #[test]
     fn share_catalogue_preserves_exact_roles_and_only_two_observed_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::ShareInitialize as usize,
             Service::KeyboardGetKey2Char as usize + 1

@@ -31,7 +31,6 @@ const CASES: [(Service, &str, &str, u8); 4] = [
 
 #[test]
 fn game_intent_catalog_appends_four_public_roles_in_two_exact_scopes() {
-    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(
         REGISTRATIONS[960].service,
         Service::PafMspaceMallocStatsFast

@@ -46,7 +46,6 @@ fn uds_bindings_cross_index1024_with_full_ids_fixed_pages_and_stable_data() {
     let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!(MAX_REGISTRATIONS, 2048);
     assert_eq!(CODE_MAPPED_BYTES, 4 * PAGE_SIZE);
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[43..45],
         &[

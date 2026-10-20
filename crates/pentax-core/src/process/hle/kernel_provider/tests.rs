@@ -21,6 +21,9 @@ mod system_notice;
 #[path = "acm_tests.rs"]
 mod acm;
 
+#[path = "audio_out2_tests.rs"]
+mod audio_out2;
+
 const OLD_REGISTRATIONS: usize = 862;
 const SCOPES: [(&[u8], &[u8]); 4] = [
     (b"NpWebApi2", b"NpWebApi2"),
@@ -255,7 +258,6 @@ fn content_provider_selector_boundaries_and_wide_actual_symbolic_bindings() {
 #[test]
 fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
     let provider = factory();
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -324,7 +326,6 @@ fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
 #[test]
 fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_imports() {
     let provider = factory();
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[56..58],
         &[("Share", (1, 1)), ("libSceShare", (1, 1))]
@@ -423,8 +424,6 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
 #[test]
 fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_or_objects() {
     let provider = factory();
-    assert_eq!(MODULES.len(), 66);
-    assert_eq!(LIBRARIES.len(), 67);
     assert_eq!(
         &MODULES[34..38],
         &[
@@ -462,8 +461,8 @@ fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_
     let metadata = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
     let metadata = metadata.metadata().unwrap();
     let descriptors = metadata.descriptors().decoded().unwrap();
-    assert_eq!(descriptors.module_info().len(), 66);
-    assert_eq!(descriptors.export_libraries().len(), 67);
+    assert_eq!(descriptors.module_info().len(), MODULES.len());
+    assert_eq!(descriptors.export_libraries().len(), LIBRARIES.len());
     for (index, descriptor) in descriptors.module_info().iter().enumerate() {
         assert_eq!(descriptor.name().as_bytes(), MODULES[index].0.as_bytes());
         assert_eq!(descriptor.id().value(), index as u16 + 1);

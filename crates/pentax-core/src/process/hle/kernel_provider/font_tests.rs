@@ -42,7 +42,6 @@ fn font_all_exact_bindings_fit_existing_caps_and_preserve_old_sites_and_objects(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
     );
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[47..51],
         &[

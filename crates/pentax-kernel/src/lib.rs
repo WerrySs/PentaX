@@ -10,6 +10,7 @@
 mod acm;
 mod ampr;
 mod application_heap;
+mod audio_out2;
 mod budget;
 mod calendar;
 mod catalog;
@@ -762,6 +763,10 @@ impl Kernel {
         self.budget.attempt()?;
         use Service::*;
         match service {
+            AudioOut2Initialize
+            | AudioOut2ContextResetParam
+            | AudioOut2ContextQueryMemory
+            | AudioOut2GetSpeakerInfo => audio_out2::invoke(service, args, guest, &mut self.budget),
             AcmContextCreate => self.acm_context_create(args, guest),
             SystemHideSplashScreen
             | SystemParamGetString

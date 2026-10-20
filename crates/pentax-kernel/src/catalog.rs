@@ -607,6 +607,10 @@ pub enum Service {
     SystemPowerTick,
     SystemReportAbnormalTermination,
     AcmContextCreate,
+    AudioOut2Initialize,
+    AudioOut2ContextResetParam,
+    AudioOut2ContextQueryMemory,
+    AudioOut2GetSpeakerInfo,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1602,6 +1606,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < AUDIO_OUT2_REGISTRATIONS.len() {
+        entries[output] = AUDIO_OUT2_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1689,6 +1699,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + PRIORITY_REGISTRATIONS.len()
             + SYSTEM_NOTICE_REGISTRATIONS.len()
             + ACM_REGISTRATIONS.len()
+            + AUDIO_OUT2_REGISTRATIONS.len()
     },
 >();
 
@@ -1731,6 +1742,10 @@ use system_notice::SYSTEM_NOTICE_REGISTRATIONS;
 #[path = "catalog/acm.rs"]
 mod acm;
 use acm::ACM_REGISTRATIONS;
+
+#[path = "catalog/audio_out2.rs"]
+mod audio_out2;
+use audio_out2::AUDIO_OUT2_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a
 // separately observed full-prefix import. No mixed or inferred aliases.

@@ -106,7 +106,6 @@ mod tests {
 
     #[test]
     fn priority_appends_nine_source_rows_with_seven_stable_roles_and_gp_arities() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::PthreadGetprio as usize,
             Service::PlayGoGetSupportedOptionalChunk as usize + 1

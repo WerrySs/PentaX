@@ -95,7 +95,6 @@ mod tests {
 
     #[test]
     fn system_notice_appends_seven_exact_roles_with_source_labels_and_gp_arities() {
-        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::SystemHideSplashScreen as usize,
             Service::PosixThreadSetSchedParam as usize + 1

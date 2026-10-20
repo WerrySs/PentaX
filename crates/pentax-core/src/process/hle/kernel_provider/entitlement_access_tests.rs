@@ -38,7 +38,6 @@ fn link<'a>(
 #[test]
 fn entitlement_access_exact_bindings_preserve_prior_sites_and_fixed_data_pages() {
     let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[45..47],
         &[

@@ -1443,3 +1443,29 @@ the source's multi-waiter Poll/drain race. FIFO/priority order is not claimed:
 the source constructor ignores that argument. Actual parked CPU context storage,
 including YMM state, uses the existing scheduler path; no synthetic signal,
 host busy loop or fabricated syscall return is introduced.
+
+## Stateless AudioOut2 helpers
+
+The four helper contracts follow PUBLIC KytyPS5/KytyPS5 revision
+`f186b35706ddbc3faf5513f326e2335d224802f7`,
+[libAudio2.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/libAudio2.cpp)
+(`91fb83671bec4e4c17a31a28476dbec9dadd43cc`) and
+[audio.h](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/audio.h)
+(`40706f5ff2d5087c53c0ffc749ad2c73c1a66dd4`). Exact NIDs and canonical module
+AudioOut 1.1/library AudioOut2 1 follow
+[libAudio.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/libAudio.cpp),
+blob `2069a82b636778b652d4d6f936a57c3e8dd040ed`. All three files were decoded
+and Git-blob verified independently. The kernel/core NOTICE files retain GPL
+version2 terms and original Kyty MIT attribution.
+
+Initialize has no arguments or effects beyond logging/zero return. ResetParam
+writes the source 64-byte defaults; QueryMemory reads only queue_depth at 12 and
+writes one 64-bit source-formula result, including its zero-depth fallback.
+GetSpeakerInfo clears exactly 80 bytes and supplies the two source stereo angles.
+PentaX replaces unchecked pointers with complete checked transactions and
+snapshots the query input before output, preserving ordinary overlap. Fatal null
+checks remain typed Unsupported without guessed Sony errors. The four canonical
+exports plus their exact demonstrated full-prefix identities are finite;
+cross-axis or other aliases are not inferred. These calls create no owned state,
+host device or audio context. No AudioOutOpen, ContextCreate, playback or DSP
+success is implied.

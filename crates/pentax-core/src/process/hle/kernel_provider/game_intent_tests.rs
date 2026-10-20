@@ -47,7 +47,6 @@ fn link<'a>(
 #[test]
 fn game_intent_all_eight_bindings_append_after_stable_old_sites_and_data() {
     let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[39..41],
         &[("NpGameIntent", (1, 1)), ("libSceNpGameIntent", (1, 1))]

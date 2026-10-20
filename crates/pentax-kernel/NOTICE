@@ -573,3 +573,14 @@ PentaX modifications2026: process-owned bounded creation state, exact four-byte
 transactional output and finite nonwrapping identifiers replace a global atomic
 counter and unchecked guest pointer. Null remains unsupported. No batch or DSP
 success behavior is adapted from the source's logging-only placeholders.
+
+Four stateless AudioOut2 helpers additionally adapt PUBLIC KytyPS5/KytyPS5
+revision f186b35706ddbc3faf5513f326e2335d224802f7:
+  src/libs/libAudio2.cpp, Git blob91fb83671bec4e4c17a31a28476dbec9dadd43cc
+  src/libs/audio.h, Git blob40706f5ff2d5087c53c0ffc749ad2c73c1a66dd4
+  src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed
+GPL-2.0-only and the retained original Kyty MIT attribution/grant apply.
+PentaX modifications2026 use checked exact guest spans, a queue-depth snapshot
+and atomic outputs. Initialize preserves stateless success, not host device
+initialization. ContextResetParam, ContextQueryMemory and GetSpeakerInfo do not
+allocate a context or imply real playback, output, mixing or DSP completion.

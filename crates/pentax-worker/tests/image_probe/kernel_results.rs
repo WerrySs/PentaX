@@ -109,6 +109,8 @@ mod timestamp_counter;
 mod acm_context;
 #[path = "ampr.rs"]
 mod ampr;
+#[path = "audio_out2.rs"]
+mod audio_out2;
 #[path = "calendar.rs"]
 mod calendar;
 #[path = "content_init.rs"]
