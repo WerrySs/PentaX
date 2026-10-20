@@ -60,9 +60,9 @@ fn link<'a>(
 #[test]
 fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
     let (provider, libc) = factories();
-    assert_eq!(provider.registration_count(), 1281);
-    assert_eq!(provider.markers().len(), 1281);
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!(provider.registration_count(), 1283);
+    assert_eq!(provider.markers().len(), 1283);
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[36..39],
         &[
@@ -93,8 +93,8 @@ fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
         (runtime.segments[1].flags.raw(), runtime.segments[1].vaddr),
         (6, 4 * PAGE_SIZE)
     );
-    assert_eq!(provider.code_bytes().len(), 0xfdb8);
-    assert_eq!(provider.image().len(), 0xfdc8);
+    assert_eq!(provider.code_bytes().len(), 0xfe68);
+    assert_eq!(provider.image().len(), 0xfe78);
     let metadata = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
     let metadata = metadata.metadata().unwrap();
     let descriptors = metadata.descriptors().decoded().unwrap();
@@ -148,11 +148,11 @@ fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     // Mspace stays in the kernel factory; the separately retained libc factory

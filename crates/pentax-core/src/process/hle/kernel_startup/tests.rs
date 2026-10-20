@@ -382,7 +382,7 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
                 plan.kernel_bindings(),
                 plan.hle.provider_bindings()
             ),
-            (1281, 1, 1)
+            (1283, 1, 1)
         );
         assert_eq!(
             (

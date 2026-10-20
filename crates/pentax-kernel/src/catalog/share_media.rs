@@ -132,7 +132,7 @@ mod tests {
     use super::*;
     #[test]
     fn share_media_exact_append_and_winning_permit_keep_unique_identities() {
-        assert_eq!(REGISTRATIONS.len(), 1281);
+        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::ShareCaptureVideoClip as usize,
             Service::ContentDeleteInitialize as usize + 1

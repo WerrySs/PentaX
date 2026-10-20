@@ -18,6 +18,9 @@ mod priority;
 #[path = "system_notice_tests.rs"]
 mod system_notice;
 
+#[path = "acm_tests.rs"]
+mod acm;
+
 const OLD_REGISTRATIONS: usize = 862;
 const SCOPES: [(&[u8], &[u8]); 4] = [
     (b"NpWebApi2", b"NpWebApi2"),
@@ -39,11 +42,11 @@ fn share_media_provider_exact_append_and_only_observed_prefix_bindings() {
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1281, 64, 65)
+        (1283, 66, 67)
     );
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
@@ -173,7 +176,7 @@ fn content_provider_selector_boundaries_and_wide_actual_symbolic_bindings() {
     // PlayGo IDs. Higher offsets exceed the independent64 KiB image ceiling.
     for base in [1, 2] {
         let provider = build_kernel_provider_with_base(CODE_MAPPED_BYTES, base).unwrap();
-        assert_eq!(provider.markers().len(), 1281);
+        assert_eq!(provider.markers().len(), 1283);
         for (a, b) in ordinary.markers().iter().zip(provider.markers()) {
             assert_eq!(
                 (a.service_id, a.rva, a.bytes()),
@@ -275,11 +278,11 @@ fn content_provider_selector_boundaries_and_wide_actual_symbolic_bindings() {
 #[test]
 fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1281);
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!(provider.registration_count(), 1283);
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
@@ -349,8 +352,8 @@ fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
 #[test]
 fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_imports() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1281);
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!(provider.registration_count(), 1283);
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[56..58],
         &[("Share", (1, 1)), ("libSceShare", (1, 1))]
@@ -358,7 +361,7 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
     assert_eq!(&LIBRARIES[57..59], &[("Share", 1), ("libSceShare", 1)]);
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
@@ -380,11 +383,11 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
     }
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(
         &provider.data_bytes()[..8],
@@ -453,10 +456,10 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
 #[test]
 fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_or_objects() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1281);
-    assert_eq!(provider.markers().len(), 1281);
-    assert_eq!(MODULES.len(), 64);
-    assert_eq!(LIBRARIES.len(), 65);
+    assert_eq!(provider.registration_count(), 1283);
+    assert_eq!(provider.markers().len(), 1283);
+    assert_eq!(MODULES.len(), 66);
+    assert_eq!(LIBRARIES.len(), 67);
     assert_eq!(
         &MODULES[34..38],
         &[
@@ -494,8 +497,8 @@ fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_
     let metadata = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
     let metadata = metadata.metadata().unwrap();
     let descriptors = metadata.descriptors().decoded().unwrap();
-    assert_eq!(descriptors.module_info().len(), 64);
-    assert_eq!(descriptors.export_libraries().len(), 65);
+    assert_eq!(descriptors.module_info().len(), 66);
+    assert_eq!(descriptors.export_libraries().len(), 67);
     for (index, descriptor) in descriptors.module_info().iter().enumerate() {
         assert_eq!(descriptor.name().as_bytes(), MODULES[index].0.as_bytes());
         assert_eq!(descriptor.id().value(), index as u16 + 1);
@@ -513,9 +516,9 @@ fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_
         assert_eq!(descriptor.version(), LIBRARIES[index].1);
     }
     let symbols = metadata.link().symbols();
-    assert_eq!(symbols.len(), 1284);
-    assert_eq!(provider.objects()[0].symbol, 1282);
-    assert_eq!(provider.objects()[1].symbol, 1283);
+    assert_eq!(symbols.len(), 1286);
+    assert_eq!(provider.objects()[0].symbol, 1284);
+    assert_eq!(provider.objects()[1].symbol, 1285);
     assert_eq!(provider.objects()[0].rva, STACK_GUARD_RVA);
     assert_eq!(provider.objects()[1].rva, PROGRAM_NAME_OBJECT_RVA);
     assert_eq!(STACK_GUARD_RVA, 4 * PAGE_SIZE);

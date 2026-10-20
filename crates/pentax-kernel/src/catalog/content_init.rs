@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn content_catalogue_keeps_search_minor_zero_and_only_observed_export_alias() {
-        assert_eq!(REGISTRATIONS.len(), 1281);
+        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::ContentExportInit2 as usize,
             Service::ShareTerminate as usize + 1

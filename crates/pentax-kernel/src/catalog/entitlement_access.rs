@@ -24,7 +24,7 @@ const CASES: [(Service, &str, u8); 5] = [
 
 #[test]
 fn entitlement_access_catalog_appends_five_exact_roles_and_two_observed_aliases() {
-    assert_eq!(REGISTRATIONS.len(), 1281);
+    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(REGISTRATIONS[1049].service, Service::UdsTerminate);
     assert_eq!(
         Service::EntitlementAccessInitialize as usize,

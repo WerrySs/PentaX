@@ -277,3 +277,10 @@ acknowledgement. The current linear draw receipt does not attest a tiled video
 buffer. GPU-EOP, event delivery and desktop/worker frame transport remain
 explicit integration gaps. No commercial frame or FPS is established by these
 original fixtures. Detailed scope is in src/gpu/video/README.md.
+
+The finite ACM ContextCreate provider metadata additionally follows public
+KytyPS5/KytyPS5@f186b35706ddbc3faf5513f326e2335d224802f7,
+src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed.
+GPL-2.0-only and the retained original Kyty MIT grant continue to apply.
+PentaX modifications2026 append two exact FUNC identities while preserving all
+prior marker and data addresses. No batch/DSP implementation is implied.

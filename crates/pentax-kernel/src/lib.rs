@@ -7,6 +7,7 @@
 //! A caller must retain the same actual guest backing through [`GuestAccess`].
 //! No guest integer is a host pointer and this crate has no execution interface.
 
+mod acm;
 mod ampr;
 mod application_heap;
 mod budget;
@@ -483,6 +484,7 @@ pub struct Kernel {
     user: user::UserState,
     np: np::NpState,
     entitlements: entitlement::LocalEntitlements,
+    acm: acm::AcmState,
     fonts: font::FontState,
     ime: ime::ImeState,
     content: content_init::ContentState,
@@ -539,6 +541,7 @@ impl Kernel {
             user: user::UserState::default(),
             np: np::NpState::new(limits)?,
             entitlements: entitlement::LocalEntitlements::default(),
+            acm: acm::AcmState::default(),
             fonts: font::FontState::default(),
             ime: ime::ImeState::default(),
             content: content_init::ContentState::default(),
@@ -759,6 +762,7 @@ impl Kernel {
         self.budget.attempt()?;
         use Service::*;
         match service {
+            AcmContextCreate => self.acm_context_create(args, guest),
             SystemHideSplashScreen
             | SystemParamGetString
             | SystemGetNoticeScreenSkipFlag

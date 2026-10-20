@@ -23,7 +23,7 @@ const OBSERVED: [usize; 5] = [0, 1, 2, 14, 13];
 
 #[test]
 fn trophy2_catalog_appends_fifteen_source_roles_and_only_five_observed_pairs() {
-    assert_eq!(REGISTRATIONS.len(), 1281);
+    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(
         REGISTRATIONS[968].service,
         Service::GameIntentGetPropertyValueString

@@ -105,6 +105,8 @@ mod time_counter;
 #[path = "timestamp_counter.rs"]
 mod timestamp_counter;
 
+#[path = "acm_context.rs"]
+mod acm_context;
 #[path = "ampr.rs"]
 mod ampr;
 #[path = "calendar.rs"]

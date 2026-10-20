@@ -606,6 +606,7 @@ pub enum Service {
     SystemSetNoticeScreenSkipFlag,
     SystemPowerTick,
     SystemReportAbnormalTermination,
+    AcmContextCreate,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1595,6 +1596,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < ACM_REGISTRATIONS.len() {
+        entries[output] = ACM_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1681,6 +1688,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + PLAYGO_REGISTRATIONS.len()
             + PRIORITY_REGISTRATIONS.len()
             + SYSTEM_NOTICE_REGISTRATIONS.len()
+            + ACM_REGISTRATIONS.len()
     },
 >();
 
@@ -1719,6 +1727,10 @@ use priority::PRIORITY_REGISTRATIONS;
 #[path = "catalog/system_notice.rs"]
 mod system_notice;
 use system_notice::SYSTEM_NOTICE_REGISTRATIONS;
+
+#[path = "catalog/acm.rs"]
+mod acm;
+use acm::ACM_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a
 // separately observed full-prefix import. No mixed or inferred aliases.

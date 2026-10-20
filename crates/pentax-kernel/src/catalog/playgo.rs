@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn playgo_appends_eighteen_source_roles_and_only_seven_observed_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1281);
+        assert_eq!(REGISTRATIONS.len(), 1283);
         assert_eq!(
             Service::PlayGoInitialize as usize,
             Service::ShareSetCaptureSource as usize + 1

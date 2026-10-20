@@ -37,12 +37,12 @@ fn link<'a>(
 #[test]
 fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
     let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1281);
+    assert_eq!(provider.registration_count(), 1283);
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
     );
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[53..56],
         &[
@@ -57,7 +57,7 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
     );
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -96,11 +96,11 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

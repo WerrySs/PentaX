@@ -1192,3 +1192,13 @@ Allocator pointers and requested sizes are therefore neither read nor executed,
 and no host media operation is created. Work/attempt refusal leaves flags
 unchanged. ContentSearch uses its exact module version 1.0. This initialization
 profile does not implement content export, search or deletion operations.
+
+`AcmContextCreate` implements the pinned creation-only ACM profile: one opaque
+process-owned uint32 identifier, starting at one, is written to exactly four
+guest bytes. Shared handle/work/byte limits and the complete live output
+transaction precede identifier publication. Rejected outputs consume no context
+or identifier; exhaustion refuses without wrapping or reuse. Null takes a typed
+unsupported path rather than an invented numeric error. Only canonical
+`Acm/Acm` and the exact full-prefix `libSceAcm/libSceAcm` identity are registered,
+both module1.1/library1. Context destruction, batch submission, waiting and DSP
+execution remain unsupported; creating an identifier does not process audio.

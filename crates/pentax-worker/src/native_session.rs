@@ -234,6 +234,10 @@ impl NativeSessionProgress {
                 use std::fmt::Write;
                 let _ = write!(fields, ",ime:{}", usage.ime);
             }
+            if usage.acm != 0 {
+                use std::fmt::Write;
+                let _ = write!(fields, ",acm:{}", usage.acm);
+            }
             {
                 use std::fmt::Write;
                 let _ = write!(

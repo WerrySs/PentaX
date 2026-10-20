@@ -51,7 +51,7 @@ const OBSERVED: [usize; 20] = [
 
 #[test]
 fn uds_catalog_appends_all_source_roles_and_only_twenty_observed_prefixes() {
-    assert_eq!(REGISTRATIONS.len(), 1281);
+    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(REGISTRATIONS[988].service, Service::Trophy2DestroyHandle);
     assert_eq!(
         Service::UdsInitialize as usize,

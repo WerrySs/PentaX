@@ -1396,3 +1396,26 @@ Exact guest metadata remains separate from effective execution class:
 the running class. Initial child activation uses its then-current attributes;
 later affinity changes never relatch its demotion. Priority inheritance and
 priority-ordered kernel wait queues are outside this change.
+
+## ACM context creation
+
+The creation-only ACM contract follows the independently blob-verified public
+[acm.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/acm.cpp)
+(`303c2afe5fb515456edc64519e5731938358d78b`) and
+[acm.h](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/acm.h)
+(`f561b2cdf08560fb4d7022f5d22a26f3036cc7f7`). The uint32 context output,
+SYSV int return, initial identifier1 and null unsupported path come from those
+sources. Canonical NID/scope/version metadata follows
+[libAudio.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/libAudio.cpp),
+blob `2069a82b636778b652d4d6f936a57c3e8dd040ed`. The GPL version2 terms and
+retained original Kyty MIT attribution are recorded in the kernel NOTICE.
+
+PentaX replaces the global counter/direct pointer store with bounded
+process-owned scalar records and one exact four-byte checked guest transaction.
+Handle admission, work/byte limits and complete live output validation precede
+infallible identifier/count publication. Exhaustion refuses without wrapping or
+reuse. The finite catalogue appends canonical `Acm/Acm` and the independently
+confirmed full-prefix `libSceAcm/libSceAcm`, both module1.1/library1; mixed scopes
+and all other ACM roles remain absent. Previous service sites and data RVAs stay
+fixed. Context destruction and real batch/DSP execution are separate work; the
+upstream batch ID/offset/logging placeholders do not establish audio processing.

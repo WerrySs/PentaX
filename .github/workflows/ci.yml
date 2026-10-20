@@ -141,3 +141,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_ymm_bridge_proves_all_registers_boundaries_upper_rules_and_real_native_counts -- --test-threads=1
+      - name: Test native ACM context creation and exact scopes
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_acm_context_creation_binds_exact_scopes_and_writes_sequential_u32_handles -- --test-threads=1

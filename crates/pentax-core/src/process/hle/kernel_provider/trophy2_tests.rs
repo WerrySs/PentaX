@@ -40,8 +40,8 @@ fn link<'a>(
 #[test]
 fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry() {
     let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1281);
-    assert_eq!((MODULES.len(), LIBRARIES.len()), (64, 65));
+    assert_eq!(provider.registration_count(), 1283);
+    assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[41..43],
         &[("NpTrophy2", (1, 1)), ("libSceNpTrophy2", (1, 1))]
@@ -77,16 +77,16 @@ fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry(
     assert_eq!(provider.markers()[976].registration.arguments, 7);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     assert!(provider.image().len() as u64 <= CODE_MAPPED_BYTES);
     for (namespace, start, end) in [

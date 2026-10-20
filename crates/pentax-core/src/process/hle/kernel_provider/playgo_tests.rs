@@ -12,7 +12,7 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1281, 64, 65)
+        (1283, 66, 67)
     );
     assert_eq!(
         &MODULES[62..],
@@ -25,7 +25,7 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
     );
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -64,11 +64,11 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

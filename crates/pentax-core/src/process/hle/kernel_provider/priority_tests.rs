@@ -12,7 +12,7 @@ fn priority_exact_bindings_append_without_moving_previous_sites_or_objects() {
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1281, 64, 65)
+        (1283, 66, 67)
     );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
@@ -20,7 +20,7 @@ fn priority_exact_bindings_append_without_moving_previous_sites_or_objects() {
     );
     assert_eq!(
         (provider.code_bytes().len(), provider.image().len()),
-        (0xfdb8, 0xfdc8)
+        (0xfe68, 0xfe78)
     );
     for index in 1262..1272 {
         let marker = provider.markers()[index];
@@ -60,11 +60,11 @@ fn priority_exact_bindings_append_without_moving_previous_sites_or_objects() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1282, 0x10000)
+        (1284, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1283, 0x10008)
+        (1285, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

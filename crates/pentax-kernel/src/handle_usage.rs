@@ -40,6 +40,8 @@ pub struct HandleUsage {
     /// IME sessions and pending event dispatches. Temporary event mappings are
     /// independently included in memory, never added twice here.
     pub ime: usize,
+    /// Creation-only ACM contexts; no batch or audio execution is implied.
+    pub acm: usize,
 }
 impl HandleUsage {
     #[must_use]
@@ -59,6 +61,7 @@ impl HandleUsage {
             + self.uds
             + self.fonts
             + self.ime
+            + self.acm
     }
 }
 impl Kernel {
@@ -94,6 +97,7 @@ impl Kernel {
             uds: self.uds.retained_handle_count(),
             fonts: self.fonts.retained_handle_count(),
             ime: self.ime.retained_handle_count(),
+            acm: self.acm.retained_handle_count(),
         }
     }
 }

@@ -49,7 +49,7 @@ const SCOPES: [(&str, &str); 4] = [
 
 #[test]
 fn np_webapi2_appends_exact_public_nids_source_names_and_abi_counts() {
-    assert_eq!(REGISTRATIONS.len(), 1281);
+    assert_eq!(REGISTRATIONS.len(), 1283);
     assert_eq!(REGISTRATIONS[861].service, Service::Http2SetTimeOut);
     assert_eq!(REGISTRATIONS[861].nid, "VYMxTcBqSE0");
     assert_eq!(

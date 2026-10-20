@@ -554,3 +554,14 @@ whole committed-range validation and retained protection metadata. PentaX uses
 bounded transactional adoption of already committed input-image pages through
 its same-owner adapter, rather than a global host virtual-range registry. This
 does not admit generated service providers, runtime-owned storage or holes.
+
+ACM context creation additionally adapts PUBLIC KytyPS5/KytyPS5 revision
+f186b35706ddbc3faf5513f326e2335d224802f7:
+  src/libs/acm.cpp, Git blob303c2afe5fb515456edc64519e5731938358d78b
+  src/libs/acm.h, Git blobf561b2cdf08560fb4d7022f5d22a26f3036cc7f7
+  src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed
+GPL-2.0-only and the retained original Kyty MIT attribution/grant apply.
+PentaX modifications2026: process-owned bounded creation state, exact four-byte
+transactional output and finite nonwrapping identifiers replace a global atomic
+counter and unchecked guest pointer. Null remains unsupported. No batch or DSP
+success behavior is adapted from the source's logging-only placeholders.
