@@ -1,5 +1,15 @@
 # Private frame-session codec
 
+`Configure` (kind 5) and `Ready` (kind 6) carry actual surface dimensions and
+alpha/color flags with sequence zero and no payload. Both validate the same
+frame-size bounds before any allocation. The consumer opens the real window
+from Configure, then echoes that exact configuration with Ready. The bridge
+checks `matches_configuration` and its own phase before accepting the echo.
+Neither message consumes a frame sequence, observes a refresh or acknowledges
+presentation. Vblank remains an independent real observation. Configuration
+cannot be accepted while a frame is outstanding. This ordering permits the
+first real tick before core frame handoff, without guessed dimensions.
+
 This portable crate defines a separate binary session protocol. It does not
 change the existing worker probe/diagnostic protocol. It performs no I/O,
 creates no endpoints and supplies no guest-memory, vblank or presentation
@@ -13,16 +23,17 @@ Version 1 uses this exact 64-byte little-endian header:
 | 8 | 2 | Version, exactly 1 |
 | 10 | 2 | Closed message kind |
 | 12 | 2 | Header size, exactly 64 |
-| 14 | 2 | Closed frame flags, zero on controls |
+| 14 | 2 | Closed frame flags; also retained by Configure/Ready; zero on other controls |
 | 16 | 16 | Nonzero session nonce |
-| 32 | 8 | Frame sequence, starting at 1; zero for Vblank/Close |
+| 32 | 8 | Frame sequence, starting at 1; zero for Vblank/Close/Configure/Ready |
 | 40 | 8 | Nonzero window generation |
-| 48 | 4 | Width; zero on controls |
-| 52 | 4 | Height; zero on controls |
+| 48 | 4 | Width; also set on Configure/Ready; zero on other controls |
+| 52 | 4 | Height; also set on Configure/Ready; zero on other controls |
 | 56 | 4 | Exact payload length |
 | 60 | 4 | Reserved, exactly zero |
 
-Kinds are FrameRgba8=1, Presented=2, Vblank=3 and Close=4. FrameRgba8 contains
+Kinds are FrameRgba8=1, Presented=2, Vblank=3, Close=4, Configure=5 and Ready=6.
+FrameRgba8 contains
 exactly `width * height * 4` tightly packed RGBA8 bytes, with stride `width * 4`.
 Presented contains no payload and echoes the exact outstanding frame identity.
 Vblank contains exactly one nonzero little-endian u64 observation count. Close

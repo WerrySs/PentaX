@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 use super::*;
-use std::{ffi::c_void, marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::{cell::Cell, ffi::c_void, marker::PhantomData, ptr::NonNull, rc::Rc};
 use windows_sys::Win32::{
     Foundation::GetLastError,
     System::Memory::{
@@ -48,6 +48,10 @@ pub struct NativeAddressSpace {
     owner_id: NativeOwnerId,
     reservations: Vec<Reservation>,
     pages: Vec<Page>,
+    // One successful exact full-span logical CPU RW+NX proof. It belongs to
+    // this owner, contains no payload/pointer and never bypasses live(). Every
+    // attempted mapping/protection change clears it before any OS effect.
+    stack_preflight: Cell<Option<NativeRange>>,
     names: Vec<NameEntry>,
     name_work: u64,
     next_mapping_lifetime: u64,
@@ -72,6 +76,8 @@ pub struct NativeAddressSpace {
     rollback_gate: Option<usize>,
     #[cfg(test)]
     rollback_operations: usize,
+    #[cfg(test)]
+    stack_preflight_scans: Cell<u64>,
 }
 
 impl NativeAddressSpace {
@@ -90,6 +96,7 @@ impl NativeAddressSpace {
             owner_id,
             reservations: Vec::new(),
             pages: Vec::new(),
+            stack_preflight: Cell::new(None),
             names: Vec::new(),
             name_work: 0,
             next_mapping_lifetime: 1,
@@ -114,6 +121,8 @@ impl NativeAddressSpace {
             rollback_gate: None,
             #[cfg(test)]
             rollback_operations: 0,
+            #[cfg(test)]
+            stack_preflight_scans: Cell::new(0),
         })
     }
     /// Stable identity of this exact owner, including after moves. This getter
@@ -241,6 +250,16 @@ impl NativeAddressSpace {
         } else {
             Ok(())
         }
+    }
+    fn invalidate_stack_preflight(&mut self) {
+        // Mutation entry points: map_backing_at (private/shared), map_physical
+        // (including its early preflight), protect, unmap, release_physical,
+        // compare_replace_words (temporary physical rights), and abandon.
+        // Nested region preparation, alias restoration and protection rollback
+        // run while empty and never publish a new proof. Future mapping/rights
+        // mutators must enter here before validation or any possible OS effect.
+        // Ordinary checked CPU/GPU payload writes do not change these metadata.
+        self.stack_preflight.set(None);
     }
     fn operation(&mut self) -> Result<(), NativeMemoryError> {
         #[cfg(test)]
@@ -387,6 +406,7 @@ impl NativeAddressSpace {
         permissions: NativePermissions,
         shared: Option<u64>,
     ) -> Result<(), NativeMemoryError> {
+        self.invalidate_stack_preflight();
         // Lifetime identity must be available before any host/backing effect.
         let next_lifetime = self
             .next_mapping_lifetime
@@ -512,6 +532,7 @@ impl NativeAddressSpace {
         size: u64,
         permissions: NativePermissions,
     ) -> Result<(), NativeMemoryError> {
+        self.invalidate_stack_preflight();
         self.live()?;
         let end = range(address, size)?;
         if !address.is_multiple_of(NATIVE_GUEST_PAGE) || !size.is_multiple_of(NATIVE_GUEST_PAGE) {
@@ -562,6 +583,7 @@ impl NativeAddressSpace {
     /// or later injected failure poisons the owner rather than exposing partial
     /// mappings as a recoverable operation. No physical view becomes executable.
     pub fn unmap(&mut self, address: u64, size: u64) -> Result<(), NativeMemoryError> {
+        self.invalidate_stack_preflight();
         self.live()?;
         range(address, size)?;
         if !address.is_multiple_of(NATIVE_GUEST_PAGE) || !size.is_multiple_of(NATIVE_GUEST_PAGE) {
@@ -598,6 +620,7 @@ impl NativeAddressSpace {
     /// Irreversibly revoke this owner's access after a caller cannot complete
     /// rollback. Keep reservation ownership for Drop; all live APIs refuse.
     pub fn abandon(&mut self) {
+        self.invalidate_stack_preflight();
         self.poisoned = true;
     }
     fn check(
@@ -691,16 +714,36 @@ impl PausedNativeMemory<'_> {
     ) -> Result<(), NativeMemoryError> {
         self.owner.check_permissions(address, size, None, 4)
     }
-    /// Check every live logical page once for CPU read/write and no CPU execute.
-    /// GPU rights do not satisfy CPU rights. No permission result is retained;
-    /// empty spans still require a live owner, as with the individual checks.
+    /// Require every live logical page to allow CPU read/write and no CPU execute.
+    /// GPU rights do not satisfy CPU rights. One exact successful span is
+    /// retained only while this owner's mapping/protection metadata is unchanged.
+    /// No payload, operand, guard, RSP or TLS proof is retained. Empty spans and
+    /// cache hits still require a live owner, as with the individual checks.
     pub(crate) fn preflight_read_write_non_executable(
         &self,
         address: u64,
         size: u64,
     ) -> Result<(), NativeMemoryError> {
+        self.owner.live()?;
+        if size == 0 {
+            return Ok(());
+        }
+        let span = NativeRange { address, size };
+        if self.owner.stack_preflight.get() == Some(span) {
+            return Ok(());
+        }
+        // No negative proof or a different/partially covered span is reused.
+        self.owner.stack_preflight.set(None);
+        #[cfg(test)]
+        {
+            self.owner
+                .stack_preflight_scans
+                .set(self.owner.stack_preflight_scans.get().saturating_add(1));
+        }
         self.owner
-            .check_permissions(address, size, Some(NativePermissions::READ_WRITE), 4)
+            .check_permissions(address, size, Some(NativePermissions::READ_WRITE), 4)?;
+        self.owner.stack_preflight.set(Some(span));
+        Ok(())
     }
     /// Require nonempty aligned guard storage wholly covered by this owner's
     /// actual reservation union, with no logical mapped page in that span.
@@ -928,6 +971,9 @@ mod ownership_tests;
 
 #[cfg(test)]
 mod deferred_tests;
+
+#[cfg(test)]
+mod stack_preflight_tests;
 
 mod replacement;
 mod transaction;

@@ -2,6 +2,95 @@
 //! Original bounded messages. These fixtures confer no display capability.
 use super::*;
 
+#[test]
+fn configuration_opens_before_ticks_without_allocating_pixels_or_consuming_a_frame() {
+    let configuration = Header::configure(nonce(), 7, 2, 1, flags(), limits()).unwrap();
+    assert_eq!(configuration.payload_len(), 0);
+    assert_eq!(configuration.id().sequence(), 0);
+    let mut decoder = Decoder::new(nonce(), 7, limits()).unwrap();
+    let mut consumer = session();
+    let feed = decoder
+        .feed_checked(&configuration.encode(), HEADER_BYTES, |header| {
+            consumer.check_incoming_header(header)
+        })
+        .unwrap();
+    let message = feed.message.unwrap();
+    assert_eq!(message.capacity(), 0);
+    assert_eq!(
+        consumer.receive_control(&message),
+        Ok(ControlEvent::Configured(configuration))
+    );
+    assert_eq!(consumer.last_vblank(), 0);
+    assert!(consumer.pending().is_none());
+    let ready = Header::ready(configuration).unwrap();
+    assert!(ready.matches_configuration(configuration));
+    assert_eq!(ready.frame_flags(), configuration.frame_flags());
+    let mut worker = session();
+    assert_eq!(
+        worker.receive_control(&decoded(ready, &[])),
+        Ok(ControlEvent::Ready(ready))
+    );
+    assert_eq!(worker.last_vblank(), 0);
+    assert!(worker.pending().is_none());
+    assert_eq!(
+        worker.begin_frame(2, 1, flags()).unwrap().id().sequence(),
+        1
+    );
+    assert_eq!(
+        Header::ready(Header::close(nonce(), 7).unwrap()),
+        Err(Error::InvalidHeader)
+    );
+}
+
+#[test]
+fn configuration_echo_and_bounds_reject_stale_mismatched_or_pixel_bearing_handshakes() {
+    let configuration = Header::configure(nonce(), 7, 2, 1, flags(), limits()).unwrap();
+    for other in [
+        Header::configure(nonce(), 7, 1, 1, flags(), limits()).unwrap(),
+        Header::configure(nonce(), 8, 2, 1, flags(), limits()).unwrap(),
+        Header::configure(Nonce::new([0x22; 16]).unwrap(), 7, 2, 1, flags(), limits()).unwrap(),
+        Header::configure(
+            nonce(),
+            7,
+            2,
+            1,
+            FrameFlags::new(AlphaMode::Straight, ColorEncoding::Srgb),
+            limits(),
+        )
+        .unwrap(),
+    ] {
+        assert!(
+            !Header::ready(other)
+                .unwrap()
+                .matches_configuration(configuration)
+        );
+    }
+    for (offset, value, expected) in [
+        (32, 1, Error::InvalidIdentity),
+        (48, 0, Error::InvalidDimensions),
+        (56, 1, Error::InvalidLength),
+        (14, 4, Error::InvalidFlags),
+    ] {
+        let mut wire = configuration.encode();
+        wire[offset] = value;
+        let mut decoder = Decoder::new(nonce(), 7, limits()).unwrap();
+        assert_eq!(decoder.feed(&wire, HEADER_BYTES).unwrap_err(), expected);
+        assert_eq!(decoder.retained_bytes(), 0);
+    }
+    let mut worker = session();
+    let frame = worker.begin_frame(1, 1, flags()).unwrap();
+    assert_eq!(
+        worker.receive_control(&decoded(Header::ready(configuration).unwrap(), &[])),
+        Err(Error::Backpressure)
+    );
+    assert_eq!(worker.pending().unwrap().header(), frame);
+    assert!(!worker.pending().unwrap().receipt_observed());
+    assert_eq!(
+        Header::configure(nonce(), 7, 5, 1, flags(), limits()),
+        Err(Error::InvalidDimensions)
+    );
+}
+
 fn limits() -> Limits {
     Limits {
         max_dimension: 4,
@@ -86,7 +175,7 @@ fn malformed_fixed_fields_and_oversize_products_refuse_before_any_payload_alloca
     for (at, value, expected) in [
         (0, 0, Error::InvalidHeader),
         (8, 2, Error::UnsupportedVersion),
-        (10, 5, Error::UnknownKind),
+        (10, 7, Error::UnknownKind),
         (12, 63, Error::InvalidHeader),
         (14, 4, Error::InvalidFlags),
         (32, 0, Error::InvalidIdentity),

@@ -3,7 +3,9 @@
 //! Numeric ordinary-instruction footprints, not ownership or execution proof.
 
 use crate::{Code, InstructionRecord, Mnemonic, Register};
-use iced_x86::{CodeSize, Instruction, InstructionInfo, InstructionInfoFactory, OpAccess, OpKind};
+use iced_x86::{
+    CodeSize, Instruction, InstructionInfo, InstructionInfoFactory, OpAccess, OpKind, UsedMemory,
+};
 
 /// Conservative GPR dependencies, including partial/conditional/implicit writes.
 /// A previous write to any address register requires a fresh CPU observation.
@@ -14,6 +16,22 @@ pub struct MemoryRegisterDependencies {
     pub address: u16,
     /// Any written alias in the same order, including conditional writes.
     pub written: u16,
+}
+
+/// Immutable decoder output owned by one instruction record. These are address
+/// expressions, never evaluated addresses, register values or permission proofs.
+/// The complete count preserves refusal order when Iced reports more than the
+/// supported two accesses: earlier dynamic errors still precede the third slot.
+#[derive(Debug)]
+pub(crate) struct InstructionMemoryTemplate {
+    dependencies: MemoryRegisterDependencies,
+    memory: [UsedMemory; 2],
+    memory_count: usize,
+}
+impl InstructionMemoryTemplate {
+    pub(crate) fn register_dependencies(&self) -> MemoryRegisterDependencies {
+        self.dependencies
+    }
 }
 
 fn dependencies(info: &InstructionInfo, instruction: &Instruction) -> MemoryRegisterDependencies {
@@ -146,9 +164,12 @@ impl std::fmt::Display for MemoryAccessError {
 }
 impl std::error::Error for MemoryAccessError {}
 
-/// Reuses Iced's instruction-info scratch. As with Iced's global decode tables,
-/// dependency-internal allocations use its ordinary allocator; recoverable
-/// process-wide OOM is not promised. Caller output is a fixed two-entry value.
+/// Planning reuses Iced's instruction-info scratch to retain immutable decoded
+/// templates. `analyze` reuses the exact record's template and evaluates current
+/// PRE-instruction GPR values without rebuilding Iced information. As with Iced's
+/// decode tables, planning's dependency-internal allocations use its ordinary
+/// allocator; recoverable process-wide OOM is not promised. Template and caller
+/// output storage are fixed two-entry values, charged with the owning records.
 #[derive(Debug)]
 pub struct MemoryAccessAnalyzer {
     factory: InstructionInfoFactory,
@@ -161,8 +182,17 @@ impl Default for MemoryAccessAnalyzer {
     }
 }
 impl MemoryAccessAnalyzer {
-    pub(crate) fn dependencies(&mut self, instruction: &Instruction) -> MemoryRegisterDependencies {
-        dependencies(self.factory.info(instruction), instruction)
+    pub(crate) fn prepare(&mut self, instruction: &Instruction) -> InstructionMemoryTemplate {
+        let info = self.factory.info(instruction);
+        let mut memory = [UsedMemory::default(); 2];
+        for (destination, source) in memory.iter_mut().zip(info.used_memory()) {
+            *destination = *source;
+        }
+        InstructionMemoryTemplate {
+            dependencies: dependencies(info, instruction),
+            memory,
+            memory_count: info.used_memory().len(),
+        }
     }
     /// Derive explicit and implicit accesses using PRE-instruction GPR values
     /// in RAX,RCX,RDX,RBX,RSP,RBP,RSI,RDI,R8..R15 order. Conditional accesses are
@@ -183,28 +213,31 @@ impl MemoryAccessAnalyzer {
             return Err(MemoryAccessError::NotEmitted);
         }
         let instruction = record.instruction();
-        let info = self.factory.info(instruction);
+        let info = record
+            .memory_template
+            .as_ref()
+            .ok_or(MemoryAccessError::NotEmitted)?;
         let mut output = InstructionMemoryAccesses {
-            dependencies: dependencies(info, instruction),
+            dependencies: info.dependencies,
             ..Default::default()
         };
         let atomic = record.has_atomic_memory();
-        if atomic && info.used_memory().len() != 1 {
+        if atomic && info.memory_count != 1 {
             return Err(MemoryAccessError::UnsupportedAddress);
         }
-        if info.used_memory().is_empty()
+        if info.memory_count == 0
             && crate::policy::potential_memory(instruction)
             && !matches!(instruction.mnemonic(), Mnemonic::Lea | Mnemonic::Nop)
         {
             return Err(MemoryAccessError::UnsupportedAddress);
         }
-        let bit_string = !info.used_memory().is_empty()
+        let bit_string = info.memory_count != 0
             && matches!(
                 instruction.mnemonic(),
                 Mnemonic::Bt | Mnemonic::Btc | Mnemonic::Btr | Mnemonic::Bts
             );
         let bit_width = if bit_string {
-            if info.used_memory().len() != 1 {
+            if info.memory_count != 1 {
                 return Err(MemoryAccessError::UnsupportedBitString);
             }
             Some(
@@ -214,10 +247,14 @@ impl MemoryAccessAnalyzer {
         } else {
             None
         };
-        for used in info.used_memory() {
+        for index in 0..info.memory_count {
             if output.length == output.entries.len() {
                 return Err(MemoryAccessError::TooManyAccesses);
             }
+            // More than two descriptors were deliberately not retained. The
+            // preceding guard refuses the third visit before indexing, after
+            // all earlier descriptor/address failures have kept their order.
+            let used = &info.memory[index];
             if used.address_size() != CodeSize::Code64 || used.vsib_size() != 0 {
                 return Err(MemoryAccessError::UnsupportedAddress);
             }
@@ -293,3 +330,7 @@ fn slot(register: Register) -> Option<usize> {
         _ => return Option::None,
     })
 }
+
+#[cfg(test)]
+#[path = "memory/template_tests.rs"]
+mod template_tests;

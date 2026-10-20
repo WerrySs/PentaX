@@ -148,6 +148,10 @@ impl NativeAddressSpace {
         size: u64,
         maximum: usize,
     ) -> Result<(), NativeMemoryError> {
+        // Physical release can detach several virtual aliases, including a
+        // previously validated stack. Keep it invalid through staging failure
+        // and rollback too; no later callback can republish a proof here.
+        self.invalidate_stack_preflight();
         let plan = self.physical_release_plan(physical, size, maximum)?;
         for (index, view) in plan.views.iter().enumerate() {
             let result = self

@@ -94,9 +94,12 @@ pub enum Kind {
     Presented = 2,
     Vblank = 3,
     Close = 4,
+    Configure = 5,
+    Ready = 6,
 }
 
-/// Validated fixed metadata. Control messages have no dimensions/alpha/color.
+/// Validated fixed metadata. Configure/Ready carry geometry without pixels;
+/// Presented/Vblank/Close carry no dimensions or color flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Header {
     kind: Kind,
@@ -107,6 +110,55 @@ pub struct Header {
     length: u32,
 }
 impl Header {
+    /// Actual captured-surface metadata configures the consumer before the
+    /// first observed tick and frame handoff. This grants no core authority.
+    pub fn configure(
+        nonce: Nonce,
+        generation: u64,
+        width: u32,
+        height: u32,
+        flags: FrameFlags,
+        limits: Limits,
+    ) -> Result<Self, Error> {
+        limits.validate()?;
+        if generation == 0 {
+            return Err(Error::InvalidIdentity);
+        }
+        frame_length(width, height, limits)?;
+        Ok(Self {
+            kind: Kind::Configure,
+            flags,
+            id: FrameId {
+                nonce,
+                sequence: 0,
+                generation,
+            },
+            width,
+            height,
+            length: 0,
+        })
+    }
+    /// Echo only after the real consumer has opened this exact configuration.
+    /// Readiness is neither a refresh observation nor a presentation receipt.
+    pub fn ready(configuration: Self) -> Result<Self, Error> {
+        if configuration.kind != Kind::Configure {
+            return Err(Error::InvalidHeader);
+        }
+        Ok(Self {
+            kind: Kind::Ready,
+            ..configuration
+        })
+    }
+    pub fn matches_configuration(self, configuration: Self) -> bool {
+        self.kind == Kind::Ready
+            && configuration.kind == Kind::Configure
+            && self.id == configuration.id
+            && self.width == configuration.width
+            && self.height == configuration.height
+            && self.flags == configuration.flags
+            && self.length == 0
+            && configuration.length == 0
+    }
     pub(crate) fn frame(
         id: FrameId,
         width: u32,
@@ -180,7 +232,7 @@ impl Header {
         self.length as usize
     }
     pub fn frame_flags(self) -> Option<FrameFlags> {
-        (self.kind == Kind::FrameRgba8).then_some(self.flags)
+        matches!(self.kind, Kind::FrameRgba8 | Kind::Configure | Kind::Ready).then_some(self.flags)
     }
     pub fn stride(self) -> Option<u32> {
         (self.kind == Kind::FrameRgba8).then_some(self.width * 4)
@@ -214,6 +266,8 @@ impl Header {
             2 => Kind::Presented,
             3 => Kind::Vblank,
             4 => Kind::Close,
+            5 => Kind::Configure,
+            6 => Kind::Ready,
             _ => return Err(Error::UnknownKind),
         };
         let flags = FrameFlags::decode(u16_at(bytes, 14))?;
@@ -231,6 +285,15 @@ impl Header {
         let height = u32_at(bytes, 52);
         let length = u32_at(bytes, 56);
         match kind {
+            Kind::Configure | Kind::Ready => {
+                if id.sequence != 0 {
+                    return Err(Error::InvalidIdentity);
+                }
+                frame_length(width, height, limits)?;
+                if length != 0 {
+                    return Err(Error::InvalidLength);
+                }
+            }
             Kind::FrameRgba8 => {
                 if id.sequence == 0 {
                     return Err(Error::InvalidIdentity);

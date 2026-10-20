@@ -361,3 +361,120 @@ fn control_records_and_invalid_full_spans_are_refused() {
         [access(0, 8, MemoryAccessKind::Read)]
     );
 }
+
+#[test]
+fn cached_instruction_templates_follow_new_gprs_after_unrelated_analyzer_reuse() {
+    // MOV RCX,[RAX+8]; MOV [RDI],ECX; RET. Neither address depends on the
+    // preceding destination, so both records belong to one admitted batch.
+    let bytes = image(&[0x48, 0x8b, 0x48, 8, 0x89, 0x0f, 0xc3]);
+    let source = link(&[(&bytes, BIAS)]);
+    let plan = plan_block(
+        &source,
+        0,
+        BIAS + ENTRY as u64,
+        placement(),
+        &TranslationPolicy::x64_sse2().with_independent_memory(),
+        &BlockLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(plan.instructions().len(), 3);
+    assert!(plan.instructions()[0].memory_template.is_some());
+    assert!(plan.instructions()[1].memory_template.is_some());
+    assert!(plan.instructions()[2].memory_template.is_none());
+    let mut analyzer = MemoryAccessAnalyzer::default();
+    for (base, destination) in [(0x8000, 0x9000), (0xa000, 0xb000), (u64::MAX - 7, 0xc000)] {
+        let mut registers = [0; 16];
+        registers[0] = base;
+        registers[7] = destination;
+        // Overwrite the analyzer's scratch with an unrelated implicit stack
+        // footprint. The retained records must own their own decoded metadata.
+        let _ = analyzer.prepare(plan.instructions()[2].instruction());
+        let loaded = analyzer
+            .analyze(&plan.instructions()[0], &registers)
+            .unwrap();
+        assert_eq!(
+            loaded.accesses(),
+            [access(base.wrapping_add(8), 8, MemoryAccessKind::Read)]
+        );
+        assert_eq!(
+            loaded.register_dependencies(),
+            MemoryRegisterDependencies {
+                address: 1,
+                written: 2
+            }
+        );
+        let stored = analyzer
+            .analyze(&plan.instructions()[1], &registers)
+            .unwrap();
+        assert_eq!(
+            stored.accesses(),
+            [access(destination, 4, MemoryAccessKind::Write)]
+        );
+        assert_eq!(
+            stored.register_dependencies(),
+            MemoryRegisterDependencies {
+                address: 1 << 7,
+                written: 0
+            }
+        );
+        assert_eq!(
+            analyzer.analyze(&plan.instructions()[2], &registers),
+            Err(MemoryAccessError::NotEmitted)
+        );
+    }
+    let mut outside = [0; 16];
+    outside[0] = (1_u64 << 47) - 4;
+    assert_eq!(
+        analyzer.analyze(&plan.instructions()[0], &outside),
+        Err(MemoryAccessError::InvalidRange)
+    );
+}
+
+#[test]
+fn cached_stack_and_bit_string_templates_recompute_each_selected_element() {
+    for (code, mode) in [
+        (&[0xff, 0x34, 0x24, 0xc3][..], 0), // PUSH [RSP].
+        (&[0x8f, 0x04, 0x24, 0xc3][..], 1), // POP [RSP].
+        (&[0xc9, 0xc3][..], 2),             // LEAVE.
+        (&[0x0f, 0xa3, 0x0f, 0xc3][..], 3), // BT [RDI],ECX.
+    ] {
+        let bytes = image(code);
+        let source = link(&[(&bytes, BIAS)]);
+        let plan = make(&source);
+        let record = &plan.instructions()[0];
+        let mut analyzer = MemoryAccessAnalyzer::default();
+        for (base, index) in [(0x8000, u64::MAX), (0xa000, 32)] {
+            let mut registers = [0; 16];
+            registers[1] = index;
+            registers[4] = base;
+            registers[5] = base + 0x100;
+            registers[7] = base;
+            let result = analyzer.analyze(record, &registers).unwrap();
+            let expected = match mode {
+                0 => vec![
+                    access(base, 8, MemoryAccessKind::Read),
+                    access(base - 8, 8, MemoryAccessKind::Write),
+                ],
+                1 => vec![
+                    access(base + 8, 8, MemoryAccessKind::Write),
+                    access(base, 8, MemoryAccessKind::Read),
+                ],
+                2 => vec![access(base + 0x100, 8, MemoryAccessKind::Read)],
+                3 => vec![access(
+                    if index == u64::MAX {
+                        base - 4
+                    } else {
+                        base + 4
+                    },
+                    4,
+                    MemoryAccessKind::Read,
+                )],
+                _ => unreachable!(),
+            };
+            assert_eq!(result.accesses(), expected, "{mode}");
+            if mode == 3 {
+                assert_eq!(result.register_dependencies().address, (1 << 7) | (1 << 1));
+            }
+        }
+    }
+}

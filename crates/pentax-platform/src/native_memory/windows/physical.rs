@@ -274,6 +274,9 @@ impl NativeAddressSpace {
         physical: u64,
         permissions: NativePermissions,
     ) -> Result<(), NativeMemoryError> {
+        // Even a physical-map preflight refusal must not retain an earlier
+        // span proof through an attempted mapping operation.
+        self.invalidate_stack_preflight();
         self.preflight_physical_map(address, size, physical, permissions)?;
         self.map_backing_at(address, size, permissions, Some(physical))
     }

@@ -187,6 +187,9 @@ pub struct InstructionRecord {
     pub(crate) emitted_len: usize,
     pub(crate) instruction: Instruction,
     pub(crate) rip_target: Option<u64>,
+    // Inline immutable decoded metadata is admitted with this Vec's requested
+    // and actual capacities. Nonemitted exits never need an operand template.
+    pub(crate) memory_template: Option<crate::memory::InstructionMemoryTemplate>,
 }
 impl InstructionRecord {
     /// Numeric instruction classification, not execution or memory authority.

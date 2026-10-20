@@ -44,6 +44,7 @@ use std::fmt;
 pub mod host_memory;
 pub mod native_memory;
 pub mod network;
+pub mod presenter;
 pub mod time_counter;
 pub mod vulkan;
 

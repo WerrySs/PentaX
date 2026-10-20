@@ -142,6 +142,7 @@ pub(crate) fn plan_window<'plan, 'image>(
                 emitted_len: 0,
                 instruction,
                 rip_target,
+                memory_template: None,
             });
             exit = BlockExit {
                 guest_pc: pc,
@@ -154,12 +155,17 @@ pub(crate) fn plan_window<'plan, 'image>(
         }
         // Atomics always need their actual PRE-instruction context, including
         // the manual runner's mandatory owned-range/alignment admission.
-        let dependencies = if policy.batches_independent_memory() {
+        let memory_template = if policy.batches_independent_memory() {
             accounting.charge(128)?;
-            memory_analyzer.dependencies(&instruction)
+            Some(memory_analyzer.prepare(&instruction))
         } else {
-            MemoryRegisterDependencies::default()
+            None
         };
+        let dependencies = memory_template
+            .as_ref()
+            .map_or(MemoryRegisterDependencies::default(), |template| {
+                template.register_dependencies()
+            });
         if dependencies.address & written_registers != 0 {
             exit = fallthrough(pc, cache_ip);
             break;
@@ -185,6 +191,7 @@ pub(crate) fn plan_window<'plan, 'image>(
                 emitted_len: 0,
                 instruction,
                 rip_target,
+                memory_template: None,
             });
             exit = BlockExit {
                 guest_pc: pc,
@@ -268,6 +275,14 @@ pub(crate) fn plan_window<'plan, 'image>(
         accounting.grow(&mut bytes, needed, maximum_output)?;
         let needed = records.len() + 1;
         accounting.grow(&mut records, needed, record_count)?;
+        let memory_template = if let Some(template) = memory_template {
+            template
+        } else {
+            // Other policies did not need dependency analysis for batching,
+            // but execution must use the same bounded immutable information.
+            accounting.charge(128)?;
+            memory_analyzer.prepare(&instruction)
+        };
         bytes.extend_from_slice(&encoded);
         encoded.clear();
         encoder.set_buffer(encoded);
@@ -279,6 +294,7 @@ pub(crate) fn plan_window<'plan, 'image>(
             emitted_len: emitted,
             instruction,
             rip_target,
+            memory_template: Some(memory_template),
         });
         position += source_len;
         written_registers |= dependencies.written;

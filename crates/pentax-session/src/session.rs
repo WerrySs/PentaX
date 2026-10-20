@@ -18,6 +18,8 @@ impl PendingFrame {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlEvent {
+    Configured(Header),
+    Ready(Header),
     Presented(FrameId),
     Vblank(u64),
     Closed,
@@ -128,6 +130,19 @@ impl Session {
         self.active()?;
         self.identity(header)?;
         match header.kind() {
+            Kind::Configure | Kind::Ready => {
+                if self.pending.is_some() {
+                    return Err(Error::Backpressure);
+                }
+                Header::configure(
+                    self.nonce,
+                    self.generation,
+                    header.width(),
+                    header.height(),
+                    header.frame_flags().ok_or(Error::InvalidFlags)?,
+                    self.limits,
+                )?;
+            }
             Kind::FrameRgba8 => {
                 if self.pending.is_some() {
                     return Err(Error::Backpressure);
@@ -175,6 +190,8 @@ impl Session {
         self.check_incoming_header(header)?;
         header.validate_payload(message.payload())?;
         match header.kind() {
+            Kind::Configure => Ok(ControlEvent::Configured(header)),
+            Kind::Ready => Ok(ControlEvent::Ready(header)),
             Kind::Presented => {
                 self.mark_receipt(header.id())?;
                 Ok(ControlEvent::Presented(header.id()))

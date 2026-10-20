@@ -27,6 +27,10 @@ impl NativeAddressSpace {
         replacements: &[NativeWordReplacement],
         limits: &NativeTransactionLimits,
     ) -> Result<(), NativeMemoryError> {
+        // This path temporarily changes physical rights without calling
+        // protect(). Invalidate before even a refused attempt; sealing and all
+        // rollback paths retain an empty proof until the next live span check.
+        self.invalidate_stack_preflight();
         self.live()?;
         let count = replacements.len();
         if count > limits.max_outputs
