@@ -343,7 +343,7 @@ pub(crate) fn native_packed_float_memory_width(instruction: &Instruction) -> Opt
     Some(width)
 }
 
-/// Thirty-eight exact decoded forms, all register-only. The twelve packed
+/// Seventy exact decoded forms, all register-only. The twelve packed
 /// ADD/SUB/MUL floating-point forms require the runtime's checked masked MXCSR
 /// profile, just like already admitted legacy SSE arithmetic. W/L,
 /// mandatory prefixes and reserved fields remain the pinned decoder's contract.
@@ -354,11 +354,27 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         VEX_Vmovdqa_xmm_xmmm128
         | VEX_Vmovdqa_xmmm128_xmm
         | VEX_Vmovdqu_xmm_xmmm128
-        | VEX_Vmovdqu_xmmm128_xmm => (16, 2),
+        | VEX_Vmovdqu_xmmm128_xmm
+        | VEX_Vmovaps_xmm_xmmm128
+        | VEX_Vmovaps_xmmm128_xmm
+        | VEX_Vmovups_xmm_xmmm128
+        | VEX_Vmovups_xmmm128_xmm
+        | VEX_Vmovapd_xmm_xmmm128
+        | VEX_Vmovapd_xmmm128_xmm
+        | VEX_Vmovupd_xmm_xmmm128
+        | VEX_Vmovupd_xmmm128_xmm => (16, 2),
         VEX_Vmovdqa_ymm_ymmm256
         | VEX_Vmovdqa_ymmm256_ymm
         | VEX_Vmovdqu_ymm_ymmm256
-        | VEX_Vmovdqu_ymmm256_ymm => (32, 2),
+        | VEX_Vmovdqu_ymmm256_ymm
+        | VEX_Vmovaps_ymm_ymmm256
+        | VEX_Vmovaps_ymmm256_ymm
+        | VEX_Vmovups_ymm_ymmm256
+        | VEX_Vmovups_ymmm256_ymm
+        | VEX_Vmovapd_ymm_ymmm256
+        | VEX_Vmovapd_ymmm256_ymm
+        | VEX_Vmovupd_ymm_ymmm256
+        | VEX_Vmovupd_ymmm256_ymm => (32, 2),
         VEX_Vpand_xmm_xmm_xmmm128
         | VEX_Vpandn_xmm_xmm_xmmm128
         | VEX_Vpor_xmm_xmm_xmmm128
@@ -373,7 +389,15 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vsubps_xmm_xmm_xmmm128
         | VEX_Vsubpd_xmm_xmm_xmmm128
         | VEX_Vmulps_xmm_xmm_xmmm128
-        | VEX_Vmulpd_xmm_xmm_xmmm128 => (16, 3),
+        | VEX_Vmulpd_xmm_xmm_xmmm128
+        | VEX_Vandps_xmm_xmm_xmmm128
+        | VEX_Vandpd_xmm_xmm_xmmm128
+        | VEX_Vandnps_xmm_xmm_xmmm128
+        | VEX_Vandnpd_xmm_xmm_xmmm128
+        | VEX_Vorps_xmm_xmm_xmmm128
+        | VEX_Vorpd_xmm_xmm_xmmm128
+        | VEX_Vxorps_xmm_xmm_xmmm128
+        | VEX_Vxorpd_xmm_xmm_xmmm128 => (16, 3),
         VEX_Vpand_ymm_ymm_ymmm256
         | VEX_Vpandn_ymm_ymm_ymmm256
         | VEX_Vpor_ymm_ymm_ymmm256
@@ -388,7 +412,15 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vsubps_ymm_ymm_ymmm256
         | VEX_Vsubpd_ymm_ymm_ymmm256
         | VEX_Vmulps_ymm_ymm_ymmm256
-        | VEX_Vmulpd_ymm_ymm_ymmm256 => (32, 3),
+        | VEX_Vmulpd_ymm_ymm_ymmm256
+        | VEX_Vandps_ymm_ymm_ymmm256
+        | VEX_Vandpd_ymm_ymm_ymmm256
+        | VEX_Vandnps_ymm_ymm_ymmm256
+        | VEX_Vandnpd_ymm_ymm_ymmm256
+        | VEX_Vorps_ymm_ymm_ymmm256
+        | VEX_Vorpd_ymm_ymm_ymmm256
+        | VEX_Vxorps_ymm_ymm_ymmm256
+        | VEX_Vxorpd_ymm_ymm_ymmm256 => (32, 3),
         _ => return false,
     };
     instruction.op_count() == operands

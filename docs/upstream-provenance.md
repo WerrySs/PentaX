@@ -1774,3 +1774,35 @@ actual presentation and callback-based command-buffer growth remain unfinished.
 Original packet/shader fixtures establish test contracts, not game compatibility
 or executed results. Copyright(c)2021 InoriRus, GPL-2.0-only and the retained
 original Kyty MIT grant continue to apply in the GPU/core NOTICE files.
+
+## Native VEX register copies and bit logic
+
+The independent thirty-two-form copy/logical extension follows Intel's primary
+instruction descriptions, without copying another emulator implementation:
+
+- [Intel Volume2A](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf),
+  ANDPD/PS and ANDNPD/PS, pages3-81..92: raw bit operations and logical-source
+  order, including `(~source1) & source2`.
+- [Intel Volume2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf),
+  MOVAPD/APS pages4-44..51, MOVUPD/UPS pages4-131..138 and ORPD/PS
+  pages4-171..178: both move opcode directions, reserved move vvvv, vector
+  widths, destination upper clearing and AVX feature requirements.
+- [Intel Volume2D](https://cdrdv2-public.intel.com/671143/334569-sdm-vol-2d.pdf),
+  XORPD/PS pages6-38..43: raw bits, no SIMD floating exceptions and unchanged
+  flags. The corresponding AND/ANDN/OR/move entries likewise do not perform
+  arithmetic or quiet signaling NaNs.
+
+Only exact VEX.128/256 register forms are added to the explicitly requested
+full-YMM profile. Actual AVX CPU/OS vector-state admission and immutable bridge
+mode remain mandatory. AVX2 is not required for these thirty-two forms. Ordinary
+live source, owner, memory, stack, cache and MXCSR admission remains unchanged;
+the separate arithmetic-read profile admits none of their memory encodings.
+No guest feature advertisement, host identity exposure, unchecked memory,
+control instruction or new host assembly is introduced.
+
+All byte patterns, guest programs, oracle logic and finite measurement inputs
+are original PentaX fixtures. Actual-path counters intentionally distinguish
+newly native instructions from mediated operations; historical memory byte
+counts remain exact. The ignored baseline comparison needs two independently
+selected artifacts and does not assert faster execution. Source review and
+fixture definitions alone establish neither a measured title gain nor a frame.

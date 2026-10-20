@@ -708,7 +708,8 @@ fn native_pair_shuffles_select_distinct_lanes_and_clear_vex128_upper_halves() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "8");
+    // One register VMOVUPS is native only in the admitted full-YMM profile.
+    assert_modeled_vector_operations(&fields, ["8", "7", "7"]);
     assert_eq!(fields["vector_bytes"], "160");
 }
 
@@ -1326,6 +1327,7 @@ fn native_vector_moves_preserve_upper_lanes_across_sse_and_clear_them_on_vex128(
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "10");
+    // The wide copy and narrow self-copy promote; all six memory moves remain checked.
+    assert_modeled_vector_operations(&fields, ["10", "8", "8"]);
     assert_eq!(fields["vector_bytes"], "192");
 }

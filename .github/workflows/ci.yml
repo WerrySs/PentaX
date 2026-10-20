@@ -132,6 +132,9 @@ jobs:
       - name: Test checked packed floating-point memory reads and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_packed_float_memory_tests:: -- --test-threads=1
+      - name: Test admitted vector register copy and bit operations
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_vector_register_bits_tests:: -- --test-threads=1
       - name: Test original native packed floating-point continuations
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -142,6 +145,21 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_packed_float_memory:: -- --test-threads=1
+      - name: Test original native vector register bits
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_register_bits:: -- --test-threads=1
+      - name: Test pair shuffles after register copy promotion
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_pair_shuffles_select_distinct_lanes_and_clear_vex128_upper_halves -- --test-threads=1
+      - name: Test narrow self-copy and complete upper vector state
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_vector_moves_preserve_upper_lanes_across_sse_and_clear_them_on_vex128 -- --test-threads=1
       - name: Test retained main-thread wait observations on a typed stop
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

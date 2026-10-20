@@ -43,6 +43,7 @@ fn sample(observer: &mut BlockSamples, epoch: SourceIdentity, module: usize, pc:
             Some(instructions[0].code()),
             instructions.iter(),
             256,
+            true,
         )
         .unwrap();
     observer.complete(pending);
@@ -155,18 +156,27 @@ fn all_twelve_fp_forms_count_planned_register_and_memory_occurrences_only_after_
         pc: 0x1234,
     };
     let pending = observer
-        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256)
+        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256, false)
         .unwrap();
     assert_eq!((observer.completed, observer.records), (0, 0));
     assert_eq!(observer.counts, [[0; 2]; 12]);
+    assert_eq!(
+        (
+            observer.exit_codes_retained,
+            observer.main_context,
+            observer.child_context
+        ),
+        (0, 0, 0)
+    );
     // A failed dispatch would discard this receipt instead of calling complete.
     let _ = pending;
     let pending = observer
-        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256)
+        .prepare_records(key, Some(FORMS[0]), instructions.iter(), 256, true)
         .unwrap();
     observer.complete(pending);
     assert_eq!((observer.completed, observer.records), (1, 28));
     assert_eq!(observer.counts, [[1; 2]; 12]);
+    assert_eq!((observer.main_context, observer.child_context), (1, 0));
     let mut malformed = instructions[0];
     malformed.set_op0_register(Register::YMM3);
     assert!(candidate(&malformed).is_none());
@@ -185,7 +195,7 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         module: 0,
         pc: 0x1234,
     };
-    for case in 0..4 {
+    for case in 0..9 {
         let mut observer = BlockSamples::default();
         observer.begin_epoch(epoch);
         match case {
@@ -193,17 +203,41 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
             1 => {}
             2 => observer.completed = u64::MAX,
             3 => observer.counts[8][0] = u64::MAX,
+            4 => {
+                observer.exits[0] = Some((FORMS[8], u64::MAX));
+                observer.exit_codes_retained = 1;
+            }
+            5 => {
+                for (slot, code) in observer.exits.iter_mut().zip(Code::values()) {
+                    *slot = Some((code, 1));
+                }
+                observer.exit_codes_retained = 64;
+                observer.exit_overflow = u64::MAX;
+            }
+            6 => observer.exit_no_instruction = u64::MAX,
+            7 => observer.main_context = u64::MAX,
+            8 => observer.child_context = u64::MAX,
             _ => unreachable!(),
         }
         let completed = observer.completed;
         let counts = observer.counts;
+        let exits = observer.exits;
+        let contexts = (observer.main_context, observer.child_context);
+        let planned = if case == 6 {
+            None
+        } else if case == 5 {
+            Code::values().nth(64)
+        } else {
+            Some(FORMS[8])
+        };
         assert!(
             observer
                 .prepare_records(
                     key,
-                    Some(FORMS[8]),
+                    planned,
                     instructions.iter(),
-                    if case == 1 { 0 } else { 256 }
+                    if case == 1 { 0 } else { 256 },
+                    case != 8,
                 )
                 .is_none()
         );
@@ -211,9 +245,11 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         assert_eq!(observer.overflow, case >= 2);
         assert_eq!((observer.completed, observer.recent), (completed, 0));
         assert_eq!(observer.counts, counts);
+        assert_eq!(observer.exits, exits);
+        assert_eq!((observer.main_context, observer.child_context), contexts);
         assert!(
             observer
-                .prepare_records(key, None, instructions.iter(), 256)
+                .prepare_records(key, None, instructions.iter(), 256, true)
                 .is_none()
         );
     }
@@ -231,18 +267,133 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         recent: 64,
         distinct: 64,
         max_repeat: 64,
+        // Repeating the longest catalogue label in all slots conservatively
+        // bounds serialization even though live histogram Codes are unique.
+        exits: [Some((longest, u64::MAX)); EXIT_CAPACITY],
+        exit_codes_retained: 64,
+        exit_overflow: u64::MAX,
+        exit_no_instruction: u64::MAX,
+        main_context: u64::MAX,
+        child_context: u64::MAX,
         disabled: true,
         overflow: true,
         ..Default::default()
     };
     let fields = observer.protocol_fields();
-    assert!(fields.len() <= 2048, "{}", fields.len());
+    assert!(fields.len() <= 3072, "{}", fields.len());
     assert_eq!(fields.matches("sample_fp_forms=").count(), 1);
     assert!(!fields.contains('\n'));
     // New observer fields are final-only; old progress text remains unchanged.
     let progress = crate::native_session::NativeSessionProgress::default();
     assert!(!progress.progress_fields().contains("sample_completed="));
     assert!(!progress.progress_fields().contains("scheduling_threads="));
+    assert!(!progress.progress_fields().contains("sample_exit_top="));
     assert!(progress.protocol_fields().contains("sample_completed=0"));
     assert!(progress.protocol_fields().contains("scheduling_threads=0"));
+    assert!(
+        progress
+            .protocol_fields()
+            .contains("sample_exit_capacity=64")
+    );
+}
+
+#[test]
+fn exit_histogram_retains_first_codes_counts_observation_overflow_and_commits_contexts_only_on_success()
+ {
+    let epoch = identity();
+    let next = identity();
+    let codes: Vec<_> = Code::values().take(65).collect();
+    assert_eq!(codes.len(), 65);
+    let mut observer = BlockSamples::default();
+    observer.begin_epoch(epoch);
+    let commit = |observer: &mut BlockSamples, planned: Option<Code>, is_main: bool| {
+        let pending = observer
+            .prepare_records(
+                Key {
+                    epoch,
+                    module: 0,
+                    pc: 0x5000,
+                },
+                planned,
+                [].iter(),
+                0,
+                is_main,
+            )
+            .unwrap();
+        observer.complete(pending);
+    };
+    for (index, code) in codes[..64].iter().enumerate() {
+        commit(&mut observer, Some(*code), index % 2 == 0);
+    }
+    assert_eq!(
+        (observer.exit_codes_retained, observer.exit_overflow),
+        (64, 0)
+    );
+    for (index, repeats) in [(0, 3), (1, 2), (2, 1)] {
+        for _ in 0..repeats {
+            commit(&mut observer, Some(codes[index]), true);
+        }
+    }
+    for _ in 0..3 {
+        commit(&mut observer, Some(codes[64]), false);
+    }
+    commit(&mut observer, None, false);
+    assert_eq!(
+        (
+            observer.completed,
+            observer.main_context,
+            observer.child_context
+        ),
+        (74, 38, 36)
+    );
+    assert_eq!(
+        (observer.exit_overflow, observer.exit_no_instruction),
+        (3, 1)
+    );
+    let retained = observer
+        .exits
+        .iter()
+        .flatten()
+        .map(|(_, count)| count)
+        .sum::<u64>();
+    assert_eq!(
+        retained + observer.exit_overflow + observer.exit_no_instruction,
+        observer.completed
+    );
+    let fields = observer.protocol_fields();
+    let top = format!(
+        "sample_exit_top={:?}:4,{:?}:3,{:?}:2,{:?}:1",
+        codes[0], codes[1], codes[2], codes[3]
+    );
+    assert!(fields.ends_with(&top), "{fields}");
+    let before = observer.exits;
+    let pending = observer
+        .prepare_records(
+            Key {
+                epoch,
+                module: 0,
+                pc: 0x5000,
+            },
+            Some(codes[0]),
+            [].iter(),
+            0,
+            true,
+        )
+        .unwrap();
+    let _ = pending; // Actual hook discards this update on a failed dispatch.
+    assert_eq!(observer.exits, before);
+    assert_eq!(
+        (
+            observer.completed,
+            observer.main_context,
+            observer.child_context
+        ),
+        (74, 38, 36)
+    );
+    observer.begin_epoch(next);
+    assert_eq!(observer.exits, before); // Public Code histogram is cumulative.
+    assert_eq!(
+        (observer.recent, observer.distinct, observer.epoch_changes),
+        (0, 0, 1)
+    );
 }

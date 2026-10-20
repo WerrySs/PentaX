@@ -75,6 +75,8 @@ mod native_cache;
 mod native_packed_float_memory_tests;
 #[path = "tests/native_packed_float.rs"]
 mod native_packed_float_tests;
+#[path = "tests/native_vector_register_bits.rs"]
+mod native_vector_register_bits_tests;
 #[path = "tests/native_ymm.rs"]
 mod native_ymm_tests;
 #[path = "tests/packed_convert.rs"]

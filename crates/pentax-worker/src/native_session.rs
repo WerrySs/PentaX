@@ -979,6 +979,7 @@ fn execute_epoch<'plan, 'image>(
                     source.source_plan().identity(),
                     block,
                     limits.block.max_instructions,
+                    state.scheduling.is_main(),
                 )
             } else {
                 None

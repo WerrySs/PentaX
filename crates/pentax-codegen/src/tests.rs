@@ -15,6 +15,7 @@ mod minimum_position;
 mod multiply_add_words;
 mod native_packed_float;
 mod native_packed_float_memory;
+mod native_vector_register_bits;
 mod native_ymm;
 mod packed_convert;
 mod qword_comparisons;

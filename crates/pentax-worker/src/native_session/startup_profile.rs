@@ -116,8 +116,9 @@ impl StartupProfile {
         epoch: pentax_linker::SourceIdentity,
         block: &pentax_codegen::MaterializedBlockPlan<'_, '_, '_>,
         maximum_records: u64,
+        is_main: bool,
     ) -> Option<block_samples::PendingSample> {
-        self.blocks.prepare(epoch, block, maximum_records)
+        self.blocks.prepare(epoch, block, maximum_records, is_main)
     }
 
     pub fn complete_block_sample(&mut self, sample: block_samples::PendingSample) {

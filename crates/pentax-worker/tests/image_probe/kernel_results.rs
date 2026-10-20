@@ -5,7 +5,7 @@
 use super::*;
 
 /// Only the engine's observed closed mode selects these exact counts. Memory
-/// forms stay mediated; callers account for their known register promotions.
+/// forms in these fixtures stay mediated; callers account for known register promotions.
 fn assert_modeled_vector_operations(fields: &HashMap<String, String>, expected: [&str; 3]) {
     let mode = fields["native_ymm_mode"].as_str();
     let index = match mode {
@@ -73,6 +73,8 @@ mod multiply_add_words;
 mod native_packed_float;
 #[path = "native_packed_float_memory.rs"]
 mod native_packed_float_memory;
+#[path = "native_vector_register_bits.rs"]
+mod native_vector_register_bits;
 #[path = "native_ymm.rs"]
 mod native_ymm;
 #[path = "packed_convert.rs"]

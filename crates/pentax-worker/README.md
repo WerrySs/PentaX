@@ -187,7 +187,21 @@ no per-sample allocation. Quota exhaustion disables it with
 Guest limits, dispatch permissions, existing attempt/work counters and clocks
 are unchanged. Original pure fixtures cover eviction, source identity, all
 twelve forms, failed-sample publication, optional limits, Debug redaction and
-a conservative 2 KiB bound for the new final fields with maximum counters.
+a conservative 3 KiB bound for the observer's final fields with maximum counters.
+The same observer also retains the first 64 distinct planned-exit Codes across
+successful periodic samples and source-plan changes. `sample_exit_top` lists
+the four most frequent among these retained Codes as `Code:count`, or `none`;
+ties use static Code order. `sample_exit_codes_retained` and
+`sample_exit_capacity=64` describe the fixed table. `sample_exit_overflow` counts
+observations of unretained Codes, not distinct unretained Codes, while
+`sample_exit_no_instruction` counts plans without an exit instruction. These
+are sampled planned exits, not proof that those exit instructions executed or
+the most frequent instructions across all code. `sample_main_context` and
+`sample_child_context` count successful samples in the scheduler's main/child
+contexts; they do not measure fairness, elapsed time or semantic progress.
+The additional 64 lookup visits are preadmitted within the same observer work
+cap before dispatch. Histogram and context updates commit only after a
+successful step. Existing guest budgets and `PROGRESS` records remain unchanged.
 `service_top` lists the four most frequent public kernel catalogue labels among
 the first 64 distinct admitted labels; their counts are exact. `service_overflow`
 counts successful actions for additional labels and `service_other` counts other

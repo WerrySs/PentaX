@@ -133,9 +133,11 @@ BMI support does not authorize vector state. Native consumers must check actual
 host BMI support before entry; no software BMI fallback is provided here.
 
 `with_native_ymm_registers()` explicitly requests a separate closed profile of
-38 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
+70 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
 VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
-128/256-bit vectors, plus VADDPS/PD, VSUBPS/PD and VMULPS/PD at both widths.
+128/256-bit vectors, plus VADDPS/PD, VSUBPS/PD and VMULPS/PD at both widths,
+VMOVAPS/UPS/APD/UPD in both opcode directions and VAND/ANDN/OR/XOR PS/PD
+at both widths.
 Every operand must be a same-width XMM0–15 or YMM0–15. This request alone excludes
 memory encodings, GPR transfers, scalar or other floating-point operations,
 vector-state control and EVEX. Existing legacy SSE2 admission is unchanged.
@@ -151,6 +153,27 @@ without it, the default mediated path remains in use. Its closed aggregate
 `native_ymm_mode=sse2|avx|avx2` field reports that actual engine mode, not host
 identity or the guest CPUID profile. No guest feature advertisement is changed,
 and no performance gain is claimed without execution measurements.
+
+The thirty-two additional copy/logical forms require only AVX, including their
+256-bit forms. They transfer raw bits: signaling NaNs are neither classified
+nor quieted, and MXCSR status and RFLAGS remain unchanged. VEX.128 replaces the
+low half and clears the destination's upper half, even for a self-copy; VEX.256
+replaces all 256 bits. Store-opcode register encodings still write the decoded
+destination, and ANDN preserves `(~source1) & source2` order. This extension
+does not admit any copy/logical memory encoding, including when the separate
+arithmetic-memory request is enabled. Host control and full-YMM preservation
+reuse the existing bridge; no bridge code or guest CPUID profile changes.
+
+Original codegen and actual-platform fixtures enumerate all thirty-two forms,
+directions and aliases using arbitrary bits and unchanged status. The native
+worker consumer uses two finite original images with exact mode-aware counter
+deltas. Newly native operations count as `native_instructions`, rather than
+mediated `vector_ops`; memory setup and readback retain their exact mediated
+bytes. The ignored `native_vector_register_bits_original_baseline_measurement`
+requires explicit independently verified `PENTAX_VECTOR_REGISTER_BITS_BASELINE_WORKER`
+and `PENTAX_TEST_WORKER` artifacts. It compares the same 50,000-iteration original
+separated/coalesced inputs with bounded concurrent diagnostic drains. It asserts
+results and counter differences, not a timing inequality or a title speedup.
 
 Packed native ADD/SUB/MUL uses the existing checked host-compatible MXCSR
 profile: all six numeric exceptions must be masked, reserved or unsupported

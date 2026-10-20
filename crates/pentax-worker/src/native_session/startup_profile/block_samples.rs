@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //! Optional bounded observations, never execution or source authority.
+//! The exit histogram retains the first 64 distinct catalogue Codes across
+//! successful samples. Overflow counts observations of unretained Codes, not
+//! distinct unknown Codes. A missing exit instruction has a separate bucket.
+//! Top 4 counts are exact only within that retained set; these are sampled
+//! planned exits, not whole-run frequencies or proof that an exit instruction
+//! ran. Main/child refers to the actual selected thread
+//! context, including callbacks on it, and establishes no scheduling fairness.
 
 use pentax_codegen::{Code, Instruction, MaterializedBlockPlan, OpKind, Register};
 use pentax_linker::SourceIdentity;
 use std::fmt::{self, Write};
 
 const CAPACITY: usize = 64;
+const EXIT_CAPACITY: usize = 64;
 const MAX_WORK: u64 = 64 * 1024 * 1024;
-const FIXED_WORK: u64 = 4 * CAPACITY as u64 + 64;
+const FIXED_WORK: u64 = 4 * CAPACITY as u64 + 64 + EXIT_CAPACITY as u64;
 const RECORD_WORK: u64 = 32;
 
 // Exact public forms shared with the separately reviewed native FP candidate.
@@ -40,12 +48,25 @@ struct Entry {
     frequency: u8,
 }
 
+enum ExitUpdate {
+    Code {
+        index: usize,
+        code: Code,
+        count: u64,
+    },
+    Overflow(u64),
+    NoInstruction(u64),
+}
+
 pub(in crate::native_session) struct PendingSample {
     key: Key,
     planned: Option<Code>,
     completed: u64,
     records: u64,
     counts: [[u64; 2]; 12],
+    exit: ExitUpdate,
+    main_context: u64,
+    child_context: u64,
 }
 
 pub(in crate::native_session) struct BlockSamples {
@@ -60,6 +81,12 @@ pub(in crate::native_session) struct BlockSamples {
     records: u64,
     epoch_changes: u64,
     counts: [[u64; 2]; 12],
+    exits: [Option<(Code, u64)>; EXIT_CAPACITY],
+    exit_codes_retained: u8,
+    exit_overflow: u64,
+    exit_no_instruction: u64,
+    main_context: u64,
+    child_context: u64,
     work: u64,
     maximum_work: u64,
     disabled: bool,
@@ -80,6 +107,12 @@ impl Default for BlockSamples {
             records: 0,
             epoch_changes: 0,
             counts: [[0; 2]; 12],
+            exits: [None; EXIT_CAPACITY],
+            exit_codes_retained: 0,
+            exit_overflow: 0,
+            exit_no_instruction: 0,
+            main_context: 0,
+            child_context: 0,
             work: 0,
             maximum_work: MAX_WORK,
             disabled: false,
@@ -96,6 +129,9 @@ impl fmt::Debug for BlockSamples {
             .field("recent", &self.recent)
             .field("distinct", &self.distinct)
             .field("max_repeat", &self.max_repeat)
+            .field("exit_codes_retained", &self.exit_codes_retained)
+            .field("main_context", &self.main_context)
+            .field("child_context", &self.child_context)
             .field("disabled", &self.disabled)
             .field("overflow", &self.overflow)
             .finish()
@@ -154,6 +190,7 @@ impl BlockSamples {
         epoch: SourceIdentity,
         block: &MaterializedBlockPlan<'_, '_, '_>,
         maximum_records: u64,
+        is_main: bool,
     ) -> Option<PendingSample> {
         self.prepare_records(
             Key {
@@ -167,6 +204,7 @@ impl BlockSamples {
                 .iter()
                 .map(|record| record.instruction()),
             maximum_records,
+            is_main,
         )
     }
 
@@ -176,6 +214,7 @@ impl BlockSamples {
         planned: Option<Code>,
         instructions: impl ExactSizeIterator<Item = &'a Instruction>,
         maximum_records: u64,
+        is_main: bool,
     ) -> Option<PendingSample> {
         if self.disabled {
             return None;
@@ -221,13 +260,59 @@ impl BlockSamples {
                 counts[form][kind] = next;
             }
         }
+        let main_context = self.main_context.checked_add(u64::from(is_main));
+        let child_context = self.child_context.checked_add(u64::from(!is_main));
+        let (Some(main_context), Some(child_context)) = (main_context, child_context) else {
+            self.disabled = true;
+            self.overflow = true;
+            return None;
+        };
+        let exit = self.prepare_exit(planned)?;
         Some(PendingSample {
             key,
             planned,
             completed,
             records,
             counts,
+            exit,
+            main_context,
+            child_context,
         })
+    }
+
+    fn prepare_exit(&mut self, planned: Option<Code>) -> Option<ExitUpdate> {
+        // FIXED_WORK reserves all 64 visits before this bounded lookup. The
+        // first 64 distinct public Codes remain retained across source epochs.
+        if let Some(code) = planned {
+            for (index, entry) in self.exits.iter().enumerate() {
+                match entry {
+                    Some((found, count)) if *found == code => {
+                        if let Some(count) = count.checked_add(1) {
+                            return Some(ExitUpdate::Code { index, code, count });
+                        }
+                        self.disabled = true;
+                        self.overflow = true;
+                        return None;
+                    }
+                    None => {
+                        return Some(ExitUpdate::Code {
+                            index,
+                            code,
+                            count: 1,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(next) = self.exit_overflow.checked_add(1) {
+                return Some(ExitUpdate::Overflow(next));
+            }
+        } else if let Some(next) = self.exit_no_instruction.checked_add(1) {
+            return Some(ExitUpdate::NoInstruction(next));
+        }
+        self.disabled = true;
+        self.overflow = true;
+        None
     }
 
     pub(super) fn complete(&mut self, pending: PendingSample) {
@@ -271,6 +356,18 @@ impl BlockSamples {
         self.completed = pending.completed;
         self.records = pending.records;
         self.counts = pending.counts;
+        match pending.exit {
+            ExitUpdate::Code { index, code, count } => {
+                if self.exits[index].is_none() {
+                    self.exit_codes_retained += 1;
+                }
+                self.exits[index] = Some((code, count));
+            }
+            ExitUpdate::Overflow(next) => self.exit_overflow = next,
+            ExitUpdate::NoInstruction(next) => self.exit_no_instruction = next,
+        }
+        self.main_context = pending.main_context;
+        self.child_context = pending.child_context;
     }
 
     pub(super) fn protocol_fields(&self) -> String {
@@ -305,6 +402,33 @@ impl BlockSamples {
                 "{code:?}:{}:{}",
                 self.counts[index][0], self.counts[index][1]
             );
+        }
+        let _ = write!(
+            fields,
+            "\tsample_exit_capacity={EXIT_CAPACITY}\tsample_exit_codes_retained={}\tsample_exit_overflow={}\tsample_exit_no_instruction={}\tsample_main_context={}\tsample_child_context={}\tsample_exit_top=",
+            self.exit_codes_retained,
+            self.exit_overflow,
+            self.exit_no_instruction,
+            self.main_context,
+            self.child_context
+        );
+        // Sorting copies only 64 inline catalogue-code/count pairs, once when
+        // reporting. Counts descend, with static Code order breaking ties.
+        let mut sorted = self.exits;
+        sorted.sort_unstable_by_key(|entry| match entry {
+            Some((code, count)) => (std::cmp::Reverse(*count), *code as u32),
+            None => (std::cmp::Reverse(0), u32::MAX),
+        });
+        let mut any = false;
+        for (code, count) in sorted.iter().flatten().take(4) {
+            if any {
+                fields.push(',');
+            }
+            let _ = write!(fields, "{code:?}:{count}");
+            any = true;
+        }
+        if !any {
+            fields.push_str("none");
         }
         fields
     }
