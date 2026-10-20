@@ -2,7 +2,34 @@
 //! Original command streams; these refusals and zero draws never enter Vulkan.
 use super::*;
 use crate::gpu::driver::{Function, Limits};
-use pentax_platform::native_memory::{NativeAddressSpace, NativePermissions};
+use pentax_platform::native_memory::{NativeAddressSpace, NativeMemoryError, NativePermissions};
+
+fn original_video_owner() -> (NativeAddressSpace, u64) {
+    // VideoOut's source tracker admits only the low 40-bit range. An
+    // OS-selected native arena may validly be higher, independently of GPU
+    // or clock support, so choose one bounded original low-address mapping.
+    for index in 0..16 {
+        let base = 0x55_0000_0000 + index * 0x100_0000;
+        let mut owner = NativeAddressSpace::new(Default::default()).unwrap();
+        match owner.map_at(
+            base,
+            0x20000,
+            NativePermissions::READ_WRITE.with_gpu(true, true),
+        ) {
+            Ok(()) => {
+                assert!(base + 0x20000 <= 1 << 40);
+                return (owner, base);
+            }
+            Err(NativeMemoryError::OperatingSystem {
+                operation: "VirtualAlloc2(placeholder)",
+                code: 487,
+                ..
+            }) => continue, // Actual no-overwrite reservation collision only.
+            Err(_) => panic!("original video backing admission failed"),
+        }
+    }
+    panic!("original bounded video address candidates unavailable");
+}
 
 fn words(memory: &mut PausedNativeMemory<'_>, address: u64, input: &[u32]) {
     let bytes: Vec<_> = input.iter().flat_map(|word| word.to_le_bytes()).collect();
@@ -176,15 +203,7 @@ fn gpu_flip_clock_owner_full_queue_and_capture_quota_refuse_before_any_draw() {
     ) -> Result<u64, Failure> {
         panic!("pre-effect admission must not sample the clock");
     }
-    let mut owner = NativeAddressSpace::reserve_any(Default::default(), 0x30000).unwrap();
-    let base = owner.reserved_ranges().next().unwrap().address;
-    owner
-        .map_at(
-            base,
-            0x20000,
-            NativePermissions::READ_WRITE.with_gpu(true, true),
-        )
-        .unwrap();
+    let (mut owner, base) = original_video_owner();
     let mut memory = owner.pause().unwrap();
     words(
         &mut memory,

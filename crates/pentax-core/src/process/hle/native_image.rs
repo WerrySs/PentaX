@@ -21,6 +21,7 @@ use pentax_platform::native_memory::{
 use std::fmt;
 
 const GRANULE: u64 = 65_536;
+const ARENA_MINIMUM: u64 = 1 << 32;
 
 mod resources;
 pub use resources::NativeResourceError;
@@ -320,7 +321,14 @@ pub fn with_native_image_session_with_roots<T, E>(
     if reservation > limits.native.reserved_limit {
         return Err(NativeImageError::Budget("reservation-bytes"));
     }
-    let mut owner = NativeAddressSpace::reserve_any(
+    // The source VideoOut tracker admits only 40-bit surface addresses.
+    // Keep the complete image/TLS/thread/kernel arena inside that profile,
+    // rather than accepting arbitrary 47-bit host placement and failing only
+    // when a real guest later registers an otherwise valid surface. Start at
+    // least 4GiB: the prepared executor's finite nearby cache search also needs
+    // addressable space below a large arena. This prefix is not reserved and
+    // does not guarantee availability of any separate cache allocation.
+    let mut owner = NativeAddressSpace::reserve_within(
         NativeMemoryLimits {
             mapped_bytes: limits
                 .native
@@ -330,6 +338,10 @@ pub fn with_native_image_session_with_roots<T, E>(
             reserved_bytes: limits.native.reserved_limit,
         },
         reservation,
+        NativeRange {
+            address: ARENA_MINIMUM,
+            size: (1 << 40) - ARENA_MINIMUM,
+        },
     )
     .map_err(NativeImageError::Memory)?;
     if let Some(backing) = &limits.file_backing {

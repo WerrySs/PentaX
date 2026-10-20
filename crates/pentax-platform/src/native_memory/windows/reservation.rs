@@ -3,9 +3,12 @@
 //! Exact owned placeholder slots. Every state transition retains its address.
 use super::*;
 use windows_sys::Win32::System::Memory::{
-    MEM_COMMIT, MEM_PRESERVE_PLACEHOLDER, MEM_REPLACE_PLACEHOLDER, MEM_RESERVE_PLACEHOLDER,
-    MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile3, UnmapViewOfFile2, VirtualAlloc2,
+    MEM_ADDRESS_REQUIREMENTS, MEM_COMMIT, MEM_EXTENDED_PARAMETER, MEM_EXTENDED_PARAMETER_0,
+    MEM_EXTENDED_PARAMETER_1, MEM_PRESERVE_PLACEHOLDER, MEM_REPLACE_PLACEHOLDER,
+    MEM_RESERVE_PLACEHOLDER, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile3,
+    MemExtendedParameterAddressRequirements, UnmapViewOfFile2, VirtualAlloc2,
 };
+use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,13 +220,66 @@ impl Reservation {
         Ok(())
     }
     pub(super) fn reserve(address: Option<u64>, size: u64) -> Result<Self, NativeMemoryError> {
+        Self::reserve_impl(address, size, None)
+    }
+    pub(super) fn reserve_within(
+        size: u64,
+        window: NativeRange,
+        granularity: u64,
+    ) -> Result<Self, NativeMemoryError> {
+        Self::reserve_impl(None, size, Some((window, granularity)))
+    }
+    fn reserve_impl(
+        address: Option<u64>,
+        size: u64,
+        window: Option<(NativeRange, u64)>,
+    ) -> Result<Self, NativeMemoryError> {
+        let (window_end, mut requirements) = if let Some((window, granularity)) = window {
+            let end = checked_reservation_window(size, window, granularity, size)?;
+            let mut info = SYSTEM_INFO::default();
+            // SAFETY: GetSystemInfo writes exactly this live initialized
+            // SYSTEM_INFO. It performs no allocation, scan or policy change.
+            unsafe { GetSystemInfo(&mut info) };
+            if u64::from(info.dwAllocationGranularity) != granularity
+                || window.address < info.lpMinimumApplicationAddress as u64
+                || end - 1 > info.lpMaximumApplicationAddress as u64
+            {
+                return Err(NativeMemoryError::UnsupportedPageLayout);
+            }
+            let requirements = MEM_ADDRESS_REQUIREMENTS {
+                LowestStartingAddress: window.address as usize as *mut c_void,
+                HighestEndingAddress: (end - 1) as usize as *mut c_void,
+                Alignment: granularity as usize,
+            };
+            (Some(end), requirements)
+        } else {
+            (None, MEM_ADDRESS_REQUIREMENTS::default())
+        };
+        let mut parameter = MEM_EXTENDED_PARAMETER {
+            Anonymous1: MEM_EXTENDED_PARAMETER_0 {
+                _bitfield: MemExtendedParameterAddressRequirements as u64,
+            },
+            Anonymous2: MEM_EXTENDED_PARAMETER_1 {
+                Pointer: std::ptr::from_mut(&mut requirements).cast(),
+            },
+        };
         let mut regions = Vec::new();
         regions
             .try_reserve_exact(1)
             .map_err(|_| NativeMemoryError::Allocation)?;
         let target = address.map_or(std::ptr::null(), |v| v as usize as *const c_void);
+        let (parameters, count) = if window.is_some() {
+            (std::ptr::from_mut(&mut parameter), 1)
+        } else {
+            (std::ptr::null_mut(), 0)
+        };
         // SAFETY: Fresh reservation cannot replace anyone else's allocation.
-        // The caller admits aligned size/address and descriptor capacity first.
+        // Size/address and descriptor capacity are admitted first. In the
+        // constrained path BaseAddress is NULL and the single typed parameter
+        // points to call-live MEM_ADDRESS_REQUIREMENTS; reserved bits are zero.
+        // The inclusive highest address is the checked exclusive end minus1.
+        // No MEM_COMMIT is requested. The ordinary exact-address/any path has
+        // no extended parameters, preserving its existing allocation policy.
         let raw = unsafe {
             VirtualAlloc2(
                 std::ptr::null_mut(),
@@ -231,8 +287,8 @@ impl Reservation {
                 size as usize,
                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                 PAGE_NOACCESS,
-                std::ptr::null_mut(),
-                0,
+                parameters,
+                count,
             )
         };
         let base = NonNull::new(raw)
@@ -249,9 +305,18 @@ impl Reservation {
             released: false,
         };
         let result = (|| {
+            let end = owned
+                .address()
+                .checked_add(size)
+                .filter(|end| *end <= NATIVE_ADDRESS_LIMIT)
+                .ok_or(NativeMemoryError::InvalidRange)?;
             if owned.address() == 0
-                || owned.end() > NATIVE_ADDRESS_LIMIT
                 || address.is_some_and(|expected| expected != owned.address())
+                || window.is_some_and(|(window, granularity)| {
+                    owned.address() < window.address
+                        || end > window_end.unwrap_or(0)
+                        || !owned.address().is_multiple_of(granularity)
+                })
             {
                 return Err(NativeMemoryError::InvalidRange);
             }

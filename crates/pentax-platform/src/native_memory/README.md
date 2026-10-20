@@ -21,6 +21,23 @@ budgets cover both total virtual mapped bytes and unique admitted backing, and
 64 KiB reservations; 16 KiB guest holes remain owned, uncommitted `NOACCESS`.
 All physical protections remain NX, including logical executable mappings.
 
+`NativeAddressSpace::reserve_within` additionally reserves one OS-selected
+placeholder wholly inside an explicit allocation-granularity-aligned window
+with an exclusive end. Size, overflow, native47-bit range and reservation quota
+are checked before allocation; the requested window must also fit the actual
+Windows application range. One
+[VirtualAlloc2](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc2)
+call uses NULL BaseAddress, `MEM_RESERVE | MEM_RESERVE_PLACEHOLDER` and
+`PAGE_NOACCESS`, with a call-live
+[MEM_ADDRESS_REQUIREMENTS](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-mem_address_requirements)
+in one typed extended parameter. Windows receives inclusive highest address
+`end - 1`; returned alignment and the complete extent are checked again before
+owner publication. Reservation commits no backing. Unsupported geometry or
+allocation failure is explicit, with no scan, replacement or broader fallback.
+`reserve_any` retains its general placement policy. This initial-placement
+constraint does not grant payload access or constrain later explicit mappings
+beyond their existing owner/permission/budget checks.
+
 Live span checks locate the first sorted page once and then verify every expected
 page address and permission in order. Missing pages remain holes; later pages
 cannot supply their rights. The non-executable span check validates logical NX

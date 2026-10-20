@@ -150,6 +150,27 @@ impl NativeAddressSpace {
         owner.reserved = size;
         Ok(owner)
     }
+    /// Reserve one fresh OS-selected placeholder wholly inside `window`.
+    /// The window has an exclusive end and allocation-granularity alignment.
+    /// No pages are committed and no payload/access/execution authority is
+    /// created. Later explicit mappings still use the ordinary owner checks.
+    /// An unavailable or incompatible host range is refused, never broadened.
+    pub fn reserve_within(
+        limits: NativeMemoryLimits,
+        size: u64,
+        window: NativeRange,
+    ) -> Result<Self, NativeMemoryError> {
+        let mut owner = Self::new(limits)?;
+        checked_reservation_window(size, window, owner.granularity, limits.reserved_bytes)?;
+        owner
+            .reservations
+            .try_reserve_exact(1)
+            .map_err(|_| NativeMemoryError::Allocation)?;
+        let reservation = Reservation::reserve_within(size, window, owner.granularity)?;
+        owner.reservations.push(reservation);
+        owner.reserved = size;
+        Ok(owner)
+    }
     pub fn reserved_ranges(&self) -> impl Iterator<Item = NativeRange> + '_ {
         self.reservations.iter().map(|r| NativeRange {
             address: r.address(),
@@ -974,6 +995,9 @@ mod deferred_tests;
 
 #[cfg(test)]
 mod stack_preflight_tests;
+
+#[cfg(test)]
+mod constrained_tests;
 
 mod replacement;
 mod transaction;

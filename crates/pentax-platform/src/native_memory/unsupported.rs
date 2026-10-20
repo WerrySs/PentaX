@@ -69,6 +69,13 @@ impl NativeAddressSpace {
     pub fn reserve_any(_: NativeMemoryLimits, _: u64) -> Result<Self, NativeMemoryError> {
         Err(NativeMemoryError::UnsupportedHost)
     }
+    pub fn reserve_within(
+        _: NativeMemoryLimits,
+        _: u64,
+        _: NativeRange,
+    ) -> Result<Self, NativeMemoryError> {
+        Err(NativeMemoryError::UnsupportedHost)
+    }
     pub fn reserved_ranges(&self) -> impl Iterator<Item = NativeRange> {
         std::iter::empty()
     }

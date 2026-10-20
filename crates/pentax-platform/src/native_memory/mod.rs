@@ -173,6 +173,39 @@ pub struct NativeRange {
     pub size: u64,
 }
 
+// The window end is exclusive. This pure admission is shared by the public
+// Windows constructor and its private FFI boundary; no OS search is performed.
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+fn checked_reservation_window(
+    size: u64,
+    window: NativeRange,
+    granularity: u64,
+    reserved_limit: u64,
+) -> Result<u64, NativeMemoryError> {
+    let end = window
+        .address
+        .checked_add(window.size)
+        .ok_or(NativeMemoryError::InvalidRange)?;
+    if !granularity.is_power_of_two()
+        || granularity < NATIVE_GUEST_PAGE
+        || size == 0
+        || !size.is_multiple_of(granularity)
+        || size > reserved_limit
+        || window.address == 0
+        || window.size == 0
+        || !window.address.is_multiple_of(granularity)
+        || !window.size.is_multiple_of(granularity)
+        || size > window.size
+        || end > NATIVE_ADDRESS_LIMIT
+    {
+        return Err(NativeMemoryError::InvalidRange);
+    }
+    Ok(end)
+}
+
+#[cfg(test)]
+mod reservation_bounds_tests;
+
 /// Independent bounded virtual-name metadata; none of these limits grant
 /// mapping, payload access or execution authority. Work is cumulative per owner.
 #[derive(Debug, Clone, Copy)]
