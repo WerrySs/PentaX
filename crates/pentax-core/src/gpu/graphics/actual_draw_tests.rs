@@ -343,8 +343,9 @@ fn declared_tiled_draw_refuses_padding_overlap_late_gpu_rights_and_shared_host_q
         assert!(matches!(overlap, Err(super::Error::Memory(_))));
         assert!(!admitted.get());
         assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
-        // Exact retained source/compiler charge leaves less than the upload +
-        // completed tight result. The admission hook must not be reached.
+        // Tight workspace and backend upload/readback quotas independently
+        // refuse before GPU admission. The workspace may now fail earlier at
+        // a temporary compiler peak rather than at the retained product.
         let prepared = pentax_gpu::graphics::prepare_draw_with_target(
             &plan.draws()[0],
             &crate::gpu::Memory(&memory),
@@ -383,7 +384,28 @@ fn declared_tiled_draw_refuses_padding_overlap_late_gpu_rights_and_shared_host_q
                 Ok(())
             },
         );
-        assert!(matches!(quota, Err(super::Error::Limit)));
+        assert!(matches!(
+            quota,
+            Err(super::Error::Limit)
+                | Err(super::Error::Prepare(pentax_gpu::graphics::Error::Limit(_)))
+        ));
+        assert!(!admitted.get());
+        assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
+        let backend_quota = execute_draw_admitted(
+            &mut memory,
+            &plan.draws()[0],
+            &Limits::default(),
+            &GpuLimits {
+                max_host_bytes: 32767,
+                ..Default::default()
+            },
+            &[],
+            |_, _, _| {
+                admitted.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(backend_quota, Err(super::Error::Limit)));
         assert!(!admitted.get());
         assert_eq!(read(&memory, target, 65536), [0x9b; 65536]);
     }

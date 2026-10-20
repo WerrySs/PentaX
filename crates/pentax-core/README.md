@@ -645,7 +645,7 @@ the separate process-owned implementation described below.
 
 The JSON primitive batch adds boolean/integer/type construction, scalar setters,
 reference getters, copy/assignment, cleanup, count and allocator destruction.
-The provider has34 private markers and170 exact export rows. Existing rows and
+The provider has35 private markers and172 exact export rows. Existing rows and
 marker addresses remain stable; metadata moves within its original code page.
 Three separate read-only zero words back the boolean, integer and real default
 references. GetBoolean/GetInteger/GetReal return actual guest addresses; GetReal
@@ -669,6 +669,14 @@ and container formatting refuses explicitly. Nonzero Array/Object payloads
 retain their explicit storage-unavailable stop. Calls keep constant-work source validation and
 live marker/default attestation; full binding validation occurs at plan/epoch
 publication instead of scanning unrelated relocations for every scalar call.
+
+The appended Initializer constructor returns the complete opaque `self` word
+unchanged, including null, exactly as the pinned public body specifies. It reads
+or writes no guest object bytes and does not initialize an allocator. Only the
+source `Json2` module/library pair and the independently observed `libSceJson`
+module / `libSceJson2` library pair are exported for this NID, at module1.1/lib1.
+Initialization, termination and destruction remain separate unsupported calls;
+the constructor does not stand in for those lifecycle effects.
 
 String growth publishes its new allocation and all caller fields atomically.
 Impl identities remain stable during assignment, while Value copies own

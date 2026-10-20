@@ -839,5 +839,7 @@ fn native_application_heap_registration_accepts_a_real_table_and_stops_on_invali
     }
 }
 
+#[path = "gpu_window.rs"]
+mod gpu_window;
 #[path = "present_window.rs"]
 mod present_window;

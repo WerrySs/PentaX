@@ -29,6 +29,89 @@ fn request(
 }
 
 #[test]
+fn json_initializer_constructor_returns_full_opaque_self_without_reads_or_writes() {
+    let input = original_input(0);
+    with_native_image_session(
+        &[&input],
+        &NativeImageLimits::default(),
+        |session, layout| {
+            let object = layout.entry.stack.address + 0x101;
+            let sentinel = [0xa7; 48];
+            session
+                .pause()
+                .unwrap()
+                .write(object - 1, &sentinel)
+                .unwrap();
+            let binding = session.plan.json.unwrap();
+            for opaque_self in [
+                0,
+                u64::MAX,
+                0x8123_4567_89ab_cdef,
+                object,
+                binding.factory.address_point(),
+            ] {
+                let mut call = request(session, opaque_self, 34);
+                call.args[1..].copy_from_slice(&[
+                    0xffff_ffff_ffff_fff1,
+                    0x9234_5678_9abc_def2,
+                    0xa345_6789_abcd_ef03,
+                    0xb456_789a_bcde_f014,
+                    0xc567_89ab_cdef_0125,
+                ]);
+                assert_eq!(session.service_request(call), Ok(opaque_self));
+            }
+            let mut observed = [0; 48];
+            session
+                .pause()
+                .unwrap()
+                .read(object - 1, &mut observed)
+                .unwrap();
+            assert_eq!(observed, sentinel);
+            let mut defaults = [0; 104];
+            session
+                .pause()
+                .unwrap()
+                .read(binding.bias + PAGE_SIZE, &mut defaults)
+                .unwrap();
+            assert_eq!(defaults.as_slice(), binding.factory.data_bytes());
+            let good = request(session, object, 34);
+            let foreign = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
+            let mut wrong = good;
+            wrong.owner_id = foreign.owner_id();
+            assert_eq!(
+                session.service_request(wrong),
+                Err(KernelStartupError::NativeOwnerMismatch)
+            );
+            wrong = good;
+            wrong.service_id |= 1 << 32;
+            assert!(matches!(
+                session.service_request(wrong),
+                Err(KernelStartupError::ServiceIdMismatch { .. })
+            ));
+            wrong = good;
+            wrong.next_pc += 1;
+            assert!(matches!(
+                session.service_request(wrong),
+                Err(KernelStartupError::ContinuationMismatch { .. })
+            ));
+            session.provider_work = session.plan.limits.max_provider_work - 1;
+            assert!(matches!(
+                session.service_request(good),
+                Err(KernelStartupError::Budget(_))
+            ));
+            session
+                .pause()
+                .unwrap()
+                .read(object - 1, &mut observed)
+                .unwrap();
+            assert_eq!(observed, sentinel);
+            Ok::<_, ()>(())
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn constructor_writes_one_unaligned_guest_word_and_refuses_forged_requests_before_effects() {
     let input = original_input(0);
     with_native_image_session(

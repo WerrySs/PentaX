@@ -351,3 +351,13 @@ policy follows the separately retained authorized209dffe queue revision; public7
 is not claimed to implement that policy. Ten canonical VideoOut1.1/library1
 exports append without moving earlier service markers. No unobserved namespace
 aliases, physical display timing or presentation completion are fabricated.
+
+The stateless JSON Initializer constructor additionally adapts PUBLIC
+KytyPS5/KytyPS5 revision f186b35706ddbc3faf5513f326e2335d224802f7,
+src/libs/libJson2.cpp, Git blob d6e968f019fa61e0adc5224cd20be1ecd3261487,
+constructor476-480 and registration1086. Copyright (c) 2021 InoriRus;
+GPL-2.0-only and the retained original Kyty MIT grant continue to apply.
+PentaX modifications, 2026: append-only exact canonical and independently
+observed module/library bindings with existing immutable-provider attestation.
+The constructor returns its opaque self word without guest memory effects;
+no allocator initialization or complete JSON lifecycle is claimed.

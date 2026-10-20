@@ -43,6 +43,9 @@ mod json_value;
 #[path = "image_probe/json_primitives.rs"]
 mod json_primitives;
 
+#[path = "image_probe/json_initializer.rs"]
+mod json_initializer;
+
 #[path = "image_probe/game_intent.rs"]
 mod game_intent;
 #[path = "image_probe/libc_mspace.rs"]

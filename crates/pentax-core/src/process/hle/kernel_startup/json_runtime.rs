@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Source-bound JSON constructor writes and explicit unsupported virtual calls.
+//! Source-bound JSON construction and explicit unsupported virtual calls.
 use super::{
     KernelStartupError, KernelStartupLimits, NativeServiceRequest, PreparedNativeKernelStartup,
     charge, require,
@@ -233,6 +233,13 @@ pub(super) fn stop(
         session.plan.limits.max_provider_work,
     )?;
     match marker.function {
+        JsonFunction::InitializerCtor => {
+            // KytyPS5 f186 libJson2.cpp476-480 returns the complete self word
+            // unchanged. It performs no member/base/vptr initialization and
+            // does not dereference self, even when null or otherwise unmapped.
+            // This stateless constructor does not initialize an allocator.
+            Ok(request.args[0])
+        }
         JsonFunction::VirtualCall => Err(KernelStartupError::UnavailableJsonAllocatorVirtual),
         JsonFunction::ValueCtor => {
             // Pinned Kyty JsonValueInit initializes the complete 32-byte Null

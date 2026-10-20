@@ -87,9 +87,9 @@ fn link<'a>(
 }
 
 #[test]
-fn json_provider_has_typed_primitive_exports_and_no_terminal_symbol_or_initializer() {
+fn json_provider_has_typed_exports_and_no_terminal_symbol_or_elf_initializer() {
     let provider = factory(BIAS);
-    assert_eq!(provider.function_count(), 170);
+    assert_eq!(provider.function_count(), 172);
     assert_eq!(provider.mapped_bytes(), 2 * PAGE_SIZE);
     assert_eq!(provider.load_bias(), BIAS);
     let view = open_executable(provider.image()).unwrap();
@@ -157,7 +157,7 @@ fn json_provider_has_typed_primitive_exports_and_no_terminal_symbol_or_initializ
         );
     }
     let symbols = metadata.link().symbols();
-    assert_eq!(symbols.len(), 171);
+    assert_eq!(symbols.len(), 173);
     assert_eq!(
         (symbols[0].info, symbols[0].value, symbols[0].size),
         (0, 0, 0)
@@ -177,13 +177,13 @@ fn json_provider_has_typed_primitive_exports_and_no_terminal_symbol_or_initializ
     for symbol in 6..=14 {
         assert_eq!(provider.export_marker(symbol), Some(provider.markers()[2]));
     }
-    for symbol in [0, 171, usize::MAX] {
+    for symbol in [0, 173, usize::MAX] {
         assert!(provider.export_marker(symbol).is_none());
     }
     assert!(!symbols.iter().any(|symbol| symbol.value == 0x110));
     assert!(metadata.link().rela().is_empty());
     assert!(metadata.link().plt_rela().is_empty());
-    assert_eq!(provider.markers().len(), 34);
+    assert_eq!(provider.markers().len(), 35);
     for marker in provider.markers() {
         assert_eq!(
             &provider.image()[marker.rva as usize..marker.rva as usize + 8],
@@ -219,8 +219,8 @@ fn json_provider_has_typed_primitive_exports_and_no_terminal_symbol_or_initializ
         (0x3800, 0x1800, 0x3868)
     );
     assert_eq!((DYNAMIC_AT, STRINGS_AT), (0x600, 0x800));
-    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x12be);
-    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2808);
+    assert_eq!(STRINGS_AT + STRINGS_BYTES, 0x12de);
+    assert_eq!(SYMBOLS_AT + symbols.len() * SYMBOL_BYTES, 0x2838);
     for (row, symbol) in symbols.iter().enumerate().skip(1) {
         let marker = provider.export_marker(row).unwrap();
         assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);
@@ -229,6 +229,108 @@ fn json_provider_has_typed_primitive_exports_and_no_terminal_symbol_or_initializ
         assert_eq!((symbol.value, symbol.size), (marker.rva, 8));
         assert_ne!(marker.function, JsonFunction::VirtualCall);
     }
+}
+
+#[test]
+fn json_initializer_constructor_appends_only_two_exact_scopes_without_lifecycle_authority() {
+    let provider = factory(BIAS);
+    let marker = provider.markers()[34];
+    assert_eq!(
+        marker,
+        JsonMarker {
+            function: JsonFunction::InitializerCtor,
+            service_id: 0x5058_4a23,
+            rva: 0x320,
+        }
+    );
+    let view = open_executable(provider.image()).unwrap();
+    let inspected = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
+    let symbols = inspected.metadata().unwrap().link().symbols();
+    for (row, module, library, name) in [
+        (
+            171,
+            b"Json2".as_slice(),
+            b"Json2".as_slice(),
+            b"cK6bYHf-Q5E#B#B".as_slice(),
+        ),
+        (
+            172,
+            b"libSceJson".as_slice(),
+            b"libSceJson2".as_slice(),
+            b"cK6bYHf-Q5E#C#D".as_slice(),
+        ),
+    ] {
+        assert_eq!(symbols[row].name.as_ref().unwrap().as_bytes(), name);
+        assert_eq!(provider.export_marker(row), Some(marker));
+        assert_eq!((symbols[row].value, symbols[row].size), (0x320, 8));
+        let mut original = consumer(module, library);
+        original.imports[0].nid = *b"cK6bYHf-Q5E";
+        let bytes = original.build().unwrap();
+        let source = link(&bytes, &provider).unwrap();
+        assert!(
+            matches!(source.patches()[0].resolution(), Resolution::Definition(reference)
+            if reference.module.index() == 1 && reference.symbol == row)
+        );
+        assert_eq!(source.patches()[0].value(), BIAS + 0x320);
+        for (major, minor, version) in [(2, 1, 1), (1, 2, 1), (1, 1, 2)] {
+            let mut wrong = original.clone();
+            (wrong.major, wrong.minor, wrong.version) = (major, minor, version);
+            assert!(matches!(
+                link(&wrong.build().unwrap(), &provider),
+                Err(SymbolicError::VersionMismatch { .. })
+            ));
+        }
+        let mut object = original.clone();
+        object.imports[0].symbol_type = 1;
+        object.imports[0].relocation = 6;
+        assert!(matches!(
+            link(&object.build().unwrap(), &provider),
+            Err(SymbolicError::UnsupportedSymbol {
+                reason: UnsupportedSymbol::TypeMismatch,
+                ..
+            })
+        ));
+        for nid in [
+            b"Cxwy7wHq4J0",
+            b"IXW-z8pggfg",
+            b"PR5k1penBLM",
+            b"RujUxbr3haM",
+        ] {
+            let mut lifecycle = original.clone();
+            lifecycle.imports[0].nid = *nid;
+            assert!(matches!(
+                link(&lifecycle.build().unwrap(), &provider),
+                Err(SymbolicError::MissingProvider { .. })
+            ));
+        }
+    }
+    for (module, library) in [
+        (b"libSceJson2".as_slice(), b"libSceJson2".as_slice()),
+        (b"libSceJson2".as_slice(), b"Json2".as_slice()),
+        (b"Json2".as_slice(), b"libSceJson2".as_slice()),
+        (b"libSceJson".as_slice(), b"Json2".as_slice()),
+    ] {
+        let mut original = consumer(module, library);
+        original.imports[0].nid = *b"cK6bYHf-Q5E";
+        assert!(matches!(
+            link(&original.build().unwrap(), &provider),
+            Err(SymbolicError::MissingProvider { .. })
+        ));
+    }
+    // The old last String marker and all old rows retain their exact identities.
+    assert_eq!(
+        provider.markers()[33],
+        JsonMarker {
+            function: JsonFunction::ValueSerialize,
+            service_id: 0x5058_4a22,
+            rva: 0x310,
+        }
+    );
+    assert_eq!(
+        symbols[170].name.as_ref().unwrap().as_bytes(),
+        b"R7FDWtcN6f8#C#D"
+    );
+    assert_eq!(symbols[170].value, 0x310);
 }
 
 #[test]

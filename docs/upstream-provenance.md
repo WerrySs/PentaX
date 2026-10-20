@@ -1103,6 +1103,21 @@ rows; eleven gain the independently observed fifth scope, while StringAssign
 remains canonical-only. Earlier export rows and guest marker/table/default
 addresses remain stable during metadata growth within the original code page.
 
+The separate `JsonInitializerCtor` public NID `cK6bYHf-Q5E` follows that same
+pinned KytyPS5 `libJson2.cpp` blob, lines476-480 and registration1086. The complete
+body returns its `self` argument unchanged; it does not call a base constructor,
+write a vptr/member, dereference the argument or initialize an allocator. PentaX
+therefore returns the complete opaque guest word, including null, after the
+ordinary owner/source/site/continuation and immutable-provider checks. Exactly
+two rows are appended: the source `Json2` module/library1.1/1 identity and the
+independently observed `libSceJson` module / `libSceJson2` library1.1/1 identity.
+No prefix-family expansion follows from that observation. All earlier markers,
+service IDs, export ordinals and immutable defaults remain unchanged.
+The source's adjacent return-zero Initialize/InitializeV1 placeholders do not
+establish real configuration or allocator initialization; those operations and
+Initializer termination/destruction remain unavailable. This constructor does
+not grant a complete JSON lifecycle or an executable module capability.
+
 `LibcInternalExt::LibcHeapGetTraceInfo` adapts the same pinned `libC.cpp` source:
 the exact extension-library registration, 32-byte Info record, 64-bit mask and
 64-entry state table. The original unknown words are preserved. PentaX owns a
