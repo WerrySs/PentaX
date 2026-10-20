@@ -19,6 +19,7 @@ pub(crate) struct ThreadContext {
     started: bool,
     pub(crate) affinity: u64,
     pub(crate) waiting: bool,
+    pub(crate) time_wait: Option<crate::time::TimeWait>,
     pub(crate) self_pointer: Option<u64>,
     pub(crate) errno: Option<u64>,
     pub(crate) net_errno: Option<u64>,
@@ -40,6 +41,7 @@ impl ThreadContext {
             started: true,
             affinity: 0x7f,
             waiting: false,
+            time_wait: None,
             self_pointer: None,
             errno: None,
             net_errno: None,
@@ -155,6 +157,18 @@ impl ThreadContexts {
     }
     pub(crate) fn active_mut(&mut self) -> &mut ThreadContext {
         &mut self.entries[self.active]
+    }
+
+    pub(crate) fn has_time_wait(
+        &self,
+        ticket: &crate::time::TimeWait,
+        budget: &mut crate::budget::Budget,
+    ) -> Result<bool, Failure> {
+        budget.work(self.entries.len() as u64)?;
+        Ok(self
+            .entries
+            .iter()
+            .any(|entry| entry.waiting && entry.time_wait == Some(*ticket)))
     }
 
     pub(crate) fn priority_entry(

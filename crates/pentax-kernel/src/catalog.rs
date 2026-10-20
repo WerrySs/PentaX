@@ -1635,6 +1635,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < POSIX_USLEEP_REGISTRATIONS.len() {
+        entries[output] = POSIX_USLEEP_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1725,6 +1731,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + AUDIO_OUT2_REGISTRATIONS.len()
             + AUDIO_OUT2_LIFECYCLE_REGISTRATIONS.len()
             + POSIX_SELF_REGISTRATIONS.len()
+            + POSIX_USLEEP_REGISTRATIONS.len()
     },
 >();
 
@@ -1776,6 +1783,10 @@ use audio_out2::AUDIO_OUT2_REGISTRATIONS;
 #[path = "catalog/posix_self.rs"]
 mod posix_self;
 use posix_self::POSIX_SELF_REGISTRATIONS;
+
+#[path = "catalog/posix_usleep.rs"]
+mod posix_usleep;
+use posix_usleep::POSIX_USLEEP_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a
 // separately observed full-prefix import. No mixed or inferred aliases.

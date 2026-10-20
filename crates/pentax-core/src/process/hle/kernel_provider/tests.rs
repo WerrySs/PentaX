@@ -26,6 +26,8 @@ mod audio_out2;
 
 #[path = "posix_self_tests.rs"]
 mod posix_self;
+#[path = "posix_usleep_tests.rs"]
+mod posix_usleep;
 
 const OLD_REGISTRATIONS: usize = 862;
 const SCOPES: [(&[u8], &[u8]); 4] = [

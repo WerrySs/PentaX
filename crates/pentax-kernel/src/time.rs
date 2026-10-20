@@ -16,15 +16,19 @@
 //! CPU-time clocks and clock resolutions remain explicitly unsupported. Native
 //! TSC counter services require a bound platform adapter with a stable frequency.
 //!
-//! Sleeps really block the calling host thread. That is only valid under the
-//! admitted profile without guest signals or additional native guest threads,
-//! and only up to `Limits::max_sleep_nanoseconds`.
+//! Raw synchronous sleep invocation blocks the calling host thread, valid only
+//! in its admitted single-thread profile. Native Usleep dispatch instead uses
+//! the owner-bound cooperative continuation below, in the same process clock
+//! domain and up to `Limits::max_sleep_nanoseconds`.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::budget::Budget;
 use crate::catalog::Service;
 use crate::{CallArgs, Errno, Failure, GuestAccess, GuestWrite, TimeCounterSample};
+
+mod wait;
+pub use wait::{TimeWait, TimeWaitAction};
 
 #[cfg(test)]
 #[path = "time/tests.rs"]
@@ -130,6 +134,8 @@ pub struct ProcessClock {
 pub(crate) struct TimeState {
     epoch: Instant,
     counter_epoch: Option<TimeCounterSample>,
+    wait_owner: u64,
+    wait_serial: u64,
 }
 
 impl TimeState {
@@ -137,6 +143,8 @@ impl TimeState {
         Self {
             epoch: Instant::now(),
             counter_epoch: None,
+            wait_owner: 0,
+            wait_serial: 0,
         }
     }
 

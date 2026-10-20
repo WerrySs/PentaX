@@ -608,3 +608,15 @@ PentaX modifications2026 append only the exact libkernel1.1/Posix1 binding
 and selected libScePosix1 spelling, retaining every old marker and the existing
 process-owned selected-thread implementation. No host pthread pointer, wildcard
 namespace normalization or new thread lifecycle behavior is introduced.
+
+Cooperative native Usleep continues the PUBLIC KytyPS5 revision above:
+  src/kernel/pthread.cpp, Git blob bdb125ab7e77969821928985da0dfaff4c929070
+  src/libs/libKernel.cpp, Git blob c6fb3d76c9df124274d28f51da9b1fd3d9183b61
+GPL-2.0-only and the retained original Kyty copyright/MIT grant apply.
+PentaX modifications2026 replace native-dispatch host sleeping with actual
+process-clock deadlines and fixed per-thread owner/serial-bound continuations.
+The exact demonstrated QcteRwbsnV0 libkernel1.1/libScePosix1 import is a finite
+compatibility binding to KernelUsleep, not an upstream POSIX wrapper claim.
+The unsigned low32 microsecond input, zero result and unchanged errno reuse
+the existing kernel service. Signal polling/cancellation parity is not provided.
+Raw synchronous invocation retains its distinct bounded host-sleep profile.

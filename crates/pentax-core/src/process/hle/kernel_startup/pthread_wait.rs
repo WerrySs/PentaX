@@ -6,7 +6,7 @@ use super::*;
 use pentax_kernel::{
     AudioOut2Wait, AudioOut2WaitAction, ConditionWait, ConditionWaitAction, EventFlagWait,
     EventFlagWaitAction, EventQueueWait, EventQueueWaitAction, MutexWait, MutexWaitAction,
-    SemaphoreWait, SemaphoreWaitAction, Service,
+    SemaphoreWait, SemaphoreWaitAction, Service, TimeWait, TimeWaitAction,
 };
 use pentax_platform::native_memory::NativeOwnerId;
 
@@ -25,6 +25,7 @@ enum Ticket {
     Mutex(MutexWait),
     EventFlag(EventFlagWait),
     AudioOut2(AudioOut2Wait),
+    Time(TimeWait),
 }
 impl fmt::Debug for PendingThreadWait {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -45,7 +46,15 @@ pub(super) fn begin(
         .thread_tls
         .ok_or(KernelStartupError::InvalidProvider("thread wait TLS"))?
         .thread_pointer;
-    let ticket = if matches!(
+    let ticket = if service == Service::Usleep {
+        match kernel
+            .begin_time_wait(service, args, memory)
+            .map_err(KernelStartupError::Kernel)?
+        {
+            TimeWaitAction::Returned(value) => return Ok(NativeServiceAction::Returned(value)),
+            TimeWaitAction::Waiting(ticket) => Ticket::Time(ticket),
+        }
+    } else if matches!(
         service,
         Service::AudioOut2ContextCreate
             | Service::AudioOut2ContextDestroy
@@ -159,7 +168,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
             Ticket::Mutex(ticket) => self.kernel.mutex_wait_ready(ticket),
             Ticket::EventFlag(ticket) => self.kernel.event_flag_wait_ready(ticket),
-            Ticket::AudioOut2(ticket) => {
+            Ticket::AudioOut2(_) | Ticket::Time(_) => {
                 let (mut paused, instances) =
                     self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
                 let guest = KernelMemory {
@@ -175,7 +184,11 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 // This is an observation of the same process-microsecond
                 // clock, possibly while a different guest thread is selected.
                 // No PCM read, guest write or pending-ticket consumption occurs.
-                self.kernel.audio_out2_wait_ready(ticket, &guest)
+                match &pending.ticket {
+                    Ticket::AudioOut2(ticket) => self.kernel.audio_out2_wait_ready(ticket, &guest),
+                    Ticket::Time(ticket) => self.kernel.time_wait_ready(ticket, &guest),
+                    _ => unreachable!(),
+                }
             }
         }
         .map_err(KernelStartupError::Kernel)
@@ -206,7 +219,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .kernel
                 .event_flag_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
-            Ticket::AudioOut2(ticket) => {
+            Ticket::AudioOut2(_) | Ticket::Time(_) => {
                 let (mut paused, instances) =
                     self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
                 let guest = KernelMemory {
@@ -219,9 +232,12 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     thread_tls: instances.get(self.active_tls),
                     initial_entry: None,
                 };
-                self.kernel
-                    .audio_out2_wait_delay(ticket, &guest)
-                    .map_err(KernelStartupError::Kernel)
+                match &pending.ticket {
+                    Ticket::AudioOut2(ticket) => self.kernel.audio_out2_wait_delay(ticket, &guest),
+                    Ticket::Time(ticket) => self.kernel.time_wait_delay(ticket, &guest),
+                    _ => unreachable!(),
+                }
+                .map_err(KernelStartupError::Kernel)
             }
         }
     }
@@ -288,7 +304,8 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Semaphore(_)
             | Ticket::EventQueue(_)
             | Ticket::EventFlag(_)
-            | Ticket::AudioOut2(_) => {
+            | Ticket::AudioOut2(_)
+            | Ticket::Time(_) => {
                 let (mut paused, instances) =
                     self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
                 let mut guest = KernelMemory {
@@ -314,6 +331,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     Ticket::AudioOut2(ticket) => {
                         self.kernel.complete_audio_out2_wait(ticket, &mut guest)
                     }
+                    Ticket::Time(ticket) => self.kernel.complete_time_wait(ticket, &guest),
                     _ => unreachable!(),
                 }
                 .map_err(KernelStartupError::Kernel)

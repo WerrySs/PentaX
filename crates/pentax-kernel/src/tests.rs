@@ -621,7 +621,7 @@ fn exact_scope_and_source_aliases_are_required() {
     assert_eq!(
         Service::registrations()
             .iter()
-            .filter(|r| r.service == Service::Usleep)
+            .filter(|r| r.service == Service::Usleep && r.library == "libkernel")
             .count(),
         2
     );

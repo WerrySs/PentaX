@@ -173,3 +173,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_posix_self_uses_each_actual_selected_thread_and_keeps_tls_distinct -- --test-threads=1
+      - name: Test native cooperative microsecond sleep and exact POSIX binding
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_canonical_and_posix_usleep_park_while_another_guest_runs_and_preserve_context -- --test-threads=1

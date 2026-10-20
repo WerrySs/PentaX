@@ -1549,3 +1549,42 @@ which ambiguous imported symbol caused a particular dynamic stop. Original
 consumers compare canonical and POSIX self values on two actual scheduled
 threads, with independently distinct TLS snapshots; pthread prefixes are not
 assumed equal to TLS pointers.
+
+## Cooperative native microsecond sleeps
+
+The existing kernel sleep ABI follows the same public KytyPS5 revision:
+[pthread.cpp3868..3870](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/kernel/pthread.cpp#L3868),
+blob `bdb125ab7e77969821928985da0dfaff4c929070`, calls the source sleep/signal
+poll helper and returns zero. The two canonical NIDs `1jfXLRVzisc` and
+`QcteRwbsnV0` are registered to that same implementation in
+[libKernel.cpp3384..3385](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/libs/libKernel.cpp#L3384),
+blob `c6fb3d76c9df124274d28f51da9b1fd3d9183b61`. Both sources were independently
+Git-blob verified; the existing GPL version2 terms and original Kyty MIT
+attribution are retained in the kernel/core NOTICE files.
+
+The selected `QcteRwbsnV0` import under module `libkernel` 1.1/library
+`libScePosix` 1 is an explicit finite PentaX compatibility binding. The pinned
+source registers this function under the canonical kernel library; it does not
+establish a separate POSIX `usleep` wrapper or justify additional spellings,
+versions, NIDs or errno conversion. PentaX reuses the existing unsigned low32
+microsecond argument, zero return and unchanged errno behavior.
+
+Native dispatch parks the actual guest continuation on a checked deadline in
+the existing kernel process-microsecond clock. It does not host-sleep inside a
+service dispatch, create another clock epoch or manufacture completion from a
+call count. Admission charges one attempt and work before effects; positive
+durations retain the existing sleep-duration policy, while zero returns without
+sampling. Owner/thread/context/serial-bound tickets occupy fixed fields in the
+already bounded thread-context records, with at most one pending wait per
+thread. Observation scans are work-charged; completion consumes a ticket only
+after its actual deadline and the runtime's exact native token/source/TLS
+validation. Premature completion and clock/admission failure preserve the ticket.
+The scheduler alone may idle when all guest threads are parked, within its
+existing cumulative idle-sleep budget.
+
+The raw synchronous kernel invocation remains a separate bounded host-sleep
+profile. Guest signal polling, signal interruption and cancellation equivalence
+are not supplied by this cooperative slice. Original modeled clocks exercise
+deadline, width, budget, ownership, replay and retry contracts; original native
+consumers exercise actual cross-thread continuation rather than claiming source
+host-thread race equivalence.

@@ -965,7 +965,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         } else if actions
             && matches!(
                 marker.registration.service,
-                pentax_kernel::Service::CondWait
+                pentax_kernel::Service::Usleep
+                    | pentax_kernel::Service::CondWait
                     | pentax_kernel::Service::PosixCondWait
                     | pentax_kernel::Service::WaitSema
                     | pentax_kernel::Service::WaitEqueue

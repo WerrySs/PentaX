@@ -48,6 +48,8 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
 mod posix;
 #[path = "posix_self.rs"]
 mod posix_self;
+#[path = "usleep_wait.rs"]
+mod usleep_wait;
 
 #[path = "thread_priority.rs"]
 mod thread_priority;
