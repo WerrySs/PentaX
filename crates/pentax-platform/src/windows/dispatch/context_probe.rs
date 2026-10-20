@@ -113,8 +113,8 @@ const _: () = assert!(offset_of!(HostProbeState, observed_rsp) == 488);
 const _: () = assert!(offset_of!(HostProbeState, observed_base) == 496);
 const _: () = assert!(offset_of!(HostProbeState, observed_limit) == 504);
 const _: () = assert!(offset_of!(HostProbeState, observed_flags) == 512);
-const _: () = assert!(offset_of!(HostProbeState, enter) == 528);
-const _: () = assert!(size_of::<HostProbeState>() == 544);
+const _: () = assert!(offset_of!(HostProbeState, enter) == 520);
+const _: () = assert!(size_of::<HostProbeState>() == 528);
 const _: () = assert!(align_of::<HostProbeState>() == 16);
 
 #[repr(transparent)]
@@ -215,7 +215,7 @@ pentax_context_probe_host:
     ldmxcsr [rip + {probe} + 224]
     fldcw [rip + {probe} + 228]
     cld
-    call qword ptr [rip + {probe} + 528]
+    call qword ptr [rip + {probe} + 520]
     mov [rip + {probe} + 256], rbx
     mov [rip + {probe} + 264], rbp
     mov [rip + {probe} + 272], rsi

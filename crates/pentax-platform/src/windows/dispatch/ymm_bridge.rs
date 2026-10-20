@@ -275,4 +275,5 @@ unsafe extern "C" {
 }
 
 #[cfg(test)]
+#[path = "ymm_bridge/tests.rs"]
 mod tests;
