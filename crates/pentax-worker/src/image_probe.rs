@@ -697,12 +697,17 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                     execution.progress_interval_blocks = 2_097_152;
                 }
                 if long_startup {
-                    execution.dispatch.max_blocks *= 4;
-                    execution.dispatch.max_source_bytes *= 4;
-                    execution.dispatch.max_emitted_bytes *= 4;
-                    execution.dispatch.max_work_units *= 4;
-                    execution.max_total_window_bytes *= 4;
-                    execution.max_admission_work *= 4;
+                    // Only cumulative execution work grows with this explicit
+                    // profile. A measured startup run now leaves enough of its
+                    // unchanged 300-second supervisor deadline for 320M blocks.
+                    // Native cache capacity, mappings, handles and GPU limits
+                    // retain their independent original bounds.
+                    execution.dispatch.max_blocks *= 5;
+                    execution.dispatch.max_source_bytes *= 5;
+                    execution.dispatch.max_emitted_bytes *= 5;
+                    execution.dispatch.max_work_units *= 5;
+                    execution.max_total_window_bytes *= 5;
+                    execution.max_admission_work *= 5;
                     execution.progress_interval_blocks *= 4;
                 }
                 execution.report_progress = true;
