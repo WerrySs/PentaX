@@ -112,7 +112,9 @@ fn qword_signed_endpoints_full_width_alias_sources_and_all_upper_rules_are_prese
                         engine.placement(),
                     );
                     let mut output = [0; 32];
-                    for (slot, mask) in output.chunks_exact_mut(8).zip(masks) {
+                    // Only active lanes receive comparison masks. VEX.128
+                    // clears the initialized upper half instead of comparing it.
+                    for (slot, mask) in output[..size].chunks_exact_mut(8).zip(masks) {
                         // A destructive legacy DEST==SRC2 compares a vector
                         // with itself, regardless of the originally staged SRC1.
                         let value = if form == 0 && destination == 14 && !memory {
