@@ -12,6 +12,8 @@ use pentax_codegen::{CachePlacement, MaterializedBlockPlan};
 const SLOTS: usize = 4096;
 const MAX_PLAN_BYTES: u64 = 8 * 1024 * 1024;
 
+mod initialized_windows;
+
 pub(super) struct PlanCache<'view, 'plan, 'image> {
     source: &'view MaterializedSource<'plan, 'image>,
     policy: TranslationPolicy,
@@ -19,6 +21,7 @@ pub(super) struct PlanCache<'view, 'plan, 'image> {
     slots: Vec<Option<MaterializedBlockPlan<'view, 'plan, 'image>>>,
     retained_bytes: u64,
     max_bytes: u64,
+    initialized_windows: initialized_windows::Memo<'view, 'plan, 'image>,
 }
 
 #[cfg(test)]
@@ -45,6 +48,11 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             return Err(NativeSessionError::Allocation);
         }
         slots.resize_with(SLOTS, || None);
+        // Optional metadata shares the retained-plan byte ceiling. Admission or
+        // allocation failure leaves the original scanner available; a plan may
+        // reclaim this entire allocation before its existing capacity decision.
+        let initialized_windows =
+            initialized_windows::Memo::new(source, MAX_PLAN_BYTES, work, work_limit);
         Ok(Self {
             source,
             policy,
@@ -52,7 +60,20 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             slots,
             retained_bytes: 0,
             max_bytes: MAX_PLAN_BYTES,
+            initialized_windows,
         })
+    }
+
+    /// The caller retains the original per-attempt epoch metadata charge before
+    /// this numeric lookup. A memo hit never authorizes live source or execution.
+    pub(super) fn initialized_window(
+        &mut self,
+        pc: u64,
+        maximum: u64,
+    ) -> Result<(usize, u64), NativeSessionError> {
+        self.initialized_windows
+            .yield_to_plans(self.retained_bytes, 0, self.max_bytes);
+        self.initialized_windows.get(pc, maximum)
     }
 
     pub(super) fn prepare(
@@ -65,6 +86,8 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
         work_limit: u64,
     ) -> Result<(&MaterializedBlockPlan<'view, 'plan, 'image>, bool), NativeSessionError> {
         charge(work, live.len() as u64 + 8, work_limit, "admission work")?;
+        self.initialized_windows
+            .yield_to_plans(self.retained_bytes, 0, self.max_bytes);
         let index = ((pc ^ (pc >> 8) ^ (pc >> 16) ^ (pc >> 32)) as usize) & (SLOTS - 1);
         let hit = self.slots[index].as_ref().is_some_and(|plan| {
             plan.guest_pc() == pc
@@ -85,13 +108,19 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
                 &self.limits,
             )?;
             let bytes = plan.usage().allocation_bytes;
-            if bytes > self.max_bytes {
-                return Err(NativeSessionError::Budget("plan cache bytes"));
-            }
             let old = self.slots[index]
                 .as_ref()
                 .map_or(0, |plan| plan.usage().allocation_bytes);
             let remaining = self.retained_bytes - old;
+            // The independent planner's prior allocation limit is unchanged.
+            // Its temporary allocation can coexist with the same <=8MiB
+            // retained sum as before. Memo bytes yield before the old retained
+            // capacity/refusal/eviction logic, never displacing a valid plan.
+            self.initialized_windows
+                .yield_to_plans(remaining, bytes, self.max_bytes);
+            if bytes > self.max_bytes {
+                return Err(NativeSessionError::Budget("plan cache bytes"));
+            }
             if remaining > self.max_bytes - bytes {
                 charge(work, SLOTS as u64, work_limit, "admission work")?;
                 for slot in &mut self.slots {

@@ -38,6 +38,28 @@ fallible allocation; retained plan storage keeps its independent 8 MiB ceiling.
 Source epoch, module, placement and the full freshly read live window still
 participate in reuse. This retention change makes no unmeasured speed claim.
 
+An optional4,096-entry memo retains only successful initialized-source window
+metadata for an exact PC and exact requested maximum within that same source
+epoch. A complete original module/segment scan fills each miss; errors and
+segment-wide authority are never cached. Epoch replacement drops the memo.
+Every attempt retains its original metadata-walk charge, complete live fetch,
+source-byte comparison, permission/owner/continuation checks and ordinary-memory
+mediation. The memo contains no guest bytes, live permission proof or evaluated
+operand address.
+
+Its one-time fallible construction is separately admitted and charged by the
+actual table capacity. Insufficient construction work/space, reserve failure or
+an excessive actual capacity leaves the original scanner available; attempted
+allocation work may remain consumed. Table capacity shares the existing8 MiB
+retained-plan ceiling. It yields its entire allocation before prior plan-cap
+decisions, preserving the previous full plan capacity without reducing the
+independent planner limit. Once disabled it stays disabled for the epoch. Total
+admission work can therefore differ by the known one-time construction cost;
+unchanged exact-budget reachability is not claimed when caching is enabled.
+An ignored original16-module lookup measurement reports scanner/memo timings
+and actual capacity without a speed assertion. It does not measure title
+startup or frame rate.
+
 Prepared NetCtl checks suspend their original service call while real guest
 callbacks execute and return in order. Owner/source/thread/target/frame identity
 checks apply to each callback; the original caller resumes only after the pending

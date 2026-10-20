@@ -890,8 +890,7 @@ fn execute_epoch<'plan, 'image>(
                 "admission work",
             )?;
             progress.admission_work = state.admission_work;
-            let (module, length) = initialized_window(
-                source,
+            let (module, length) = plans.initialized_window(
                 engine.state().guest_pc,
                 limits
                     .block
