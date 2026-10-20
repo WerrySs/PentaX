@@ -140,8 +140,22 @@ fn with_reserved_source<T>(
         NativeCpuState,
     ) -> T,
 ) -> T {
+    with_reserved_source_at(code, reserved_bytes, 0, test)
+}
+
+fn with_reserved_source_at<T>(
+    code: Option<&[u8]>,
+    reserved_bytes: u64,
+    source_offset: u64,
+    test: impl FnOnce(
+        &MaterializedSource<'_, '_>,
+        &mut NativeAddressSpace,
+        NativeStackFrame,
+        NativeCpuState,
+    ) -> T,
+) -> T {
     let arena = NativeAddressSpace::reserve_any(Default::default(), reserved_bytes).unwrap();
-    let bias = arena.reserved_ranges().next().unwrap().address;
+    let bias = arena.reserved_ranges().next().unwrap().address + source_offset;
     let image = code.map_or_else(original_image, build_elf);
     let inputs = [ModuleInput::new(open_executable(&image).unwrap(), bias)];
     let plan = plan_symbolic(&inputs, &SymbolicLimits::default()).unwrap();
@@ -175,28 +189,41 @@ fn with_reserved_source<T>(
 
 #[test]
 fn near_cache_search_handles_large_owned_reservations_with_an_explicit_finite_bound() {
-    with_reserved_source(None, 32 * 1024 * 1024, |source, arena, stack, state| {
-        let small = NativeDispatchLimits {
-            cache_search_granules: 256,
-            ..Default::default()
-        };
-        assert!(matches!(
-            NativeBlockStepper::new(source, &mut arena.pause().unwrap(), state, stack, &small),
-            Err(NativeDispatchError::Budget("near cache search"))
-        ));
-        let engine = NativeBlockStepper::new(
-            source,
-            &mut arena.pause().unwrap(),
-            state,
-            stack,
-            &Default::default(),
-        )
-        .unwrap();
-        let base = source.source_plan().modules()[0].load_bias();
-        assert!(engine.placement().address >= base + 32 * 1024 * 1024);
-        assert!(engine.placement().address < base + 257 * 1024 * 1024);
-        assert!(!engine.machine.cache.executable);
-    });
+    // Center the image so both directions of the bounded search remain inside
+    // owned reservations. Placing it at the first page leaves a valid lower
+    // cache location dependent on unrelated Windows address-space placement.
+    with_reserved_source_at(
+        None,
+        32 * 1024 * 1024,
+        16 * 1024 * 1024,
+        |source, arena, stack, state| {
+            let small = NativeDispatchLimits {
+                cache_search_granules: 256,
+                ..Default::default()
+            };
+            assert!(matches!(
+                NativeBlockStepper::new(source, &mut arena.pause().unwrap(), state, stack, &small),
+                Err(NativeDispatchError::Budget("near cache search"))
+            ));
+            let engine = NativeBlockStepper::new(
+                source,
+                &mut arena.pause().unwrap(),
+                state,
+                stack,
+                &Default::default(),
+            )
+            .unwrap();
+            let base = source.source_plan().modules()[0].load_bias();
+            let reserved = arena.reserved_ranges().next().unwrap();
+            let cache = engine.placement();
+            assert!(
+                cache.address + cache.capacity <= reserved.address
+                    || cache.address >= reserved.address + reserved.size
+            );
+            assert!(cache.address.abs_diff(base) < 257 * 1024 * 1024);
+            assert!(!engine.machine.cache.executable);
+        },
+    );
 }
 
 #[test]
