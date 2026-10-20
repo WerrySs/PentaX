@@ -1199,14 +1199,16 @@ struct OriginalFile {
 }
 impl OriginalFile {
     fn new() -> Self {
-        let base =
-            std::env::temp_dir().join(format!("pentax-kernel-original-{}", std::process::id()));
-        std::fs::create_dir_all(&base).unwrap();
-        let directory = base.join(format!(
-            "kernel-fixture-{}-{}",
-            std::process::id(),
-            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        // Each fixture owns its parent as well as its child directory. A
+        // concurrent fixture must not remove a shared empty parent between
+        // this constructor's parent and child creation operations.
+        let sequence = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "pentax-kernel-original-{}-{sequence}",
+            std::process::id()
         ));
+        std::fs::create_dir_all(&base).unwrap();
+        let directory = base.join(format!("kernel-fixture-{}-{sequence}", std::process::id(),));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join("original.txt");
         std::fs::write(&path, b"original-data-0123456789").unwrap();
