@@ -22,9 +22,6 @@ const OUTPUT: u64 = 0x8000;
 const NAME: u64 = OUTPUT + 0x40;
 const TLS_OFFSET: u64 = 56;
 const ENTRY: usize = 0x400;
-// Three original consumer pages, five kernel provider pages (four RX plus
-// one RW), two libc pages and two independently placed static TLS pages.
-const INITIAL_MAPPED_BYTES: u64 = 12 * PAGE_SIZE;
 
 #[test]
 fn image_protection_tracks_actual_loaded_pages_without_allocating_or_reimporting() {
@@ -271,13 +268,33 @@ fn original_consumer() -> Vec<u8> {
     image
 }
 
-fn load_limits() -> NativeLoadLimits {
+// These original images have disjoint page-aligned load segments and one
+// sub-page static TLS block per instance. Derive their real image cost instead
+// of embedding a previous provider's number of pages in quota tests.
+fn initial_mapped_bytes(plan: &KernelStartupPlan<'_>, instances: u64) -> u64 {
+    let images: u64 = plan
+        .link_plan()
+        .modules()
+        .iter()
+        .flat_map(|module| &module.runtime_plan().segments)
+        .map(|segment| {
+            ((segment.vaddr + segment.mem_size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1))
+                - (segment.vaddr & !(PAGE_SIZE - 1))
+        })
+        .sum();
+    let header = u64::from(
+        plan.limits.startup.static_tls.thread_control
+            != crate::process::tls::ThreadControlBlockPolicy::None,
+    );
+    images + instances * PAGE_SIZE * (1 + header)
+}
+
+fn load_limits(plan: &KernelStartupPlan<'_>) -> NativeLoadLimits {
+    let bytes = initial_mapped_bytes(plan, 2) + 3 * PAGE_SIZE;
     NativeLoadLimits {
         session: SessionLoadLimits {
-            // Exactly one runtime thread prefix plus the two-page mapping
-            // exercised below fit beyond the admitted initial image/TLS.
-            resident_limit: INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE,
-            mapped_limit: INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE,
+            resident_limit: bytes,
+            mapped_limit: bytes,
         },
         reserved_limit: RESERVATION,
     }
@@ -291,6 +308,7 @@ fn identity() -> ProcessIdentity {
 }
 
 mod entry;
+mod event_flag_wait;
 mod module_symbols;
 mod mutex_wait;
 mod process_parameters;
@@ -326,7 +344,7 @@ fn with_consumer(
         },
         &libc,
         ProviderPlacement {
-            load_bias: base + 0x4_0000,
+            load_bias: base + 0x5_0000,
         },
         &limits,
     )
@@ -345,7 +363,7 @@ fn prepared<'plan, 'image>(
         &StaticTlsStorage {
             thread_pointers: pointers,
         },
-        &load_limits(),
+        &load_limits(plan),
         identity(),
         vec![],
         Some(owner),
@@ -451,65 +469,96 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
 
 #[test]
 fn expanded_provider_keeps_all_source_pages_immutable_and_data_separate() {
-    with_plan(
-        KernelStartupLimits::default(),
-        |plan, owner, _, pointers| {
-            assert!(plan.factory.image().len() as u64 > PAGE_SIZE);
-            let mut session = prepared(plan, owner, &pointers);
-            let bias = plan.kernel_provider_bias();
-            for offset in (0..CODE_MAPPED_BYTES).step_by(PAGE_SIZE as usize) {
-                let paused = session.pause().unwrap();
-                paused.preflight_read(bias + offset, PAGE_SIZE).unwrap();
-                paused
-                    .preflight_fetch_source(bias + offset, PAGE_SIZE)
+    for (metadata, permissions) in [
+        (false, NativePermissions::READ_WRITE),
+        (true, NativePermissions::READ_WRITE),
+        (true, NativePermissions::READ_EXECUTE),
+        (true, NativePermissions::READ.with_gpu(false, true)),
+    ] {
+        with_plan(
+            KernelStartupLimits::default(),
+            |plan, owner, _, pointers| {
+                assert!(plan.factory.image().len() as u64 > PAGE_SIZE);
+                let mut session = prepared(plan, owner, &pointers);
+                let bias = plan.kernel_provider_bias();
+                for offset in (0..CODE_MAPPED_BYTES).step_by(PAGE_SIZE as usize) {
+                    let paused = session.pause().unwrap();
+                    paused.preflight_read(bias + offset, PAGE_SIZE).unwrap();
+                    paused
+                        .preflight_fetch_source(bias + offset, PAGE_SIZE)
+                        .unwrap();
+                    assert!(matches!(
+                        paused.preflight_write(bias + offset, 1),
+                        Err(NativeMemoryError::PermissionDenied(_))
+                    ));
+                }
+                let data = bias + CODE_MAPPED_BYTES;
+                let mut zeros = [0xa5; 512];
+                session
+                    .pause()
+                    .unwrap()
+                    .read(data + 16, &mut zeros)
+                    .unwrap();
+                assert_eq!(zeros, [0; 512]);
+                session
+                    .pause()
+                    .unwrap()
+                    .preflight_write(data, PAGE_SIZE)
+                    .unwrap();
+                session
+                    .pause()
+                    .unwrap()
+                    .preflight_non_executable(data, PAGE_SIZE)
+                    .unwrap();
+                for offset in (0..plan.factory.metadata_mapped_bytes()).step_by(PAGE_SIZE as usize)
+                {
+                    let paused = session.pause().unwrap();
+                    let page = bias + METADATA_RVA + offset;
+                    paused.preflight_read(page, PAGE_SIZE).unwrap();
+                    paused.preflight_non_executable(page, PAGE_SIZE).unwrap();
+                    assert!(matches!(
+                        paused.preflight_write(page, 1),
+                        Err(NativeMemoryError::PermissionDenied(_))
+                    ));
+                    assert!(matches!(
+                        paused.preflight_gpu_write(page, 1),
+                        Err(NativeMemoryError::PermissionDenied(_))
+                    ));
+                    assert!(matches!(
+                        paused.preflight_fetch_source(page, 1),
+                        Err(NativeMemoryError::PermissionDenied(_))
+                    ));
+                }
+                // Even the final metadata/code page must retain its exact permission
+                // class when the selected service marker is in the first RX page.
+                let target = if metadata {
+                    bias + METADATA_RVA + plan.factory.metadata_mapped_bytes() - PAGE_SIZE
+                } else {
+                    bias + CODE_MAPPED_BYTES - PAGE_SIZE
+                };
+                session
+                    .pause()
+                    .unwrap()
+                    .apply_transaction(
+                        pentax_platform::native_memory::NativeMemoryTransaction {
+                            effect: pentax_platform::native_memory::NativeMemoryEffect::Protect {
+                                address: target,
+                                size: PAGE_SIZE,
+                                permissions,
+                            },
+                            writes: &[],
+                        },
+                        &Default::default(),
+                    )
                     .unwrap();
                 assert!(matches!(
-                    paused.preflight_write(bias + offset, 1),
-                    Err(NativeMemoryError::PermissionDenied(_))
+                    session.kernel_stop(stop(plan, Service::PthreadGetthreadid, [0; 6])),
+                    Err(KernelStartupError::InvalidProvider(_))
                 ));
-            }
-            let data = bias + CODE_MAPPED_BYTES;
-            let mut zeros = [0xa5; 512];
-            session
-                .pause()
-                .unwrap()
-                .read(data + 16, &mut zeros)
-                .unwrap();
-            assert_eq!(zeros, [0; 512]);
-            session
-                .pause()
-                .unwrap()
-                .preflight_write(data, PAGE_SIZE)
-                .unwrap();
-            session
-                .pause()
-                .unwrap()
-                .preflight_non_executable(data, PAGE_SIZE)
-                .unwrap();
-            // Tampering with permissions of the last code/table page is rejected
-            // even if this particular service's immutable marker is in page one.
-            session
-                .pause()
-                .unwrap()
-                .apply_transaction(
-                    pentax_platform::native_memory::NativeMemoryTransaction {
-                        effect: pentax_platform::native_memory::NativeMemoryEffect::Protect {
-                            address: bias + CODE_MAPPED_BYTES - PAGE_SIZE,
-                            size: PAGE_SIZE,
-                            permissions: NativePermissions::READ_WRITE,
-                        },
-                        writes: &[],
-                    },
-                    &Default::default(),
-                )
-                .unwrap();
-            assert!(matches!(
-                session.kernel_stop(stop(plan, Service::PthreadGetthreadid, [0; 6])),
-                Err(KernelStartupError::InvalidProvider(_))
-            ));
-            assert_eq!(session.kernel_usage().attempts, 0);
-        },
-    );
+                assert_eq!(session.kernel_usage().attempts, 0);
+            },
+        );
+    }
 }
 
 #[test]
@@ -555,7 +604,10 @@ fn six_original_arguments_and_outputs_use_same_native_tls_and_libc_pages() {
                 session.memory().source_plan(),
                 plan.link_plan()
             ));
-            assert_eq!(session.memory().mapped_bytes(), INITIAL_MAPPED_BYTES);
+            assert_eq!(
+                session.memory().mapped_bytes(),
+                initial_mapped_bytes(plan, 2)
+            );
             let create = stop(
                 plan,
                 Service::CreateSema,
@@ -896,7 +948,7 @@ fn altered_live_provider_source_is_rejected_before_service_admission() {
         owner
             .map_at(plan.bias, CODE_MAPPED_BYTES, NativePermissions::READ_WRITE)
             .unwrap();
-        let mut bytes = plan.factory.image().to_vec();
+        let mut bytes = plan.factory.code_bytes().to_vec();
         let marker = plan.factory.markers()[0];
         bytes[marker.rva as usize + 1] ^= 1;
         owner.pause().unwrap().write(plan.bias, &bytes).unwrap();
@@ -1026,8 +1078,8 @@ fn native_eager_budget_failure_drops_unpublished_session_without_touching_source
     with_plan(
         KernelStartupLimits::default(),
         |plan, owner, _, pointers| {
-            let mut limits = load_limits();
-            limits.session.resident_limit = 8 * PAGE_SIZE;
+            let mut limits = load_limits(plan);
+            limits.session.resident_limit = initial_mapped_bytes(plan, 2) - PAGE_SIZE;
             assert!(matches!(
                 prepare_in(
                     plan,
@@ -1145,7 +1197,7 @@ fn flexible_mapping_query_and_protect_change_the_same_actual_native_pages() {
             assert_eq!(&tail, b"same-pages");
             assert_eq!(
                 session.memory().mapped_bytes(),
-                INITIAL_MAPPED_BYTES + 3 * PAGE_SIZE
+                initial_mapped_bytes(plan, 2) + 3 * PAGE_SIZE
             );
             assert_eq!(
                 (
@@ -1226,10 +1278,10 @@ fn runtime_prefix_maps_obey_the_retained_total_eager_native_budget() {
     with_plan(
         KernelStartupLimits::default(),
         |plan, owner, _, pointers| {
-            let mut limits = load_limits();
-            // Admit the complete image/TLS and no runtime prefix page.
-            limits.session.resident_limit = INITIAL_MAPPED_BYTES;
-            limits.session.mapped_limit = INITIAL_MAPPED_BYTES;
+            let mut limits = load_limits(plan);
+            let baseline = initial_mapped_bytes(plan, 2);
+            limits.session.resident_limit = baseline;
+            limits.session.mapped_limit = baseline;
             let mut session = prepare_in(
                 plan,
                 &StaticTlsStorage {
@@ -1247,11 +1299,11 @@ fn runtime_prefix_maps_obey_the_retained_total_eager_native_budget() {
                     GuestError::BudgetExceeded
                 )))
             );
-            assert_eq!(session.memory().mapped_bytes(), INITIAL_MAPPED_BYTES);
+            assert_eq!(session.memory().mapped_bytes(), baseline);
             let statistics = session.memory().statistics();
-            assert_eq!(statistics.mapped_bytes, INITIAL_MAPPED_BYTES);
-            assert_eq!(statistics.committed_bytes, INITIAL_MAPPED_BYTES);
-            assert_eq!(statistics.limits.mapped_bytes, INITIAL_MAPPED_BYTES);
+            assert_eq!(statistics.mapped_bytes, baseline);
+            assert_eq!(statistics.committed_bytes, baseline);
+            assert_eq!(statistics.limits.mapped_bytes, baseline);
             assert_eq!(
                 (
                     session.kernel_usage().mapped_bytes,

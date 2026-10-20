@@ -161,8 +161,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             if let Some((pending, _)) = &self.threads[self.active].waiting
                 && session.thread_wait_ready(pending)?
             {
-                self.resume(session, proof, engine)?;
-                return Ok(true);
+                return self.resume(session, proof, engine);
             }
             if self.threads[self.active].waiting.is_some() || self.threads[self.active].returned {
                 let mut earliest = None;
@@ -220,8 +219,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         self.threads[self.active].phase = *phase;
         *phase = self.threads[next].phase;
         self.active = next;
-        self.resume(session, proof, engine)?;
-        Ok(true)
+        self.resume(session, proof, engine)
     }
 
     fn resume(
@@ -229,17 +227,19 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         session: &mut PreparedNativeKernelStartup<'plan, 'image>,
         proof: &PreparedNativeSource<'_, '_>,
         engine: &mut NativeBlockStepper<'_, '_, '_>,
-    ) -> Result<(), NativeSessionError> {
+    ) -> Result<bool, NativeSessionError> {
         if let Some((pending, token)) = &self.threads[self.active].waiting {
             let Some(value) = session.complete_thread_wait(pending, *token, proof, engine)? else {
-                return Err(NativeSessionError::FixtureInvariant(
-                    "thread wake readiness",
-                ));
+                // Opening a source drain barrier can admit the next real wait
+                // without completing its syscall. Keep its exact token/CPU
+                // parked and reconsider readiness on another scheduling pass.
+                self.force_switch = true;
+                return Ok(false);
             };
             engine.complete_syscall(*token, value)?;
             self.threads[self.active].waiting = None;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(super) fn wait(

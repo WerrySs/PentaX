@@ -7,20 +7,8 @@ use super::*;
 fn priority_exact_bindings_append_without_moving_previous_sites_or_objects() {
     let provider = factory();
     assert_eq!(
-        (
-            provider.registration_count(),
-            MODULES.len(),
-            LIBRARIES.len()
-        ),
-        (1283, 66, 67)
-    );
-    assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
     );
     for index in 1262..1272 {
         let marker = provider.markers()[index];
@@ -60,11 +48,11 @@ fn priority_exact_bindings_append_without_moving_previous_sites_or_objects() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

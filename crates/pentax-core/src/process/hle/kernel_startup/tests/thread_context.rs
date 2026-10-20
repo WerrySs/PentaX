@@ -19,9 +19,9 @@ fn thread_context_switch_isolates_keys_errno_identity_and_mutex_ownership() {
         crate::process::tls::ThreadControlBlockPolicy::KytyObservedSelfPointerV1;
     limits.kernel.max_thread_contexts = 2;
     with_plan(limits, |plan, owner, base, pointers| {
-        let mut native_limits = load_limits();
-        native_limits.session.resident_limit = 20 * PAGE_SIZE;
-        native_limits.session.mapped_limit = 20 * PAGE_SIZE;
+        let mut native_limits = load_limits(plan);
+        native_limits.session.resident_limit = initial_mapped_bytes(plan, 2) + 6 * PAGE_SIZE;
+        native_limits.session.mapped_limit = native_limits.session.resident_limit;
         let mut session = prepare_in(
             plan,
             &StaticTlsStorage {

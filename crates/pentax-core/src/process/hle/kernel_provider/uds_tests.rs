@@ -43,10 +43,9 @@ fn link<'a>(
 
 #[test]
 fn uds_bindings_cross_index1024_with_full_ids_fixed_pages_and_stable_data() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!(MAX_REGISTRATIONS, 2048);
     assert_eq!(CODE_MAPPED_BYTES, 4 * PAGE_SIZE);
-    assert_eq!(provider.registration_count(), 1283);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[43..45],
@@ -93,16 +92,12 @@ fn uds_bindings_cross_index1024_with_full_ids_fixed_pages_and_stable_data() {
         Service::UdsEventPropertyArraySetBool
     );
     assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
-    assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(provider.data_bytes().len(), 16);
@@ -168,7 +163,7 @@ fn uds_bindings_cross_index1024_with_full_ids_fixed_pages_and_stable_data() {
 
 #[test]
 fn uds_bindings_refuse_unobserved_and_mixed_scopes_versions_and_object_types() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     let initialize = &Service::registrations()[989..990];
     for (module, library) in [
         (

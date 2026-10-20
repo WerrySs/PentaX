@@ -545,8 +545,8 @@ completes that exact token only when ready. All-parked finite waits use short id
 slices within an explicit cumulative requested-sleep budget; indefinite waits without
 a notifier produce a real deadlock result. A large finite deadline is not an
 unconditional host sleep. Raw scalar calls without continuation capture still
-refuse a wait that would block. POSIX/direct pthread semaphores and event flags
-retain their separate profiles and remain blocking-incomplete.
+refuse a wait that would block. POSIX/direct pthread semaphores retain their
+separate profile. Event flags use the cooperative continuation profile below.
 
 `CommonDialogInitialize` and `CommonDialogIsUsed` implement the pinned common
 dialog base profile, with exact CommonDialog/libSceCommonDialog spellings at
@@ -974,7 +974,7 @@ This getter does not decode a complete firmware process-parameter ABI.
 | Flexible memory | Zeroed mappings, source name/protection/alignment checks, fixed/no-overwrite profile, whole or subrange unmap/protect, and optional transactional range/protection query outputs | No replacement of existing fixed maps, memory pools or unsupported compatibility/cache behavior; unmap retains the aligned 16 KiB admission profile |
 | Files | Explicit read-only capability mounts; open/close/read/pread/seek/stat/fstat/reachability, real positional host reads, separate logical descriptor cursors, 120-byte source FileStat codec | No ambient host-path fallback, writable/device/archive/socket service or directory pread. Actual directory roots expose bounded source-packed enumeration/read/seek/status; inventories remain explicit regular-file sets |
 | Semaphores | Owned counts/attributes, FIFO/priority cooperative waits, reserved grants, deadlines/remaining time and signal/cancel/delete/poll | Blocking requires the runtime continuation interface; negative signal count and creation options remain unsupported |
-| Event flags | Owned patterns, source attribute validation, AND/OR, clear-none/all/bits, result-before-consume and timeout outputs, set/keep-mask clear/cancel/delete | No queued waiters or blocking waits; unsupported source-abort mode encodings remain Unsupported |
+| Event flags | Owned patterns, AND/OR, clear-none/all/bits, transactional pattern/time outputs, cooperative waits and cancel/delete cohort drains | Poll during an active drain is typed Unsupported; raw calls cannot block; unknown source-abort mode encodings remain Unsupported |
 | Time | Real std realtime/timeval, source monotonic aliases with a runtime-owned epoch, native TSC/process counters and frequencies through the bound adapter, process microseconds from the same TSC epoch, bounded host sleeps and checked nanosleep | CPU-time clocks and clock resolution remain Unsupported. Positive nanosleep with a remainder output is Unsupported because this trait cannot preflight a future write before elapsed host time |
 | Process/thread context | Explicit positive runtime PID/TID, owned GPO/GPI state, equality, source 4096-byte pthread guest prefix materialized in an owned 16 KiB logical mapping; mutexes, keys and native once initializers described above | Scalar kernel invocation alone does not schedule threads. The composed worker executes created threads with independent TLS and stacks; join/detach/explicit exit, cleanup callbacks and full firmware TCB/DTV remain incomplete |
 
@@ -1202,3 +1202,22 @@ unsupported path rather than an invented numeric error. Only canonical
 `Acm/Acm` and the exact full-prefix `libSceAcm/libSceAcm` identity are registered,
 both module1.1/library1. Context destruction, batch submission, waiting and DSP
 execution remain unsupported; creating an identifier does not process audio.
+
+Event-flag continuations retain the exact thread and pending syscall while its
+full CPU/TLS context is parked. AND/OR predicates are checked before deadlines;
+successful pattern/remaining-time output commits before clearing bits. Single
+waiter flags return EPERM before even a satisfied predicate. Cancel writes the
+actual cohort count before replacing bits and marks that cohort canceled;
+Delete marks it deleted. Their callers remain parked until every old waiter
+commits its output. Failed output retains the ticket, bits and drain membership.
+Cancel/Delete do not return early, and polling/readiness cannot consume a wake.
+
+Bounded deferred operations serialize native mutations and new waits behind a
+drain; admitted timeout values and the existing monotonic wait-clock start are
+retained across that barrier. An internal deferred-to-wait/drain transition
+keeps the same syscall parked and yields another scheduling pass. This is an
+explicit cooperative compatibility policy, not host thread race equivalence.
+The source ignores FIFO/priority attributes, so no priority wake order is
+claimed. Multi-waiter Poll during a cancel/delete drain is explicitly unsupported
+instead of reproducing the source race that can mutate cancellation bits. Live
+Poll remains immediate; its Single EPERM precedence is preserved during a drain.

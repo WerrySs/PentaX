@@ -27,10 +27,10 @@ fn thread_attribute_snapshot_uses_owned_entry_stack_and_refuses_changed_stack_or
         limits.startup.static_tls.thread_control =
             crate::process::tls::ThreadControlBlockPolicy::KytyObservedSelfPointerV1;
         with_plan(limits, |plan, owner, base, pointers| {
-            let mut native_limits = load_limits();
+            let mut native_limits = load_limits(plan);
             // Include the two runtime objects and the intentionally mapped guard.
-            native_limits.session.resident_limit = 16 * PAGE_SIZE;
-            native_limits.session.mapped_limit = 16 * PAGE_SIZE;
+            native_limits.session.resident_limit = initial_mapped_bytes(plan, 1) + 4 * PAGE_SIZE;
+            native_limits.session.mapped_limit = native_limits.session.resident_limit;
             let mut session = prepare_in(
                 plan,
                 &StaticTlsStorage {

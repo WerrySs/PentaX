@@ -176,6 +176,8 @@ mod bit_counts;
 mod bmi_instructions;
 #[path = "debug_stops.rs"]
 mod debug_stops;
+#[path = "event_flag_wait.rs"]
+mod event_flag_wait;
 #[path = "event_queue.rs"]
 mod event_queue;
 #[path = "fma_instructions.rs"]

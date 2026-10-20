@@ -37,8 +37,7 @@ fn link<'a>(
 
 #[test]
 fn ime_exact_bindings_append_without_changing_old_sites_data_or_caps() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1283);
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -46,10 +45,6 @@ fn ime_exact_bindings_append_without_changing_old_sites_data_or_caps() {
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(&MODULES[51..53], &[("Ime", (1, 1)), ("libSceIme", (1, 1))]);
     assert_eq!(&LIBRARIES[52..54], &[("Ime", 1), ("libSceIme", 1)]);
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
             (marker.symbol, marker.service_id, marker.rva),
@@ -87,11 +82,11 @@ fn ime_exact_bindings_append_without_changing_old_sites_data_or_caps() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(
@@ -129,7 +124,7 @@ fn ime_exact_bindings_append_without_changing_old_sites_data_or_caps() {
 
 #[test]
 fn ime_refuses_unobserved_sibling_aliases_mixed_scopes_versions_and_object_type() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     for (index, row) in Service::registrations()[1183..1196].iter().enumerate() {
         if !matches!(index, 5 | 8) {
             let bytes = consumer(b"libSceIme", b"libSceIme", &[*row])

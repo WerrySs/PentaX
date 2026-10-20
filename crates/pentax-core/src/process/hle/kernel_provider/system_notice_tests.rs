@@ -7,20 +7,8 @@ use super::*;
 fn system_notice_exact_bindings_preserve_old_sites_objects_and_provider_caps() {
     let provider = factory();
     assert_eq!(
-        (
-            provider.registration_count(),
-            MODULES.len(),
-            LIBRARIES.len()
-        ),
-        (1283, 66, 67)
-    );
-    assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -59,11 +47,11 @@ fn system_notice_exact_bindings_preserve_old_sites_objects_and_provider_caps() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

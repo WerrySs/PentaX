@@ -30,24 +30,12 @@ const SCOPES: [(&[u8], &[u8]); 4] = [
 ];
 
 fn factory() -> GeneratedKernelProvider {
-    build_kernel_provider(CODE_MAPPED_BYTES).unwrap()
+    build_kernel_provider(MAX_IMAGE_BYTES).unwrap()
 }
 
 #[test]
 fn share_media_provider_exact_append_and_only_observed_prefix_bindings() {
     let provider = factory();
-    assert_eq!(
-        (
-            provider.registration_count(),
-            MODULES.len(),
-            LIBRARIES.len()
-        ),
-        (1283, 66, 67)
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -172,11 +160,10 @@ fn content_provider_selector_boundaries_and_wide_actual_symbolic_bindings() {
         );
     }
     let ordinary = factory();
-    // Production and its adjacent selector base now exercise actual two-digit
-    // PlayGo IDs. Higher offsets exceed the independent64 KiB image ceiling.
-    for base in [1, 2] {
-        let provider = build_kernel_provider_with_base(CODE_MAPPED_BYTES, base).unwrap();
-        assert_eq!(provider.markers().len(), 1283);
+    // Exercise one-, two- and three-digit selectors with unchanged marker RVAs.
+    // Namespace metadata no longer competes with executable source capacity.
+    for base in [1, 2, 63, 64, 4096] {
+        let provider = build_kernel_provider_with_base(MAX_IMAGE_BYTES, base).unwrap();
         for (a, b) in ordinary.markers().iter().zip(provider.markers()) {
             assert_eq!(
                 (a.service_id, a.rva, a.bytes()),
@@ -259,31 +246,16 @@ fn content_provider_selector_boundaries_and_wide_actual_symbolic_bindings() {
             Err(KernelProviderError::Budget)
         ));
     }
-    for base in [63, 64] {
-        assert!(matches!(
-            build_kernel_provider_with_base(CODE_MAPPED_BYTES, base),
-            Err(KernelProviderError::Budget)
-        ));
-    }
     assert!(matches!(
-        build_kernel_provider_with_base(CODE_MAPPED_BYTES, 65535),
+        build_kernel_provider_with_base(MAX_IMAGE_BYTES, 65535),
         Err(KernelProviderError::InvalidCatalogue)
-    ));
-    assert!(matches!(
-        build_kernel_provider_with_base(CODE_MAPPED_BYTES, 4096),
-        Err(KernelProviderError::Budget)
     ));
 }
 
 #[test]
 fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1283);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -352,17 +324,12 @@ fn content_provider_exact_versions_alias_negatives_and_fixed_site_geometry() {
 #[test]
 fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_imports() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1283);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[56..58],
         &[("Share", (1, 1)), ("libSceShare", (1, 1))]
     );
     assert_eq!(&LIBRARIES[57..59], &[("Share", 1), ("libSceShare", 1)]);
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -383,11 +350,11 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
     }
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(
         &provider.data_bytes()[..8],
@@ -456,8 +423,6 @@ fn share_provider_appends_exact_scopes_preserves_old_sites_and_refuses_bad_impor
 #[test]
 fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_or_objects() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1283);
-    assert_eq!(provider.markers().len(), 1283);
     assert_eq!(MODULES.len(), 66);
     assert_eq!(LIBRARIES.len(), 67);
     assert_eq!(
@@ -480,7 +445,7 @@ fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_
     );
     let view = open_executable(provider.image()).unwrap();
     let runtime = view.runtime_plan().unwrap();
-    assert_eq!(runtime.segments.len(), 2);
+    assert_eq!(runtime.segments.len(), 3);
     assert_eq!(
         (
             runtime.segments[0].flags.raw(),
@@ -516,9 +481,15 @@ fn np_webapi2_provider_appends_descriptors_and_sites_without_moving_old_markers_
         assert_eq!(descriptor.version(), LIBRARIES[index].1);
     }
     let symbols = metadata.link().symbols();
-    assert_eq!(symbols.len(), 1286);
-    assert_eq!(provider.objects()[0].symbol, 1284);
-    assert_eq!(provider.objects()[1].symbol, 1285);
+    assert_eq!(symbols.len(), Service::registrations().len() + 3);
+    assert_eq!(
+        provider.objects()[0].symbol,
+        Service::registrations().len() + 1
+    );
+    assert_eq!(
+        provider.objects()[1].symbol,
+        Service::registrations().len() + 2
+    );
     assert_eq!(provider.objects()[0].rva, STACK_GUARD_RVA);
     assert_eq!(provider.objects()[1].rva, PROGRAM_NAME_OBJECT_RVA);
     assert_eq!(STACK_GUARD_RVA, 4 * PAGE_SIZE);

@@ -7,14 +7,6 @@ use super::*;
 fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas() {
     let provider = factory();
     assert_eq!(
-        (
-            provider.registration_count(),
-            MODULES.len(),
-            LIBRARIES.len()
-        ),
-        (1283, 66, 67)
-    );
-    assert_eq!(
         &MODULES[62..64],
         &[("PlayGo", (1, 0)), ("libScePlayGo", (1, 0))]
     );
@@ -22,10 +14,6 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -64,11 +52,11 @@ fn playgo_all_exact_bindings_fit_caps_and_preserve_prior_markers_and_object_rvas
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

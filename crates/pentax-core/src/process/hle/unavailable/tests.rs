@@ -272,47 +272,89 @@ mod native {
         let kernel = build_kernel_provider(limits.max_kernel_provider_bytes).unwrap();
         let libc = build_hle_providers(HleProfile::KytyObservedLibcInternalV1, &limits.startup.hle)
             .unwrap();
+        let kernel_bias = base + 0x2_0000;
+        // Place the next provider beyond the complete current kernel mapping,
+        // including its separately protected, page-rounded metadata segment.
+        let libc_bias = (kernel_bias + kernel.mapped_bytes()).div_ceil(0x1_0000) * 0x1_0000;
+        let libc_extent = open_executable(libc.image())
+            .unwrap()
+            .runtime_plan()
+            .unwrap()
+            .segments
+            .iter()
+            .map(|segment| segment.vaddr + segment.mem_size)
+            .max()
+            .unwrap();
+        let thread_pointer =
+            (libc_bias + libc_extent).div_ceil(0x1_0000) * 0x1_0000 + 2 * PAGE_SIZE;
+        assert!(thread_pointer + PAGE_SIZE <= base + 0x10_0000);
         let inputs = [ModuleInput::new(open_executable(&bytes).unwrap(), base)];
         let mut real = inputs.to_vec();
         real.push(ModuleInput::new(
             open_executable(kernel.image()).unwrap(),
-            base + 0x2_0000,
+            kernel_bias,
         ));
         real.push(ModuleInput::new(
             open_executable(libc.image()).unwrap(),
-            base + 0x4_0000,
+            libc_bias,
         ));
         let missing = plan_missing_functions(&real, &limits.startup.hle.linking, 16).unwrap();
         let unavailable = build_unavailable_provider(missing, &Default::default()).unwrap();
+        let unavailable_bias = base + 0x1_0000;
+        assert!(unavailable_bias + unavailable.mapped_bytes() <= kernel_bias);
         let plan = plan_kernel_startup_with_unavailable(
             &inputs,
             &kernel,
             ProviderPlacement {
-                load_bias: base + 0x2_0000,
+                load_bias: kernel_bias,
             },
             &libc,
             ProviderPlacement {
-                load_bias: base + 0x4_0000,
+                load_bias: libc_bias,
             },
             UnavailableProviderPlacement {
                 provider: &unavailable,
                 placement: ProviderPlacement {
-                    load_bias: base + 0x1_0000,
+                    load_bias: unavailable_bias,
                 },
             },
             &limits,
         )
         .unwrap();
         assert_eq!(plan.unavailable_functions(), 1);
+        // These original images contain no TLS payload/header/storage. Admit
+        // exactly their actual disjoint load pages, rather than an old fixed
+        // provider layout plus unused headroom.
+        assert!(
+            plan.link_plan()
+                .modules()
+                .iter()
+                .all(|module| module.runtime_plan().tls.is_none())
+        );
+        assert_eq!(limits.startup.static_tls.reserved_static_bytes, 0);
+        assert_eq!(
+            limits.startup.static_tls.thread_control,
+            crate::process::tls::ThreadControlBlockPolicy::None
+        );
+        let mapped_bytes = plan
+            .link_plan()
+            .modules()
+            .iter()
+            .flat_map(|module| &module.runtime_plan().segments)
+            .map(|segment| {
+                ((segment.vaddr + segment.mem_size).div_ceil(PAGE_SIZE) * PAGE_SIZE)
+                    - (segment.vaddr / PAGE_SIZE * PAGE_SIZE)
+            })
+            .sum();
         let mut session = prepare_native_kernel_startup_in(
             &plan,
             &StaticTlsStorage {
-                thread_pointers: &[base + 0x6_8000],
+                thread_pointers: &[thread_pointer],
             },
             &NativeLoadLimits {
                 session: SessionLoadLimits {
-                    resident_limit: 16 * PAGE_SIZE,
-                    mapped_limit: 16 * PAGE_SIZE,
+                    resident_limit: mapped_bytes,
+                    mapped_limit: mapped_bytes,
                 },
                 reserved_limit: 0x10_0000,
             },
@@ -324,7 +366,9 @@ mod native {
             owner,
         )
         .unwrap();
-        test(&mut session, &unavailable, base + 0x1_0000);
+        assert_eq!(session.memory().mapped_bytes(), mapped_bytes);
+        assert_eq!(session.memory().committed_bytes(), mapped_bytes);
+        test(&mut session, &unavailable, unavailable_bias);
         assert_eq!(bytes, original_input(1));
     }
     fn request(

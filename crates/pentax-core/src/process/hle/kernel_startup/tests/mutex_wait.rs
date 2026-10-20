@@ -111,9 +111,9 @@ fn session<'plan, 'image>(
     owner: NativeAddressSpace,
     pointers: &[u64],
 ) -> PreparedNativeKernelStartup<'plan, 'image> {
-    let mut native_limits = load_limits();
-    native_limits.session.resident_limit = 20 * PAGE_SIZE;
-    native_limits.session.mapped_limit = 20 * PAGE_SIZE;
+    let mut native_limits = load_limits(plan);
+    native_limits.session.resident_limit = initial_mapped_bytes(plan, 2) + 6 * PAGE_SIZE;
+    native_limits.session.mapped_limit = native_limits.session.resident_limit;
     prepare_in(
         plan,
         &StaticTlsStorage {

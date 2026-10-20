@@ -1419,3 +1419,27 @@ confirmed full-prefix `libSceAcm/libSceAcm`, both module1.1/library1; mixed scop
 and all other ACM roles remain absent. Previous service sites and data RVAs stay
 fixed. Context destruction and real batch/DSP execution are separate work; the
 upstream batch ID/offset/logging placeholders do not establish audio processing.
+
+## Cooperative event-flag waits
+
+The wait/cancel/delete contract follows public KytyPS5/KytyPS5 revision
+`f186b35706ddbc3faf5513f326e2335d224802f7`,
+[eventFlag.cpp](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/kernel/eventFlag.cpp)
+(`594e7e148bfa6294d246053ef37cda4ac09105a3`) and
+[eventFlag.h](https://github.com/KytyPS5/KytyPS5/blob/f186b35706ddbc3faf5513f326e2335d224802f7/src/kernel/eventFlag.h)
+(`99f789beb8eddc8451e1b6450b7b81441c219364`), independently decoded and Git-blob
+verified. The existing kernel GPL version2 terms and original Kyty MIT notice
+apply. Source predicates, Single-before-predicate EPERM, clear modes, full-pattern
+outputs, remaining microseconds and cancel/delete error domains are retained.
+
+Original Rust continuation records replace host mutex/condvar waits and drain
+spins. Readiness is observational; exact thread/token/source checks precede
+completion. Guest outputs commit atomically before clear/unlink, so failures
+retain the exact waiter. Cancel/Delete retain an immutable original cohort and
+return only after its output transactions complete. The bounded cooperative
+profile serializes later native mutations/new waits behind that drain and keeps
+captured timeout/deadline identity. Poll remains immediate and explicitly refuses
+the source's multi-waiter Poll/drain race. FIFO/priority order is not claimed:
+the source constructor ignores that argument. Actual parked CPU context storage,
+including YMM state, uses the existing scheduler path; no synthetic signal,
+host busy loop or fabricated syscall return is introduced.

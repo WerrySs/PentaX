@@ -37,8 +37,7 @@ fn link<'a>(
 
 #[test]
 fn font_all_exact_bindings_fit_existing_caps_and_preserve_old_sites_and_objects() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1283);
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -98,16 +97,12 @@ fn font_all_exact_bindings_fit_existing_caps_and_preserve_old_sites_and_objects(
         (0x5058_4f9f, 0x25f0)
     );
     assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
-    assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(
@@ -168,7 +163,7 @@ fn font_all_exact_bindings_fit_existing_caps_and_preserve_old_sites_and_objects(
 
 #[test]
 fn font_rejects_unobserved_renderer_nids_mixed_scopes_versions_and_object_types() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     for index in [1090, 1092] {
         let row = &Service::registrations()[index..index + 1];
         assert_eq!(row[0].service, Service::FontRenderCharGlyphImageHorizontal);

@@ -93,14 +93,33 @@ to the commitment cap until their last piece is freed. Pools and GPU/cache modes
 remain unavailable; the unchecked source wrapper's unowned no-op remains an
 explicit kernel admission stop.
 
-The generated kernel provider has two bounded read-only executable source/table
-pages and one separate writable, non-executable object page. Its 32 KiB image budget
-and limit of 512 registrations bound further catalog growth. Source execute rights
-remain logical; physical guest backing stays NX. All source pages are
-checked for immutable RX permissions at preparation and service admission, with
-cumulative work charged before dispatch. Namespace/version checks, exact marker
-bytes and source lineage remain required. Initialized file bytes and zero-filled
-memory extents stay distinct; the program-name buffer uses the existing RW BSS.
+The generated kernel provider has exactly three load segments. The established
+four-page RX extent contains only the ELF header and initialized service markers;
+every marker RVA and service ID is retained. The fixed RW/NX object page starts
+at RVA `0x10000`, with the guard at `0x10000`, program-name pointer at `0x10008`
+and its BSS buffer at `0x10010`. A separate R--/NX segment starts at `0x14000`
+and holds the program headers, dynamic descriptors, names, symbols and relocation
+record. Moving the program-header table also avoids overwriting the first marker
+at `0x100` when a fourth ELF program header is needed.
+
+Metadata uses its actual initialized byte count and page-rounded mapped extent,
+with an independent ceiling of eight 16 KiB pages. Checked layout arithmetic
+accommodates the declared 2,048-registration limit, all admitted namespaces and
+three-digit selectors without moving objects or introducing another provider.
+The complete file is capped at 147,728 bytes and the mapped extent at `0x34000`;
+ordinary source, mapping, resident and work budgets still charge actual admitted
+sizes. Provider placement follows the actual mapped extent. Larger images,
+catalogues, names and arithmetic failures refuse before image allocation.
+
+Source execute rights remain logical; physical guest backing stays NX. Exact
+factory identity and all three segment permissions are validated during planning
+and preparation. Initialized metadata bytes are compared on the actual native
+owner at preparation. RX and metadata permission checks run again before service
+admission, with work charged for actual pages. Metadata is never callable source.
+Namespace/version checks, exact marker bytes and source lineage remain required.
+Initialized file bytes and zero-filled memory extents stay distinct; the
+program-name buffer uses the existing RW BSS. Additional capacity grants no new
+service ABI, alias, firmware behavior or implementation success.
 
 The fixed kernel provider also exports the source-observed stack-check guard and
 program-name pointer as genuine GLOBAL/PROTECTED OBJECT symbols. Their separate

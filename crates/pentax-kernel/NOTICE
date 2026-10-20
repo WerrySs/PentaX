@@ -330,7 +330,15 @@ Ported sources:
     immediate/zero-timeout and queued FIFO/priority waits, signal-time count
     reservation, remaining deadlines and cancel/delete completion semantics
   src/kernel/eventFlag.cpp and eventFlag.h: attributes, AND/OR waits, result
-    pattern ordering, set, mask-keep clear, consume modes and cancellation
+    pattern ordering, set, mask-keep clear, consume modes and cancellation;
+    cooperative continuations additionally follow public KytyPS5/KytyPS5
+    f186b35706ddbc3faf5513f326e2335d224802f7, eventFlag.cpp Git blob
+    594e7e148bfa6294d246053ef37cda4ac09105a3 and eventFlag.h Git blob
+    99f789beb8eddc8451e1b6450b7b81441c219364. PentaX replaces host condvar
+    waits/spins with bounded owner/thread tickets and exact atomic outputs.
+    Cancel/Delete drain their original cohort; native operations serialize
+    behind the drain. Poll/drain races remain explicitly unsupported. Source
+    ignored FIFO/priority ordering is not presented as implemented ordering.
   src/kernel/pthread.cpp and pthread.h: guest thread prefix, clock IDs,
     thread attribute defaults, stack/affinity/scheduling metadata, getters,
     setters, per-thread affinity snapshots/targeted queries, owned lifetime

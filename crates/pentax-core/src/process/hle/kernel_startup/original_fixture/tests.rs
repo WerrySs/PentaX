@@ -29,12 +29,16 @@ fn original_source_prepares_exact_bindings_tls_and_stack_then_decodes_without_ex
         let base = layout.entry - ENTRY as u64;
         assert_eq!(session.memory().module_count(), 3);
         assert_eq!(session.memory().applied_relocations(), 8);
-        // Three original image pages, two libc pages, two TLS blocks,
-        // two thread headers and the entry stack, plus the kernel extent.
-        assert_eq!(
-            session.memory().mapped_bytes(),
-            10 * PAGE_SIZE + KERNEL_MAPPED_BYTES
-        );
+        let image_bytes: u64 = session
+            .plan()
+            .link_plan()
+            .modules()
+            .iter()
+            .map(|module| image_mapped_bytes(module.source_bytes()).unwrap())
+            .sum();
+        // Actual declared images + two static TLS pages, two thread headers
+        // and the entry stack. The later dynamic prefix is not mapped yet.
+        assert_eq!(session.memory().mapped_bytes(), image_bytes + 5 * PAGE_SIZE);
         assert_eq!(session.plan().kernel_bindings(), 3);
         assert_eq!(session.plan().hle_startup_plan().provider_bindings(), 1);
         assert_eq!(session.plan().hle_startup_plan().tls_bindings(), 3);

@@ -6,8 +6,8 @@
 
 use super::kernel_adapter::KernelMemory;
 use super::kernel_provider::{
-    CODE_MAPPED_BYTES, GeneratedKernelProvider, KERNEL_MAPPED_BYTES, KernelMarker,
-    KernelProviderError, PROGRAM_NAME_BUFFER_RVA, PROGRAM_NAME_OBJECT_RVA,
+    CODE_MAPPED_BYTES, GeneratedKernelProvider, KernelMarker, KernelProviderError, MAX_IMAGE_BYTES,
+    METADATA_RVA, PROGRAM_NAME_BUFFER_RVA, PROGRAM_NAME_OBJECT_RVA,
 };
 use super::{GeneratedProviders, HleError, HleStartupLimits, HleStartupPlan, ProviderPlacement};
 use crate::memory::native::{NativeGuestMemory, NativeLoadLimits};
@@ -82,7 +82,7 @@ impl Default for KernelStartupLimits {
             kernel: Limits::default(),
             system: pentax_kernel::SystemConfig::default(),
             user: pentax_kernel::UserConfig::default(),
-            max_kernel_provider_bytes: CODE_MAPPED_BYTES,
+            max_kernel_provider_bytes: MAX_IMAGE_BYTES,
             max_provider_work: 16 * 1024 * 1024,
         }
     }
@@ -385,7 +385,7 @@ fn plan_kernel_startup_inner<'image>(
     let bias = kernel_placement.load_bias;
     if !bias.is_multiple_of(PAGE_SIZE)
         || bias
-            .checked_add(KERNEL_MAPPED_BYTES)
+            .checked_add(kernel.mapped_bytes())
             .is_none_or(|v| v > ADDRESS_LIMIT)
     {
         return Err(KernelStartupError::Hle(HleError::InvalidPlacement {
@@ -440,7 +440,7 @@ fn plan_kernel_startup_inner<'image>(
     let runtime = module.runtime_plan();
     require(
         module.load_bias() == bias
-            && runtime.segments.len() == 2
+            && runtime.segments.len() == 3
             && runtime.tls.is_none()
             && runtime.relro.is_empty(),
         "kernel module mapping",
@@ -460,6 +460,14 @@ fn plan_kernel_startup_inner<'image>(
             && data.mem_size == PAGE_SIZE
             && data.flags.raw() == 6,
         "kernel factory data identity",
+    )?;
+    let metadata = &runtime.segments[2];
+    require(
+        std::ptr::eq(metadata.file_bytes, kernel.metadata_bytes())
+            && metadata.vaddr == METADATA_RVA
+            && metadata.mem_size == kernel.metadata_mapped_bytes()
+            && metadata.flags.raw() == 4,
+        "kernel factory metadata identity",
     )?;
     let markers = kernel.markers();
     charge(
@@ -549,12 +557,36 @@ fn attest(
     let mut work = 0;
     charge(
         &mut work,
-        plan.registration_count() as u64 * 8 + 3 * (CODE_MAPPED_BYTES / PAGE_SIZE + 1),
+        plan.registration_count() as u64 * 8
+            + plan.factory.metadata_bytes().len() as u64
+            + 3 * (CODE_MAPPED_BYTES / PAGE_SIZE + 1)
+            + 4 * (plan.factory.metadata_mapped_bytes() / PAGE_SIZE),
         plan.limits.max_provider_work,
     )?;
     for marker in plan.factory.markers() {
         attest_marker(memory, plan, *marker)?;
     }
+    // Loader metadata is an immutable factory product, never executable code.
+    // Check its initialized bytes once on the actual newly prepared owner.
+    let mut actual = [0; 128];
+    for (index, expected) in plan
+        .factory
+        .metadata_bytes()
+        .chunks(actual.len())
+        .enumerate()
+    {
+        memory
+            .read(
+                plan.bias + METADATA_RVA + (index * actual.len()) as u64,
+                &mut actual[..expected.len()],
+            )
+            .map_err(|_| KernelStartupError::InvalidProvider("kernel metadata read permission"))?;
+        require(
+            &actual[..expected.len()] == expected,
+            "kernel live metadata bytes",
+        )?;
+    }
+    attest_metadata_permissions(memory, plan)?;
     for page in (plan.bias..plan.bias + CODE_MAPPED_BYTES).step_by(PAGE_SIZE as usize) {
         require(
             memory.read(page, &mut [0]).is_ok()
@@ -584,6 +616,29 @@ fn attest(
     }
     if let Some(binding) = &plan.json {
         json_runtime::attest_all(memory, binding, &mut work, plan.limits.max_provider_work)?;
+    }
+    Ok(())
+}
+
+fn attest_metadata_permissions(
+    memory: &PausedNativeMemory<'_>,
+    plan: &KernelStartupPlan<'_>,
+) -> Result<(), KernelStartupError> {
+    for offset in (0..plan.factory.metadata_mapped_bytes()).step_by(PAGE_SIZE as usize) {
+        let page = plan.bias + METADATA_RVA + offset;
+        require(
+            memory.preflight_read(page, PAGE_SIZE).is_ok()
+                && memory.preflight_non_executable(page, PAGE_SIZE).is_ok()
+                && matches!(
+                    memory.preflight_write(page, PAGE_SIZE),
+                    Err(pentax_platform::native_memory::NativeMemoryError::PermissionDenied(_))
+                )
+                && matches!(
+                    memory.preflight_gpu_write(page, PAGE_SIZE),
+                    Err(pentax_platform::native_memory::NativeMemoryError::PermissionDenied(_))
+                ),
+            "kernel metadata must remain immutable and NX",
+        )?;
     }
     Ok(())
 }
@@ -788,7 +843,10 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         self.stop_attempts = next;
         charge(
             &mut self.provider_work,
-            self.plan.registration_count() as u64 + 8 + CODE_MAPPED_BYTES / PAGE_SIZE * 3,
+            self.plan.registration_count() as u64
+                + 8
+                + CODE_MAPPED_BYTES / PAGE_SIZE * 3
+                + self.plan.factory.metadata_mapped_bytes() / PAGE_SIZE * 4,
             self.plan.limits.max_provider_work,
         )?;
         let marker = self
@@ -830,6 +888,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 "kernel provider lost immutable permission",
             )?;
         }
+        attest_metadata_permissions(&paused, self.plan)?;
         self.last_admitted_kernel_service = Some(marker.registration.source_name);
         let mut memory = KernelMemory {
             paused: &mut paused,
@@ -905,6 +964,11 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                     | pentax_kernel::Service::PosixCondWait
                     | pentax_kernel::Service::WaitSema
                     | pentax_kernel::Service::WaitEqueue
+                    | pentax_kernel::Service::WaitEventFlag
+                    | pentax_kernel::Service::SetEventFlag
+                    | pentax_kernel::Service::ClearEventFlag
+                    | pentax_kernel::Service::CancelEventFlag
+                    | pentax_kernel::Service::DeleteEventFlag
                     | pentax_kernel::Service::MutexLock
                     | pentax_kernel::Service::PosixMutexLock
                     | pentax_kernel::Service::MutexTimedLock

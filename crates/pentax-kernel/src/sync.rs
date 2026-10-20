@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2021 InoriRus
 // Modified 2026 for PentaX: owned bounded semaphore and event-flag state, tagged
-// opaque handles, transactional outputs and cooperative semaphore waiters.
+// opaque handles, transactional outputs and cooperative synchronization waiters.
 // See NOTICE and Kyty-MIT.txt.
 
 //! Port of pinned `kernel/semaphore.cpp` and `kernel/eventFlag.cpp`.
 //!
 //! Kernel semaphores retain bounded cooperative waiters for the runtime. Raw
-//! calls without continuation capture still refuse blocking waits. Event-flag
-//! blocking remains unsupported. Each state mutation happens only after
+//! calls without continuation capture still refuse blocking waits. Each state
+//! mutation happens only after
 //! its guest output transaction committed, so a fault or budget refusal never
 //! consumes counts or bits and never publishes a handle.
 //!
@@ -20,6 +20,8 @@ use crate::catalog::Service;
 use crate::{CallArgs, Errno, Failure, GuestAccess, GuestWrite};
 mod semaphore_wait;
 pub use semaphore_wait::{SemaphoreWait, SemaphoreWaitAction};
+mod event_flag_wait;
+pub use event_flag_wait::{EventFlagWait, EventFlagWaitAction};
 
 const TAG_MASK: u64 = 0xffff_0000_0000_0000;
 const SEMAPHORE_TAG: u64 = 0x5345_0000_0000_0000;
@@ -45,11 +47,12 @@ struct EventFlag {
     id: u64,
     #[allow(dead_code)] // Retained resource identity for diagnostics.
     name: String,
-    #[allow(dead_code)] // Source single-waiter policy; no waiter can be queued.
     single_waiter: bool,
     #[allow(dead_code)] // Source accepts but ignores waiter order.
     fifo: bool,
     bits: u64,
+    // Native Cancel/Delete must drain their original cohort before returning.
+    draining: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +74,8 @@ pub(crate) struct SyncState {
     next_serial: u64,
     waiters: Vec<semaphore_wait::Waiter>,
     max_waiters: usize,
+    flag_waiters: Vec<event_flag_wait::Waiter>,
+    flag_operations: Vec<event_flag_wait::Operation>,
 }
 
 /// A 32-bit SysV integer argument occupies the low half of its register.
@@ -118,12 +123,22 @@ impl SyncState {
         waiters
             .try_reserve_exact(limits.max_thread_contexts)
             .map_err(|_| Failure::Allocation)?;
+        let mut flag_waiters = Vec::new();
+        flag_waiters
+            .try_reserve_exact(limits.max_thread_contexts)
+            .map_err(|_| Failure::Allocation)?;
+        let mut flag_operations = Vec::new();
+        flag_operations
+            .try_reserve_exact(limits.max_thread_contexts)
+            .map_err(|_| Failure::Allocation)?;
         Ok(Self {
             semaphores,
             flags,
             next_serial: 1,
             waiters,
             max_waiters: limits.max_thread_contexts,
+            flag_waiters,
+            flag_operations,
         })
     }
 
@@ -147,12 +162,14 @@ impl SyncState {
             Service::PollEventFlag => self.wait_flag(args, guest, budget, true),
             Service::SetEventFlag => {
                 let index = self.flag_index(args.0[0], budget)?;
+                self.require_flag_live(index)?;
                 self.flags[index].bits |= args.0[1];
                 Ok(0)
             }
             // Source `Clear` keeps only the given mask: bits &= pattern.
             Service::ClearEventFlag => {
                 let index = self.flag_index(args.0[0], budget)?;
+                self.require_flag_live(index)?;
                 self.flags[index].bits &= args.0[1];
                 Ok(0)
             }
@@ -389,6 +406,7 @@ impl SyncState {
             single_waiter,
             fifo,
             bits: init,
+            draining: None,
         });
         self.next_serial += 1;
         budget.added_handle();
@@ -397,6 +415,11 @@ impl SyncState {
 
     fn delete_flag(&mut self, args: CallArgs, budget: &mut Budget) -> Result<u64, Failure> {
         let index = self.flag_index(args.0[0], budget)?;
+        self.require_flag_live(index)?;
+        budget.work(self.flag_waiters.len() as u64 + 1)?;
+        if self.flag_waiting_count(args.0[0]) != 0 {
+            return Err(Failure::Unsupported("blocking event flag deletion"));
+        }
         self.flags.swap_remove(index);
         budget.removed_handle();
         Ok(0)
@@ -411,69 +434,7 @@ impl SyncState {
         budget: &mut Budget,
         poll: bool,
     ) -> Result<u64, Failure> {
-        let index = self.flag_index(args.0[0], budget)?;
-        let pattern = args.0[1];
-        if pattern == 0 {
-            return Err(Errno::Invalid.into());
-        }
-        let (wait, clear) = decode_wait_mode(args.0[2] as u32)?;
-        let result = args.0[3];
-        let timeout = if poll { 0 } else { args.0[4] };
-        let micros = if timeout == 0 {
-            None
-        } else {
-            Some(budget.u32(&*guest, timeout)?)
-        };
-
-        let bits = self.flags[index].bits;
-        let satisfied = match wait {
-            WaitMode::And => bits & pattern == pattern,
-            WaitMode::Or => bits & pattern != 0,
-        };
-        if !satisfied && !poll && micros != Some(0) {
-            return Err(Failure::Unsupported("blocking event flag wait"));
-        }
-
-        // Unchanged on success; zero on timeout, which equals the input there.
-        let micros_bytes = micros.unwrap_or(0).to_le_bytes();
-        let bits_bytes = bits.to_le_bytes();
-        let mut writes = [GuestWrite {
-            address: 0,
-            bytes: &[],
-        }; 2];
-        let mut used = 0;
-        if result != 0 {
-            writes[used] = GuestWrite {
-                address: result,
-                bytes: &bits_bytes,
-            };
-            used += 1;
-        }
-        if timeout != 0 {
-            writes[used] = GuestWrite {
-                address: timeout,
-                bytes: &micros_bytes,
-            };
-            used += 1;
-        }
-        if used != 0 {
-            budget.write(guest, &writes[..used])?;
-        }
-
-        if !satisfied {
-            return Err(Failure::Errno(if poll {
-                Errno::Busy
-            } else {
-                Errno::TimedOut
-            }));
-        }
-        let entry = &mut self.flags[index];
-        match clear {
-            ClearMode::None => {}
-            ClearMode::All => entry.bits = 0,
-            ClearMode::Bits => entry.bits &= !pattern,
-        }
-        Ok(0)
+        self.direct_event_flag_wait(args, guest, budget, poll)
     }
 
     fn cancel_flag<G: GuestAccess>(
@@ -482,18 +443,6 @@ impl SyncState {
         guest: &mut G,
         budget: &mut Budget,
     ) -> Result<u64, Failure> {
-        let index = self.flag_index(args.0[0], budget)?;
-        let (pattern, threads) = (args.0[1], args.0[2]);
-        if threads != 0 {
-            budget.write(
-                guest,
-                &[GuestWrite {
-                    address: threads,
-                    bytes: &0_i32.to_le_bytes(),
-                }],
-            )?;
-        }
-        self.flags[index].bits = pattern;
-        Ok(0)
+        self.direct_event_flag_cancel(args, guest, budget)
     }
 }

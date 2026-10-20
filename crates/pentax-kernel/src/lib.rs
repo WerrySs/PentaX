@@ -84,7 +84,7 @@ pub use pthread_mutex::{MutexWait, MutexWaitAction};
 pub use pthread_once::{AdmittedPthreadOnce, PthreadOnceAction};
 pub use runtime_data::RuntimeDataOutputs;
 pub use save::SaveStorage;
-pub use sync::{SemaphoreWait, SemaphoreWaitAction};
+pub use sync::{EventFlagWait, EventFlagWaitAction, SemaphoreWait, SemaphoreWaitAction};
 pub use thread_exit::{AdmittedThreadExitCallback, ThreadExitAction};
 pub use thread_priority::ThreadPriorityClass;
 pub use time::ProcessClock;

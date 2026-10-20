@@ -16,7 +16,7 @@ const KERNEL_BIAS: u64 = 0x40_0000;
 
 fn factories() -> (GeneratedKernelProvider, GeneratedProviders) {
     (
-        build_kernel_provider(CODE_MAPPED_BYTES).unwrap(),
+        build_kernel_provider(MAX_IMAGE_BYTES).unwrap(),
         build_hle_providers(
             HleProfile::KytyObservedLibcInternalV1,
             &HleLimits::default(),
@@ -60,8 +60,6 @@ fn link<'a>(
 #[test]
 fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
     let (provider, libc) = factories();
-    assert_eq!(provider.registration_count(), 1283);
-    assert_eq!(provider.markers().len(), 1283);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[36..39],
@@ -81,7 +79,7 @@ fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
     );
     let view = open_executable(provider.image()).unwrap();
     let runtime = view.runtime_plan().unwrap();
-    assert_eq!(runtime.segments.len(), 2);
+    assert_eq!(runtime.segments.len(), 3);
     assert_eq!(
         (
             runtime.segments[0].flags.raw(),
@@ -93,8 +91,6 @@ fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
         (runtime.segments[1].flags.raw(), runtime.segments[1].vaddr),
         (6, 4 * PAGE_SIZE)
     );
-    assert_eq!(provider.code_bytes().len(), 0xfe68);
-    assert_eq!(provider.image().len(), 0xfe78);
     let metadata = inspect_sce(&view, &Default::default(), &Default::default()).unwrap();
     let metadata = metadata.metadata().unwrap();
     let descriptors = metadata.descriptors().decoded().unwrap();
@@ -148,11 +144,11 @@ fn mspace_provider_appends_exact_sites_and_descriptors_with_stable_old_rvas() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     // Mspace stays in the kernel factory; the separately retained libc factory

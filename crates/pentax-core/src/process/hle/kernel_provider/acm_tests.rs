@@ -6,26 +6,14 @@ use super::*;
 #[test]
 fn acm_create_qualified_bindings_append_without_moving_old_sites_or_data() {
     let provider = factory();
-    assert_eq!(
-        (
-            provider.registration_count(),
-            MODULES.len(),
-            LIBRARIES.len()
-        ),
-        (1283, 66, 67)
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
     assert_eq!((MAX_REGISTRATIONS, CODE_MAPPED_BYTES), (2048, 0x10000));
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(

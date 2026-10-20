@@ -5,7 +5,6 @@
 //! startup. One explicitly selected preload can use observed initialization;
 //! automatic discovery, process parameters and module exit remain work.
 
-use super::kernel_provider::KERNEL_MAPPED_BYTES;
 use super::*;
 use crate::memory::PAGE_SIZE;
 use crate::memory::native::NativeLoadLimits;
@@ -371,12 +370,12 @@ pub fn with_native_image_session_with_roots<T, E>(
         inputs.push(ModuleInput::new(view, bias));
     }
     let kernel_bias = cursor;
-    let libc_bias = round(sum(kernel_bias, KERNEL_MAPPED_BYTES)?, GRANULE)?;
+    let kernel = build_kernel_provider(limits.startup.max_kernel_provider_bytes)
+        .map_err(|e| NativeImageError::Preparation(KernelStartupError::Provider(e)))?;
+    let libc_bias = round(sum(kernel_bias, kernel.mapped_bytes())?, GRANULE)?;
     let graphics_bias = sum(libc_bias, GRANULE)?;
     let json_bias = sum(graphics_bias, GRANULE)?;
     let unavailable_bias = sum(json_bias, GRANULE)?;
-    let kernel = build_kernel_provider(limits.startup.max_kernel_provider_bytes)
-        .map_err(|e| NativeImageError::Preparation(KernelStartupError::Provider(e)))?;
     let graphics = build_graphics_provider(PAGE_SIZE)
         .map_err(|e| NativeImageError::Preparation(KernelStartupError::Provider(e)))?;
     let json = build_json_provider(

@@ -112,13 +112,32 @@ fn loaded_lookup_refuses_live_writable_code_and_cumulative_exhaustion_without_ze
             .write(scratch + 128, &73_u64.to_le_bytes())
             .unwrap();
         let maximum = session.plan().limits.max_provider_work;
-        session.provider_work = maximum
-            - (session.plan().registration_count() as u64 + 8 + CODE_MAPPED_BYTES / PAGE_SIZE * 3);
-        assert!(matches!(
+        // Admit this exact kernel stop, including its independent RO/NX
+        // metadata-page checks, but leave no work for the export lookup.
+        // Exhausting stop admission instead would test a different boundary.
+        let stop_work = session.plan().registration_count() as u64
+            + 8
+            + CODE_MAPPED_BYTES / PAGE_SIZE * 3
+            + session.plan().factory.metadata_mapped_bytes() / PAGE_SIZE * 4;
+        session.provider_work = maximum.checked_sub(stop_work).unwrap();
+        let kernel_attempts = session.kernel_usage().attempts;
+        assert_eq!(
             lookup(session, scratch, 2, b"sceKernelGetProcParam\0"),
-            Err(KernelStartupError::Kernel(Failure::Limit(_)))
-        ));
+            Err(KernelStartupError::Kernel(Failure::Limit(
+                "module lookup work"
+            )))
+        );
         assert_eq!(word(session, scratch + 128), 73);
         assert_eq!(session.provider_work, maximum);
+        assert_eq!(session.kernel_usage().attempts, kernel_attempts + 1);
+        // The exhausted cumulative budget now rejects the following stop
+        // before another kernel attempt, without clearing the same output.
+        assert_eq!(
+            lookup(session, scratch, 2, b"sceKernelGetProcParam\0"),
+            Err(KernelStartupError::Budget("provider work"))
+        );
+        assert_eq!(session.kernel_usage().attempts, kernel_attempts + 1);
+        assert_eq!(session.provider_work, maximum);
+        assert_eq!(word(session, scratch + 128), 73);
     });
 }

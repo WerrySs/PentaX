@@ -39,8 +39,7 @@ fn link<'a>(
 
 #[test]
 fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1283);
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!((MODULES.len(), LIBRARIES.len()), (66, 67));
     assert_eq!(
         &MODULES[41..43],
@@ -77,18 +76,14 @@ fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry(
     assert_eq!(provider.markers()[976].registration.arguments, 7);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
-    );
-    assert!(provider.image().len() as u64 <= CODE_MAPPED_BYTES);
+    assert!(provider.image().len() as u64 <= MAX_IMAGE_BYTES);
     for (namespace, start, end) in [
         (b"NpTrophy2".as_slice(), 969, 984),
         (b"libSceNpTrophy2".as_slice(), 984, 989),
@@ -124,7 +119,7 @@ fn trophy2_all_twenty_qualified_bindings_preserve_prior_sites_and_data_geometry(
 
 #[test]
 fn trophy2_bindings_refuse_unobserved_or_mixed_scopes_versions_and_object_types() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     let create = &Service::registrations()[969..970];
     for (module, library) in [
         (b"NpTrophy2".as_slice(), b"libSceNpTrophy2".as_slice()),

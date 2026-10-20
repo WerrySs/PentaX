@@ -4,8 +4,8 @@
 
 use super::*;
 use pentax_kernel::{
-    ConditionWait, ConditionWaitAction, EventQueueWait, EventQueueWaitAction, MutexWait,
-    MutexWaitAction, SemaphoreWait, SemaphoreWaitAction, Service,
+    ConditionWait, ConditionWaitAction, EventFlagWait, EventFlagWaitAction, EventQueueWait,
+    EventQueueWaitAction, MutexWait, MutexWaitAction, SemaphoreWait, SemaphoreWaitAction, Service,
 };
 use pentax_platform::native_memory::NativeOwnerId;
 
@@ -22,6 +22,7 @@ enum Ticket {
     Condition(ConditionWait),
     Semaphore(SemaphoreWait),
     Mutex(MutexWait),
+    EventFlag(EventFlagWait),
 }
 impl fmt::Debug for PendingThreadWait {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -42,7 +43,24 @@ pub(super) fn begin(
         .thread_tls
         .ok_or(KernelStartupError::InvalidProvider("thread wait TLS"))?
         .thread_pointer;
-    let ticket = if service == Service::WaitEqueue {
+    let ticket = if matches!(
+        service,
+        Service::WaitEventFlag
+            | Service::SetEventFlag
+            | Service::ClearEventFlag
+            | Service::CancelEventFlag
+            | Service::DeleteEventFlag
+    ) {
+        match kernel
+            .begin_event_flag_operation(service, args, memory)
+            .map_err(KernelStartupError::Kernel)?
+        {
+            EventFlagWaitAction::Returned(value) => {
+                return Ok(NativeServiceAction::Returned(value));
+            }
+            EventFlagWaitAction::Waiting(ticket) => Ticket::EventFlag(ticket),
+        }
+    } else if service == Service::WaitEqueue {
         match kernel
             .begin_event_queue_wait(args, memory)
             .map_err(KernelStartupError::Kernel)?
@@ -112,6 +130,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Condition(ticket) => self.kernel.condition_wait_ready(ticket),
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
             Ticket::Mutex(ticket) => self.kernel.mutex_wait_ready(ticket),
+            Ticket::EventFlag(ticket) => self.kernel.event_flag_wait_ready(ticket),
         }
         .map_err(KernelStartupError::Kernel)
     }
@@ -136,6 +155,10 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Mutex(ticket) => self
                 .kernel
                 .mutex_wait_delay(ticket)
+                .map_err(KernelStartupError::Kernel),
+            Ticket::EventFlag(ticket) => self
+                .kernel
+                .event_flag_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
         }
     }
@@ -199,7 +222,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .complete_condition_wait(ticket)
                 .map(|ready| ready.then_some(0))
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Semaphore(_) | Ticket::EventQueue(_) => {
+            Ticket::Semaphore(_) | Ticket::EventQueue(_) | Ticket::EventFlag(_) => {
                 let (mut paused, instances) =
                     self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
                 let mut guest = KernelMemory {
@@ -218,6 +241,9 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     }
                     Ticket::EventQueue(ticket) => {
                         self.kernel.complete_event_queue_wait(ticket, &mut guest)
+                    }
+                    Ticket::EventFlag(ticket) => {
+                        self.kernel.complete_event_flag_wait(ticket, &mut guest)
                     }
                     _ => unreachable!(),
                 }

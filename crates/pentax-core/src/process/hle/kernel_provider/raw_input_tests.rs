@@ -36,8 +36,7 @@ fn link<'a>(
 
 #[test]
 fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
-    assert_eq!(provider.registration_count(), 1283);
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     assert_eq!(
         (MAX_REGISTRATIONS, CODE_MAPPED_BYTES),
         (2048, 4 * PAGE_SIZE)
@@ -54,10 +53,6 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
     assert_eq!(
         &LIBRARIES[54..57],
         &[("Mouse", 1), ("libSceMouse", 1), ("Keyboard", 1)]
-    );
-    assert_eq!(
-        (provider.code_bytes().len(), provider.image().len()),
-        (0xfe68, 0xfe78)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -96,11 +91,11 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
     );
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1284, 0x10000)
+        (Service::registrations().len() + 1, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1285, 0x10008)
+        (Service::registrations().len() + 2, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     assert_eq!(
@@ -139,7 +134,7 @@ fn raw_input_all_finite_bindings_preserve_old_sites_objects_and_caps() {
 
 #[test]
 fn raw_input_refuses_unobserved_aliases_mixed_axes_versions_and_nonfunction_types() {
-    let provider = build_kernel_provider(CODE_MAPPED_BYTES).unwrap();
+    let provider = build_kernel_provider(MAX_IMAGE_BYTES).unwrap();
     for (index, row) in Service::registrations()[1198..1208].iter().enumerate() {
         let (scope, prefix) = if index < 4 {
             (b"Mouse".as_slice(), b"libSceMouse".as_slice())

@@ -12,7 +12,6 @@ use super::{
 use crate::memory::PAGE_SIZE;
 use crate::memory::native::NativeLoadLimits;
 use crate::process::SessionLoadLimits;
-use crate::process::hle::kernel_provider::KERNEL_MAPPED_BYTES;
 use crate::process::hle::{
     HleError, HleProfile, ProviderPlacement, build_hle_providers, build_kernel_provider,
 };
@@ -30,10 +29,9 @@ use image::{EXIT_CALLBACK, OUTPUT, SYMBOL_OFFSET, TLS_RVA, original_image};
 
 const ARENA: u64 = 0x10_0000;
 const KERNEL: u64 = 0x2_0000;
-const LIBC: u64 = 0x4_0000;
+const LIBC: u64 = 0x5_0000;
 const TPS: [u64; 2] = [0x6_8000, 0x7_8000];
 const PREFIX: u64 = 0x8_0000;
-const RESIDENT_PAGES: u64 = 11 + KERNEL_MAPPED_BYTES / PAGE_SIZE;
 const STACK: u64 = 0xc_4000;
 const RETURN_MARKER: u64 = 0x7fff_ffff_f000;
 const EXPECTED: u64 = 42;
@@ -120,16 +118,39 @@ fn require<E>(condition: bool, reason: &'static str) -> Result<(), OriginalPrepa
     }
 }
 
-fn load_limits() -> NativeLoadLimits {
-    // Five other image pages + the exact kernel provider extent + two TLS,
-    // two thread-header, one stack and one dynamic prefix page, eagerly resident.
-    NativeLoadLimits {
+fn image_mapped_bytes(image: &[u8]) -> Result<u64, HleError> {
+    let view = open_executable(image).map_err(HleError::Load)?;
+    let runtime = view.runtime_plan().map_err(HleError::Load)?;
+    runtime.segments.iter().try_fold(0_u64, |total, segment| {
+        // All three original images have disjoint page-aligned load segments.
+        let end = segment
+            .vaddr
+            .checked_add(segment.mem_size)
+            .and_then(|value| value.checked_add(PAGE_SIZE - 1))
+            .ok_or(HleError::InvalidProvider("original image extent"))?
+            & !(PAGE_SIZE - 1);
+        total
+            .checked_add(end - (segment.vaddr & !(PAGE_SIZE - 1)))
+            .ok_or(HleError::InvalidProvider("original image byte sum"))
+    })
+}
+
+fn load_limits(images: [&[u8]; 3]) -> Result<NativeLoadLimits, HleError> {
+    // Actual image extents + two static TLS pages, two thread-header pages,
+    // one entry stack and one dynamic prefix page, all eagerly resident.
+    let mut bytes = 6 * PAGE_SIZE;
+    for image in images {
+        bytes = bytes
+            .checked_add(image_mapped_bytes(image)?)
+            .ok_or(HleError::InvalidProvider("original fixture byte sum"))?;
+    }
+    Ok(NativeLoadLimits {
         session: SessionLoadLimits {
-            resident_limit: RESIDENT_PAGES * PAGE_SIZE,
-            mapped_limit: RESIDENT_PAGES * PAGE_SIZE,
+            resident_limit: bytes,
+            mapped_limit: bytes,
         },
         reserved_limit: ARENA,
-    }
+    })
 }
 
 fn policy(base: u64) -> KernelStartupLimits {
@@ -237,7 +258,19 @@ pub fn run_original_prepared_fixture<E>(
         OriginalPreparedLayout,
     ) -> Result<u64, E>,
 ) -> Result<OriginalPreparedReport, OriginalPreparedError<E>> {
-    let caps = load_limits();
+    let defaults = KernelStartupLimits::default();
+    let kernel = build_kernel_provider(defaults.max_kernel_provider_bytes)
+        .map_err(|error| OriginalPreparedError::Startup(KernelStartupError::Provider(error)))?;
+    let libc = build_hle_providers(
+        HleProfile::KytyObservedLibcInternalV1,
+        &defaults.startup.hle,
+    )
+    .map_err(startup)?;
+    // Base-dependent instruction immediates do not change this original image's
+    // segment geometry; its actual payload is regenerated after reserving.
+    let geometry = original_image(0).map_err(startup)?;
+    let caps = load_limits([&geometry, kernel.image(), libc.image()]).map_err(startup)?;
+    drop(geometry);
     let owner = NativeAddressSpace::reserve_any(
         NativeMemoryLimits {
             mapped_bytes: caps.session.mapped_limit,
@@ -255,10 +288,6 @@ pub fn run_original_prepared_fixture<E>(
     // every original numeric address below is inside that complete owned range.
     let limits = policy(base);
     let bytes = original_image(base).map_err(startup)?;
-    let kernel = build_kernel_provider(limits.max_kernel_provider_bytes)
-        .map_err(|error| OriginalPreparedError::Startup(KernelStartupError::Provider(error)))?;
-    let libc = build_hle_providers(HleProfile::KytyObservedLibcInternalV1, &limits.startup.hle)
-        .map_err(startup)?;
     let input = [ModuleInput::new(
         open_executable(&bytes).map_err(|error| startup(HleError::Load(error)))?,
         base,
@@ -358,8 +387,8 @@ pub fn run_original_prepared_fixture<E>(
         "guest entry arguments, program name and root frame",
     )?;
     require(
-        session.memory().mapped_bytes() == RESIDENT_PAGES * PAGE_SIZE
-            && session.memory().committed_bytes() == RESIDENT_PAGES * PAGE_SIZE,
+        session.memory().mapped_bytes() == caps.session.mapped_limit
+            && session.memory().committed_bytes() == caps.session.resident_limit,
         "actual eager page counts",
     )?;
     require(

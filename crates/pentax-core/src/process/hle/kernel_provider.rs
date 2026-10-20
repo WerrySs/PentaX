@@ -15,12 +15,12 @@ use pentax_linker::{DT_SCE_EXPORT_LIB, DT_SCE_MODULE_INFO, NID_TOKEN_LEN, Select
 use std::fmt;
 
 const SERVICE_BASE: u32 = 0x5058_4b00;
-// Independent count ceiling; the fixed byte layout below may reject sooner.
-// Allocation and attestation always use the actual retained catalogue length.
+// Allocation and attestation use the actual retained catalogue length. The
+// separate metadata ceiling also accommodates this count with three-digit IDs.
 const MAX_REGISTRATIONS: usize = 2048;
 const STUB_START: usize = 0x100;
-// Each closed marker is exactly eight bytes. Contiguous aligned markers keep
-// reviewed exports/tables inside the bounded read-only source extent.
+// Each closed marker is exactly eight bytes. Their established RVAs never move
+// when the independently mapped, non-executable metadata grows.
 const STUB_STRIDE: usize = 8;
 const STUB_SIZE: usize = 8;
 // Pinned namespaces/spellings and the two explicit SSL lifecycle v2 bindings.
@@ -166,11 +166,21 @@ const LIBRARIES: [(&str, u16); 67] = [
 const _: () = assert!(MODULES.len() <= u16::MAX as usize && LIBRARIES.len() <= u16::MAX as usize);
 const DYNAMIC_ENTRIES: usize = 9 + MODULES.len() + LIBRARIES.len();
 const SYMBOL_SIZE: usize = 24;
-// Markers, names, symbols and descriptors must fit the same four-page RX
-// extent independently of the count ceiling. Oversized future catalogues
-// refuse before allocation; the independent RW/NX object page never moves.
+// Preserve all marker/object RVAs. Only ELF headers and markers occupy RX;
+// program headers, dynamic descriptors, names, symbols and relocations are R/NX.
 pub(super) const CODE_MAPPED_BYTES: u64 = 4 * PAGE_SIZE;
-pub(super) const KERNEL_MAPPED_BYTES: u64 = CODE_MAPPED_BYTES + PAGE_SIZE;
+pub(super) const METADATA_RVA: u64 = CODE_MAPPED_BYTES + PAGE_SIZE;
+const MAX_METADATA_BYTES: u64 = 8 * PAGE_SIZE;
+pub(super) const MAX_IMAGE_BYTES: u64 =
+    (STUB_START + MAX_REGISTRATIONS * STUB_STRIDE + 16) as u64 + MAX_METADATA_BYTES;
+const MAX_MAPPED_BYTES: u64 = METADATA_RVA + MAX_METADATA_BYTES;
+const PROGRAM_HEADERS: usize = 4;
+const PROGRAM_HEADER_SIZE: usize = 56;
+// All 133 admitted namespace strings may be distinct and 255 bytes long;
+// each qualified NID can use two three-digit selectors and a trailing NUL.
+const MAX_STRINGS_BYTES: usize =
+    1 + (MODULES.len() + LIBRARIES.len()) * 256 + (MAX_REGISTRATIONS + 2) * (NID_TOKEN_LEN + 9);
+const _: () = assert!(STUB_START + MAX_REGISTRATIONS * STUB_STRIDE <= CODE_MAPPED_BYTES as usize);
 pub(super) const STACK_GUARD_RVA: u64 = CODE_MAPPED_BYTES;
 // Observed libKernel.cpp initial value; this guest object is not a host canary.
 pub(super) const STACK_GUARD_INITIAL: u64 = 0xdead_beef_0000_0007;
@@ -208,6 +218,8 @@ pub struct GeneratedKernelProvider {
     markers: Vec<KernelMarker>,
     code_bytes: usize,
     data_offset: usize,
+    metadata_offset: usize,
+    metadata_mapped_bytes: u64,
     objects: [KernelObject; 2],
 }
 
@@ -238,7 +250,19 @@ impl GeneratedKernelProvider {
     }
 
     pub(super) fn data_bytes(&self) -> &[u8] {
-        &self.image[self.data_offset..]
+        &self.image[self.data_offset..self.metadata_offset]
+    }
+
+    pub(super) fn metadata_bytes(&self) -> &[u8] {
+        &self.image[self.metadata_offset..]
+    }
+
+    pub(super) const fn metadata_mapped_bytes(&self) -> u64 {
+        self.metadata_mapped_bytes
+    }
+
+    pub(super) const fn mapped_bytes(&self) -> u64 {
+        METADATA_RVA + self.metadata_mapped_bytes
     }
 
     pub(super) const fn objects(&self) -> &[KernelObject; 2] {
@@ -265,9 +289,9 @@ impl fmt::Display for KernelProviderError {
 
 impl std::error::Error for KernelProviderError {}
 
-/// Generate only the fixed, scoped catalogue. All dynamic tables and markers
-/// fit inside four logical RX guest source pages. The fixed kernel objects use
-/// a separate R-W/NX guest page, with no host pointer or execution permission.
+/// Generate only the fixed, scoped catalogue. Markers retain their four-page RX
+/// extent, kernel objects their fixed R-W/NX page, and all link metadata has a
+/// separate R--/NX extent whose actual page count is bounded independently.
 /// Provider bytes alone are never an
 /// execution capability or evidence of a resolved import.
 pub fn build_kernel_provider(
@@ -290,7 +314,6 @@ fn build_kernel_provider_with_base(
     if registrations.is_empty() || registrations.len() > MAX_REGISTRATIONS {
         return Err(KernelProviderError::Budget);
     }
-    let first = &registrations[0];
     let valid_name = |name: &str| {
         !name.is_empty()
             && name.len() <= 255
@@ -298,10 +321,9 @@ fn build_kernel_provider_with_base(
                 .bytes()
                 .all(|byte| byte.is_ascii_graphic() && byte != b'#')
     };
-    if !valid_name(first.module)
-        || !valid_name(first.library)
-        || first.module_version.0 > u8::MAX as u16
-        || first.module_version.1 > u8::MAX as u16
+    if MODULES.iter().any(|(name, (major, minor))| {
+        !valid_name(name) || *major > u8::MAX as u16 || *minor > u8::MAX as u16
+    }) || LIBRARIES.iter().any(|(name, _)| !valid_name(name))
     {
         return Err(KernelProviderError::InvalidCatalogue);
     }
@@ -328,8 +350,6 @@ fn build_kernel_provider_with_base(
 
     // Every size is bounded above by the fixed catalogue/name limits before
     // arithmetic or allocation; no guest-supplied length reaches this layout.
-    let dynamic_at = STUB_START + registrations.len() * STUB_STRIDE;
-    let strings_at = dynamic_at + DYNAMIC_ENTRIES * 16;
     let mut module_names = [0; MODULES.len()];
     let mut library_names = [0; LIBRARIES.len()];
     let mut first_symbol = 1;
@@ -355,22 +375,26 @@ fn build_kernel_provider_with_base(
     }
     let object_size = qualified_name(STACK_GUARD_NID, selector_base, selector_base).1;
     let strings_size = object_name + 2 * object_size;
-    let symbols_at = (strings_at + strings_size + 7) & !7;
-    let rela_at = symbols_at + (registrations.len() + 3) * SYMBOL_SIZE;
-    let code_bytes = rela_at + 24;
-    let data_offset = (code_bytes + 7) & !7;
-    // Only the guard and relocated name pointer have initialized data. The
-    // name buffer is already zero-filled by the RW segment's memory extent;
-    // keep it as BSS instead of serializing redundant zero bytes in the image.
-    let image_size = data_offset + 16;
-    if code_bytes as u64 > CODE_MAPPED_BYTES || image_size as u64 > maximum_image_bytes {
-        return Err(KernelProviderError::Budget);
-    }
+    let Layout {
+        code_bytes,
+        data_offset,
+        metadata_offset,
+        dynamic_at,
+        strings_at,
+        symbols_at,
+        rela_at,
+        image_size,
+        metadata_mapped_bytes,
+    } = Layout::new(registrations.len(), strings_size, maximum_image_bytes)?;
+    let metadata_rva = |offset: usize| METADATA_RVA + (offset - metadata_offset) as u64;
 
     let mut image = Vec::new();
     image
         .try_reserve_exact(image_size)
         .map_err(|_| KernelProviderError::Allocation)?;
+    if image.capacity() as u64 > maximum_image_bytes.min(MAX_IMAGE_BYTES) {
+        return Err(KernelProviderError::Budget);
+    }
     image.resize(image_size, 0);
     let mut markers = Vec::new();
     markers
@@ -389,36 +413,55 @@ fn build_kernel_provider_with_base(
     put(&mut image, 16, &3_u16.to_le_bytes());
     put(&mut image, 18, &62_u16.to_le_bytes());
     put(&mut image, 20, &1_u32.to_le_bytes());
-    put(&mut image, 32, &64_u64.to_le_bytes());
+    // Four program headers no longer fit before the immutable first marker at
+    // RVA 0x100. Place the complete table inside the R/NX metadata instead.
+    put(&mut image, 32, &(metadata_offset as u64).to_le_bytes());
     put(&mut image, 52, &64_u16.to_le_bytes());
     put(&mut image, 54, &56_u16.to_le_bytes());
-    put(&mut image, 56, &3_u16.to_le_bytes());
-    super::provider::program(
+    put(&mut image, 56, &(PROGRAM_HEADERS as u16).to_le_bytes());
+    program(
         &mut image,
+        metadata_offset,
         0,
         1,
         5,
         [0, 0, code_bytes as u64, CODE_MAPPED_BYTES, PAGE_SIZE],
     );
-    super::provider::program(
+    program(
         &mut image,
+        metadata_offset,
         1,
+        1,
+        6,
+        [data_offset as u64, STACK_GUARD_RVA, 16, PAGE_SIZE, 8],
+    );
+    program(
+        &mut image,
+        metadata_offset,
+        2,
+        1,
+        4,
+        [
+            metadata_offset as u64,
+            METADATA_RVA,
+            (image_size - metadata_offset) as u64,
+            metadata_mapped_bytes,
+            8,
+        ],
+    );
+    program(
+        &mut image,
+        metadata_offset,
+        3,
         2,
         4,
         [
             dynamic_at as u64,
-            dynamic_at as u64,
+            metadata_rva(dynamic_at),
             (DYNAMIC_ENTRIES * 16) as u64,
             (DYNAMIC_ENTRIES * 16) as u64,
             8,
         ],
-    );
-    super::provider::program(
-        &mut image,
-        2,
-        1,
-        6,
-        [data_offset as u64, STACK_GUARD_RVA, 16, PAGE_SIZE, 8],
     );
 
     for (index, (name, _)) in MODULES.iter().enumerate() {
@@ -497,9 +540,9 @@ fn build_kernel_provider_with_base(
     };
     let mut entries = [(0_i64, 0_u64); DYNAMIC_ENTRIES];
     entries[..5].copy_from_slice(&[
-        (5_i64, strings_at as u64),
+        (5_i64, metadata_rva(strings_at)),
         (10, strings_size as u64),
-        (6, symbols_at as u64),
+        (6, metadata_rva(symbols_at)),
         (39, ((registrations.len() + 3) * SYMBOL_SIZE) as u64),
         (11, SYMBOL_SIZE as u64),
     ]);
@@ -512,7 +555,7 @@ fn build_kernel_provider_with_base(
         entries[cursor] = (DT_SCE_EXPORT_LIB, library_word(index));
         cursor += 1;
     }
-    entries[cursor..].copy_from_slice(&[(7, rela_at as u64), (8, 24), (9, 24), (0, 0)]);
+    entries[cursor..].copy_from_slice(&[(7, metadata_rva(rela_at)), (8, 24), (9, 24), (0, 0)]);
     for (index, (tag, value)) in entries.into_iter().enumerate() {
         put(&mut image, dynamic_at + index * 16, &tag.to_le_bytes());
         put(
@@ -526,8 +569,98 @@ fn build_kernel_provider_with_base(
         markers,
         code_bytes,
         data_offset,
+        metadata_offset,
+        metadata_mapped_bytes,
         objects,
     })
+}
+
+// Checked independently of actual catalogue contents, so capacity fixtures can
+// exercise the entire declared limit without introducing callable fake exports.
+#[derive(Debug)]
+struct Layout {
+    code_bytes: usize,
+    data_offset: usize,
+    metadata_offset: usize,
+    dynamic_at: usize,
+    strings_at: usize,
+    symbols_at: usize,
+    rela_at: usize,
+    image_size: usize,
+    metadata_mapped_bytes: u64,
+}
+
+impl Layout {
+    fn new(count: usize, strings_size: usize, maximum: u64) -> Result<Self, KernelProviderError> {
+        if count == 0
+            || count > MAX_REGISTRATIONS
+            || strings_size == 0
+            || strings_size > MAX_STRINGS_BYTES
+        {
+            return Err(KernelProviderError::Budget);
+        }
+        let add = |a: usize, b: usize| a.checked_add(b).ok_or(KernelProviderError::Budget);
+        let code_bytes = add(
+            STUB_START,
+            count
+                .checked_mul(STUB_STRIDE)
+                .ok_or(KernelProviderError::Budget)?,
+        )?;
+        let data_offset = code_bytes;
+        // Only the guard and relocated name pointer are initialized. The fixed
+        // program-name buffer remains BSS within the separate object page.
+        let metadata_offset = add(data_offset, 16)?;
+        let dynamic_at = add(metadata_offset, PROGRAM_HEADERS * PROGRAM_HEADER_SIZE)?;
+        let strings_at = add(dynamic_at, DYNAMIC_ENTRIES * 16)?;
+        let symbols_at = add(add(strings_at, strings_size)?, 7)? & !7;
+        let symbols_bytes = add(count, 3)?
+            .checked_mul(SYMBOL_SIZE)
+            .ok_or(KernelProviderError::Budget)?;
+        let rela_at = add(symbols_at, symbols_bytes)?;
+        let image_size = add(rela_at, 24)?;
+        let metadata_bytes = (image_size - metadata_offset) as u64;
+        let metadata_mapped_bytes = metadata_bytes
+            .checked_add(PAGE_SIZE - 1)
+            .ok_or(KernelProviderError::Budget)?
+            & !(PAGE_SIZE - 1);
+        if code_bytes as u64 > CODE_MAPPED_BYTES
+            || metadata_mapped_bytes > MAX_METADATA_BYTES
+            || METADATA_RVA + metadata_mapped_bytes > MAX_MAPPED_BYTES
+            || image_size as u64 > maximum.min(MAX_IMAGE_BYTES)
+        {
+            return Err(KernelProviderError::Budget);
+        }
+        Ok(Self {
+            code_bytes,
+            data_offset,
+            metadata_offset,
+            dynamic_at,
+            strings_at,
+            symbols_at,
+            rela_at,
+            image_size,
+            metadata_mapped_bytes,
+        })
+    }
+}
+
+fn program(
+    image: &mut [u8],
+    table: usize,
+    index: usize,
+    kind: u32,
+    flags: u32,
+    [offset, address, file_size, mem_size, alignment]: [u64; 5],
+) {
+    let at = table + index * PROGRAM_HEADER_SIZE;
+    put(image, at, &kind.to_le_bytes());
+    put(image, at + 4, &flags.to_le_bytes());
+    for (index, value) in [offset, address, 0, file_size, mem_size, alignment]
+        .into_iter()
+        .enumerate()
+    {
+        put(image, at + 8 + index * 8, &value.to_le_bytes());
+    }
 }
 
 fn qualified_name(nid: &[u8], library: u16, module: u16) -> ([u8; NID_TOKEN_LEN + 9], usize) {
@@ -571,6 +704,9 @@ fn put(image: &mut [u8], offset: usize, value: &[u8]) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod layout_tests;
 
 #[cfg(test)]
 mod mspace_tests;
