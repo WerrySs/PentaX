@@ -6,6 +6,8 @@ use pentax_codegen::{Code, Instruction, Mnemonic, OpKind, UnsupportedReason};
 use pentax_core::process::hle::{NativeServiceAction, PreparedNativeKernelStartup};
 use pentax_kernel::OutputStream;
 
+mod lookahead;
+
 const TAIL_BYTES: usize = 256;
 const HINTS: [(&[u8], &str); 17] = [
     (b"assert", "assertion"),
@@ -35,6 +37,7 @@ enum Trap {
 #[derive(Debug, Default)]
 pub(super) struct StopDiagnostics {
     form: Option<(Code, Option<UnsupportedReason>)>,
+    snapshot_candidates: Option<lookahead::SnapshotCandidates>,
     trap: Option<Trap>,
     primary: bool,
     hints: u32,
@@ -54,6 +57,12 @@ struct MemoryCall {
     fixed: bool,
 }
 impl StopDiagnostics {
+    /// Planning hints from the pre-step snapshot only. This grants no live-code
+    /// assurance and cannot alter execution, cache admission or the actual stop.
+    pub(super) fn capture_snapshot_candidates(&mut self, snapshot: &[u8]) {
+        self.snapshot_candidates = Some(lookahead::SnapshotCandidates::capture(snapshot));
+    }
+
     pub(super) fn observe_failure(
         &mut self,
         name: Option<&'static str>,
@@ -170,6 +179,9 @@ impl StopDiagnostics {
             value
         });
         fields.push_str(&self.memory_and_trap_fields());
+        if let Some(candidates) = &self.snapshot_candidates {
+            candidates.append_fields(&mut fields);
+        }
         fields
     }
     fn memory_and_trap_fields(&self) -> String {

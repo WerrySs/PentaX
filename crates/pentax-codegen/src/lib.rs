@@ -22,7 +22,10 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-pub use iced_x86::{Code, ConditionCode, CpuidFeature, Instruction, Mnemonic, OpKind, Register};
+pub use iced_x86::{
+    Code, ConditionCode, CpuidFeature, Decoder, DecoderOptions, FlowControl, Instruction, Mnemonic,
+    OpKind, Register,
+};
 pub use materialized::{
     DeclaredAppliedWrite, MaterializedBlockPlan, MaterializedSource, MaterializedSourceAssurance,
     MaterializedSourceUsage, declare_materialized_source, plan_materialized_block,

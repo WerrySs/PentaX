@@ -1110,6 +1110,22 @@ fn execute_epoch<'plan, 'image>(
                         block.module().index() == 0,
                         session,
                     );
+                    // The retained window was captured before this step. Its
+                    // unconsumed suffix may be stale: decode only static public
+                    // form candidates, never an execution/unsupported trace.
+                    // Invalid bounds omit this optional diagnostic and preserve
+                    // the original stop. No additional guest bytes are read.
+                    if let Some(snapshot) = block
+                        .exit()
+                        .guest_pc()
+                        .checked_sub(block.guest_pc())
+                        .and_then(|offset| usize::try_from(offset).ok())
+                        .and_then(|offset| block.relocated_source_bytes().get(offset..))
+                    {
+                        progress
+                            .stop_diagnostics
+                            .capture_snapshot_candidates(snapshot);
+                    }
                 }
                 return Err(NativeSessionError::UnsupportedExit {
                     guest_pc,

@@ -94,6 +94,8 @@ jobs:
       - name: Test software CPU identification and atomic refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::cpu_identification_tests:: -- --test-threads=1
+      - name: Test bounded snapshot candidate diagnostics
+        run: cargo test --locked -p pentax-worker --bin pentax-worker static_candidates_are_aggregate_private_value_independent_and_stop_at_bounds -- --test-threads=1
       - name: Test signed packed-qword comparison state and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::qword_comparisons:: -- --test-threads=1
