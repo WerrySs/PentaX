@@ -183,3 +183,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_bit_strings_use_signed_indices_masked_immediates_and_live_dependency_splits -- --test-threads=1
+      - name: Test native JSON ownership, parsing and exact import scopes
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe json_ -- --test-threads=1
