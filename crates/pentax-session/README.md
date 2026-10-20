@@ -50,7 +50,12 @@ alpha is supported; the transport does not silently relabel pixels as opaque.
 Default hard policy is at most 4096 per dimension, 16 MiB per frame and 64 MiB
 simultaneous dynamic CPU staging. Limits may be tightened, never raised past
 those maxima. These are PentaX transport limits, not firmware limits. Presenter
-GPU storage needs its own independent bound.
+GPU storage needs its own independent bound. The integrated producer includes
+actual queued/captured Frames and simultaneous draw pixel buffers in that
+staging ceiling; consumers include their decode and mapped-upload capacities.
+Compiler IR/command workspace and native executable caches have separate finite
+bounds. Future decoder/backend limits are admitted at allocation time rather
+than deducted as already-allocated storage before configuration.
 
 `Decoder::new(nonce, generation, limits)` binds the expected private session.
 `feed(input, held)` accepts arbitrary fragments and returns the exact consumed

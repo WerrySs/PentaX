@@ -53,6 +53,10 @@ pub struct Limits {
     pub max_dimension: u32,
     pub max_vertices: u64,
     pub max_work: u64,
+    /// Independent pixel staging ceiling: retained LOAD/input plus the
+    /// backend's upload and completed readback allowance. Compiler IR is
+    /// bounded separately by `max_host_bytes` and `compiler_phase_bytes`.
+    pub max_pixel_bytes: usize,
     pub max_host_bytes: usize,
     pub compiler_phase_bytes: usize,
     pub compiler_phase_work: u64,
@@ -66,6 +70,7 @@ impl Default for Limits {
             max_dimension: 4096,
             max_vertices: 1024 * 1024,
             max_work: 128 * 1024 * 1024,
+            max_pixel_bytes: 64 * 1024 * 1024,
             max_host_bytes: 128 * 1024 * 1024,
             compiler_phase_bytes: 8 * 1024 * 1024,
             compiler_phase_work: 4 * 1024 * 1024,
@@ -76,7 +81,13 @@ impl Default for Limits {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Usage {
     pub work: u64,
+    /// Actual vector capacities retained in the returned prepared draw.
     pub host_bytes: usize,
+    /// Greatest admitted simultaneous host capacity, including temporary
+    /// compiler envelopes while those calls are running (not allocations).
+    pub peak_host_bytes: usize,
+    /// Actual LOAD/input vector capacities included in `host_bytes`.
+    pub pixel_bytes: usize,
     pub shader_words: usize,
     pub vertices: u64,
     pub target_bytes: usize,
@@ -235,12 +246,38 @@ impl Budget<'_> {
         Ok(())
     }
     fn host(&mut self, bytes: usize) -> Result<(), Error> {
+        self.peak(bytes)?;
         self.usage.host_bytes = self
             .usage
             .host_bytes
             .checked_add(bytes)
+            .ok_or(Error::Limit("host bytes"))?;
+        Ok(())
+    }
+    fn peak(&mut self, temporary: usize) -> Result<(), Error> {
+        let peak = self
+            .usage
+            .host_bytes
+            .checked_add(temporary)
             .filter(|n| *n <= self.limits.max_host_bytes)
             .ok_or(Error::Limit("host bytes"))?;
+        self.usage.peak_host_bytes = self.usage.peak_host_bytes.max(peak);
+        Ok(())
+    }
+    fn release(&mut self, bytes: usize) -> Result<(), Error> {
+        self.usage.host_bytes = self
+            .usage
+            .host_bytes
+            .checked_sub(bytes)
+            .ok_or(Error::Limit("host accounting"))?;
+        Ok(())
+    }
+    fn pixels(&mut self, retained: usize, future: usize) -> Result<(), Error> {
+        retained
+            .checked_add(future)
+            .filter(|n| *n <= self.limits.max_pixel_bytes)
+            .ok_or(Error::Limit("pixel staging bytes"))?;
+        self.usage.pixel_bytes = retained;
         Ok(())
     }
 }

@@ -232,6 +232,10 @@ fn read_program(
             .checked_mul(4)
             .ok_or(Error::Limit("shader words"))?,
     )?;
+    let word_bytes = words
+        .capacity()
+        .checked_mul(4)
+        .ok_or(Error::Limit("shader words"))?;
     for index in 0..count {
         let at = (index as u64)
             .checked_mul(4)
@@ -244,9 +248,19 @@ fn read_program(
         words.push(word);
         // An ENDPGM-shaped literal is not a terminator unless the independent
         // instruction decoder accepts the complete source at this boundary.
-        if word == 0xbf81_0000
-            && let Ok(program) = ShaderProgram::decode(&words, stage, compiler)
-        {
+        if word == 0xbf81_0000 {
+            // Decode owns a source/record span while validation owns its
+            // independently bounded tables. Failed attempts drop both before
+            // the next attempt. The source copy has a separate word cap.
+            let phase = compiler
+                .max_bytes
+                .checked_add(compiler.decode.max_record_bytes)
+                .and_then(|n| reserved.checked_add(n))
+                .ok_or(Error::Limit("compiler bytes"))?;
+            budget.peak(phase)?;
+            let Ok(program) = ShaderProgram::decode(&words, stage, compiler) else {
+                continue;
+            };
             if program.instructions().any(|i| {
                 i.branch()
                     .is_some_and(|b| b.target_byte_offset() <= i64::from(i.byte_offset()))
@@ -258,6 +272,9 @@ fn read_program(
                 .shader_words
                 .checked_add(words.len())
                 .ok_or(Error::Limit("shader words"))?;
+            budget.host(program.retained_host_bytes())?;
+            drop(words);
+            budget.release(word_bytes)?;
             return Ok(program);
         }
     }
@@ -358,15 +375,26 @@ pub fn prepare_draw_with_target(
         usage: Usage::default(),
     };
     let config = configuration(draw, &mut budget)?;
+    let backend_pixels = config
+        .geometry
+        .tight_bytes
+        .checked_mul(2)
+        .ok_or(Error::Limit("pixel staging bytes"))?;
+    let decoded_pixels = if config.geometry.layout == TargetLayout::LinearRgba8 {
+        0
+    } else {
+        config.geometry.tight_bytes
+    };
+    budget.pixels(
+        config
+            .bytes
+            .checked_add(decoded_pixels)
+            .ok_or(Error::Limit("pixel staging bytes"))?,
+        backend_pixels,
+    )?;
     if limits.compiler_phase_bytes == 0 || limits.compiler_phase_work == 0 {
         return Err(Error::Limit("compiler budget"));
     }
-    budget.host(
-        limits
-            .compiler_phase_bytes
-            .checked_mul(6)
-            .ok_or(Error::Limit("compiler bytes"))?,
-    )?;
     budget.work(
         limits
             .compiler_phase_work
@@ -454,13 +482,26 @@ pub fn prepare_draw_with_target(
     pixel_common.push_data_start_dword = 16;
     let pixel_profile = Profile::new(StageDescription::Pixel(PixelDescription::new(pixel_common)))
         .map_err(|_| Error::Compile)?;
+    budget.peak(compiler.max_bytes)?;
     let vertex =
         compile(&vertex_program, &vertex_profile, &compiler).map_err(|_| Error::Compile)?;
+    budget.host(vertex.retained_host_bytes())?;
+    budget.peak(compiler.max_bytes)?;
     let pixel = compile(&pixel_program, &pixel_profile, &compiler).map_err(|_| Error::Compile)?;
+    budget.host(pixel.retained_host_bytes())?;
     validate_manifest(&vertex, true)?;
     validate_manifest(&pixel, false)?;
     let vertex_push = push_data(&draw.state, &vertex, true)?;
     let pixel_push = push_data(&draw.state, &pixel, false)?;
+    let program_bytes = vertex_program
+        .retained_host_bytes()
+        .checked_add(pixel_program.retained_host_bytes())
+        .ok_or(Error::Limit("compiler bytes"))?;
+    // No decoded program, CFG/IR or compiler layout remains live when the
+    // target is allocated. Keep only the actual compiled products charged.
+    drop(vertex_program);
+    drop(pixel_program);
+    budget.release(program_bytes)?;
     budget.host(config.bytes)?;
     budget.work(config.bytes as u64)?;
     let mut input = Vec::new();
@@ -468,6 +509,13 @@ pub fn prepare_draw_with_target(
         .try_reserve_exact(config.bytes)
         .map_err(|_| Error::Allocation)?;
     budget.host(input.capacity() - config.bytes)?;
+    budget.pixels(
+        input
+            .capacity()
+            .checked_add(decoded_pixels)
+            .ok_or(Error::Limit("pixel staging bytes"))?,
+        backend_pixels,
+    )?;
     input.resize(config.bytes, 0);
     memory
         .snapshot_buffer(config.address, &mut input, true, true)
@@ -479,6 +527,14 @@ pub fn prepare_draw_with_target(
             max_host_bytes: limits
                 .max_host_bytes
                 .checked_sub(budget.usage.host_bytes)
+                .map(|n| {
+                    n.min(
+                        limits
+                            .max_pixel_bytes
+                            .saturating_sub(input.capacity())
+                            .saturating_sub(backend_pixels),
+                    )
+                })
                 .filter(|n| *n >= config.geometry.tight_bytes)
                 .ok_or(Error::Limit("target decode bytes"))?,
             max_work: limits
@@ -491,6 +547,13 @@ pub fn prepare_draw_with_target(
             return Err(Error::Unsupported("target decode extent"));
         }
         budget.host(decoded.bytes.capacity())?;
+        budget.pixels(
+            input
+                .capacity()
+                .checked_add(decoded.bytes.capacity())
+                .ok_or(Error::Limit("pixel staging bytes"))?,
+            backend_pixels,
+        )?;
         budget.work(decoded.work)?;
         (decoded.bytes, Some(input))
     };

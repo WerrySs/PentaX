@@ -85,8 +85,25 @@ storage and4194304 work units. Draw preparation independently bounds256 shader
 words per stage,32768 SPIR-V words per stage,16MiB target bytes,4096 dimensions,
 1048576 vertices,128MiB charged host storage and134217728 work units. Compiler
 phases have independent8MiB/4194304 caps; conservative outer charges also cover
-decode/compiler arenas and worst-case raster work. Actual vector capacities
+decode/compiler peaks and worst-case raster work. A decoder invocation admits
+its record/source span and validation-table envelopes while that call is live;
+each compilation admits its arena envelope alongside the actual retained
+programs/products. The decoded programs are explicitly dropped before target
+allocation. `Usage::host_bytes` reports actual retained vector capacities,
+while `peak_host_bytes` includes admitted temporary envelopes. It does not add
+dead compiler scratch to later target/readback storage. Actual vector capacities
 are checked after reservation. No budget is an AMD hardware limit.
+
+Pixel staging has an independent64MiB default ceiling. Tiled drawing retains
+the full padded LOAD snapshot and tight decoded input, plus a bounded backend
+upload/completed-readback allowance; linear drawing shares its LOAD/input vector.
+The native driver subtracts actual captured Frames and consumer-held capacities
+from that pixel ceiling. Its independent128MiB graphics workspace bound still
+includes actual retained external allocations, command plans, compiled products
+and the live phase's scratch. Compiler IR, executable caches and opaque driver
+heaps are not represented as session pixel storage. Every ceiling must pass;
+these are overlapping bounded accounting categories, not an exact process heap
+measurement. Draw buffers die before the following EOP capture's separate peak.
 
 The packet/register and shader-profile contracts adapt the retained authorized
 KytyPS5-Performance source at `209dffe9032d72749257ce18680d506b891284de`:

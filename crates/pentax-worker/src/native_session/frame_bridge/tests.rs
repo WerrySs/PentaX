@@ -225,3 +225,45 @@ fn eof_cancel_deadline_and_staging_refusal_never_complete_a_wire_identity() {
         Err(Error::Limit)
     ));
 }
+
+#[test]
+fn actual_endpoint_capacity_is_counted_and_core_queue_blocks_growth_before_window_open() {
+    let wire = pentax_session::Limits::default();
+    let mut local = local_presenter::LocalPresenterTransport::new(
+        Nonce::new([0x17; 16]).unwrap(),
+        3,
+        local_presenter::Limits::default(),
+    )
+    .unwrap();
+    assert!(local.max_retained_bytes() > 40 * 1024 * 1024);
+    let actual = local.retained_bytes();
+    let mut bridge = FrameBridge::new(
+        &mut local,
+        Nonce::new([0x17; 16]).unwrap(),
+        3,
+        Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        bridge.held_limit().unwrap(),
+        std::mem::size_of_val(&bridge) + actual
+    );
+    assert!(bridge.held_limit().unwrap() < 2 * CHUNK);
+    // Same-pump core queue capacity is not external and must not be sent back
+    // to core as a second copy. It DOES participate in endpoint allocation.
+    bridge.queued_frame_bytes = wire.max_staging_bytes - bridge.held_limit().unwrap() + 1;
+    assert_eq!(
+        bridge.held_limit().unwrap(),
+        std::mem::size_of_val(&bridge) + actual
+    );
+    assert_eq!(
+        bridge.io_held().unwrap() + actual,
+        wire.max_staging_bytes + 1
+    );
+    bridge.configure(2, 2, flags(), 7).unwrap();
+    // LocalPresenter checks the total BEFORE decoding Configure/opening any
+    // OS window. This original pure test never calls a Vulkan/Win32 API.
+    assert_eq!(bridge.flush(), Err(Error::Limit));
+    assert!(!bridge.configuration_sent);
+    assert!(bridge.frame.is_none());
+}

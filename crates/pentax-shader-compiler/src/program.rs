@@ -209,6 +209,21 @@ impl ShaderProgram {
         self.span.source_words()
     }
 
+    /// Actual retained Rust vector capacities, excluding inline storage and
+    /// allocator bookkeeping. Decode/validation scratch is dead on return and
+    /// is not part of this value. Overflow is a refusal-sized sentinel.
+    pub fn retained_host_bytes(&self) -> usize {
+        self.span
+            .source_capacity_words()
+            .saturating_mul(std::mem::size_of::<u32>())
+            .saturating_add(self.span.record_capacity_bytes())
+            .saturating_add(
+                self.targets
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
     /// Validation work units (decoder work included).
     pub fn work_units(&self) -> u64 {
         self.work

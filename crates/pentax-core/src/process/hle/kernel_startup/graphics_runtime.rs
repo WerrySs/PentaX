@@ -357,12 +357,14 @@ impl PreparedNativeKernelStartup<'_, '_> {
     /// Tighten live capture policy to include transport-held allocations. The
     /// caller accounts actual capacities and keeps handed-off Frames charged
     /// until dropped, including after by-reference acknowledgement.
+    /// Returns only the current queued-frame capacity census for a non-guest
+    /// transport pump's allocation admission; this is not frame authority.
     pub fn graphics_video_consumer_admit(
         &mut self,
         max_frame_bytes: usize,
         max_staging_bytes: usize,
         external_held: usize,
-    ) -> Result<(), KernelStartupError> {
+    ) -> Result<usize, KernelStartupError> {
         let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
         self.graphics
             .as_mut()

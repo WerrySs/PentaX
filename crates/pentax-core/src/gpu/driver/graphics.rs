@@ -294,6 +294,15 @@ impl Driver {
                     max_host_bytes,
                 )?)
                 .ok_or(Failure::Limit)?;
+            // Session staging covers simultaneous pixels and consumer memory,
+            // not compiler IR/command plans. Both independent ceilings remain
+            // enforced; previously captured Frames coexist with this draw.
+            limits.max_pixel_bytes = limits.max_pixel_bytes.min(
+                presentation
+                    .max_held_bytes
+                    .checked_sub(self.video.retained_frame_bytes())
+                    .ok_or(Failure::Limit)?,
+            );
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
             let current = super::super::graphics::execute_draw_current(
                 cursor.into_pause(),

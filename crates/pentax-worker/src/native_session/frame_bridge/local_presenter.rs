@@ -16,7 +16,7 @@ const CHUNK: usize = 65_536;
 const CONTROL_BYTES: usize = HEADER_BYTES + 8;
 const CONTROL_SLOTS: usize = 3;
 
-/// Separate backend reservation and total CPU ceiling. The former includes
+/// Separate backend allocation cap and total CPU ceiling. The former includes
 /// actual mapped upload memory and owned presenter metadata, not driver heaps.
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
@@ -462,6 +462,9 @@ impl Transport for LocalPresenterTransport {
             .saturating_add(self.presenter_bytes())
     }
     fn max_retained_bytes(&self) -> usize {
+        // A fixed endpoint ceiling, not an allocated future reservation.
+        // FrameBridge publishes retained_bytes(), and supplies all actual
+        // other/core-frame capacities before each allocation in this endpoint.
         self.reservation
     }
     fn queue_write(&mut self, bytes: &[u8], held: usize) -> Result<bool, Error> {

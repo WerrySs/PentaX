@@ -214,14 +214,22 @@ pub(super) fn execute_draw_admitted(
         .filter(|n| *n <= limits.max_work)
         .ok_or(Error::Limit)?;
     // The platform separately charges its upload and completed Vec capacities.
-    // Clamp that entire budget to the shared remainder after retained padded
-    // LOAD, tight input, shaders and conservative compiler staging charges.
+    // Compiler scratch is dead, and exact compiled products/LOAD/input remain.
+    // Upload/readback must satisfy BOTH the independent graphics workspace
+    // ceiling and the session's simultaneous pixel/transport ceiling.
     let remaining_host = limits
         .max_host_bytes
         .checked_sub(preparation.host_bytes)
         .ok_or(Error::Limit)?;
+    let remaining_pixels = limits
+        .max_pixel_bytes
+        .checked_sub(preparation.pixel_bytes)
+        .ok_or(Error::Limit)?;
     let mut execution_limits = *gpu_limits;
-    execution_limits.max_host_bytes = execution_limits.max_host_bytes.min(remaining_host as u64);
+    execution_limits.max_host_bytes = execution_limits
+        .max_host_bytes
+        .min(remaining_host as u64)
+        .min(remaining_pixels as u64);
     if (geometry.tight_bytes() as u64)
         .checked_mul(2)
         .is_none_or(|n| n > execution_limits.max_host_bytes)
@@ -260,7 +268,7 @@ pub(super) fn execute_draw_admitted(
             &mut baseline,
             &PresentationLimits {
                 max_frame_bytes: limits.max_target_bytes,
-                max_held_bytes: limits.max_host_bytes,
+                max_held_bytes: limits.max_pixel_bytes,
                 max_work: reverse_work,
             },
             &mut work,

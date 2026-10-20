@@ -98,6 +98,14 @@ operating system that aborts the process. Graph walks are iterative and repeated
 identity resolution, interning comparisons and in-place graph sorting consume
 the same finite work allowance.
 
+`ShaderProgram::retained_host_bytes`, `CompiledShader::retained_host_bytes` and
+the manifest's matching accessor report actual recursive Rust vector capacities
+that remain owned after their calls return, excluding inline metadata and
+allocator bookkeeping. `CompiledShader::charged_bytes` keeps its distinct
+monotonic compilation-arena meaning. A caller may release a temporary phase
+envelope only after the call returns; retained source/target tables, SPIR-V and
+manifest capacities must still count until their actual owners are dropped.
+
 All fixtures are original synthetic programs. The end-to-end matrix keeps live
 results and exercises scalar/vector aliases as well as stage interfaces, buffer
 writes and a carried loop value. The tests compare manifest requirements against

@@ -68,6 +68,15 @@ impl CompiledShader {
     pub fn charged_bytes(&self) -> usize {
         self.retained_bytes
     }
+    /// Actual retained SPIR-V and recursive manifest vector capacities.
+    /// Compiler CFG/IR/layout scratch has been dropped before `compile`
+    /// returns. This differs from the monotonic arena charge above.
+    pub fn retained_host_bytes(&self) -> usize {
+        self.words
+            .capacity()
+            .saturating_mul(std::mem::size_of::<u32>())
+            .saturating_add(self.manifest.retained_host_bytes())
+    }
 }
 
 /// Compile a validated program for a validated profile (source

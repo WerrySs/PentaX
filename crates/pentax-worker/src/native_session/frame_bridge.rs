@@ -9,8 +9,6 @@ use pentax_session::{ControlEvent, Decoder, FrameFlags, FrameId, Header, Kind, N
 use std::time::{Duration, Instant};
 
 const CHUNK: usize = 65536;
-const DECODE_RESERVE: usize = 256;
-
 pub(crate) mod local_presenter;
 #[cfg(test)]
 mod tests;
@@ -36,6 +34,9 @@ pub(crate) enum Read {
 /// queue_write(true) owns a copy of the complete chunk: advance exactly once.
 /// poll_write(true) means it is still pending; false means actual completion.
 /// Reads copy a complete bounded endpoint chunk or retain its cursor internally.
+/// Every growth must preadmit requested and actual capacity against `held`,
+/// which includes all other actual owners and core's still-queued Frames.
+/// max_retained_bytes is an endpoint ceiling, never an allocated reservation.
 pub(crate) trait Transport {
     fn retained_bytes(&self) -> usize;
     fn max_retained_bytes(&self) -> usize;
@@ -109,6 +110,9 @@ pub(crate) struct FrameBridge<'transport> {
     outgoing: Outgoing,
     write_queued: bool,
     frame: Option<Frame>,
+    // Non-authoritative census captured on this same non-guest pump. Every
+    // endpoint allocation must also count Frames still retained in core.
+    queued_frame_bytes: usize,
     frame_id: Option<FrameId>,
     frame_sent: bool,
     completion: Option<FlipCompletion>,
@@ -173,6 +177,7 @@ impl<'transport> FrameBridge<'transport> {
             outgoing: Outgoing::None,
             write_queued: false,
             frame: None,
+            queued_frame_bytes: 0,
             frame_id: None,
             frame_sent: false,
             completion: None,
@@ -186,17 +191,16 @@ impl<'transport> FrameBridge<'transport> {
         bridge.held_limit()?;
         Ok(bridge)
     }
-    /// Includes a conservative endpoint/decoder growth reservation before any
-    /// guest capture. Actual reported capacities must remain within it.
+    /// Actual external capacities only. Future endpoint allocations are
+    /// admitted at their own phase against these capacities AND the current
+    /// core queued-frame census; they are refreshed before guest re-entry.
     fn held_limit(&self) -> Result<usize, Error> {
-        if self.transport.retained_bytes() > self.transport.max_retained_bytes()
-            || self.decoder.retained_bytes() > DECODE_RESERVE
-        {
+        if self.transport.retained_bytes() > self.transport.max_retained_bytes() {
             return Err(Error::Limit);
         }
         let held = std::mem::size_of::<Self>()
-            .checked_add(self.transport.max_retained_bytes())
-            .and_then(|n| n.checked_add(DECODE_RESERVE))
+            .checked_add(self.transport.retained_bytes())
+            .and_then(|n| n.checked_add(self.decoder.retained_bytes()))
             .and_then(|n| n.checked_add(self.frame.as_ref().map_or(0, Frame::capacity)))
             .ok_or(Error::Limit)?;
         if held > self.limits.wire.max_staging_bytes {
@@ -206,17 +210,19 @@ impl<'transport> FrameBridge<'transport> {
     }
     fn io_held(&self) -> Result<usize, Error> {
         self.held_limit()?
-            .checked_sub(self.transport.max_retained_bytes())
+            .checked_sub(self.transport.retained_bytes())
+            .and_then(|n| n.checked_add(self.queued_frame_bytes))
             .ok_or(Error::Limit)
     }
-    fn admit(&self, session: &mut PreparedNativeKernelStartup<'_, '_>) -> Result<(), Error> {
-        session
+    fn admit(&mut self, session: &mut PreparedNativeKernelStartup<'_, '_>) -> Result<(), Error> {
+        self.queued_frame_bytes = session
             .graphics_video_consumer_admit(
                 self.limits.wire.max_frame_bytes,
                 self.limits.wire.max_staging_bytes,
                 self.held_limit()?,
             )
-            .map_err(|_| Error::Limit)
+            .map_err(|_| Error::Limit)?;
+        Ok(())
     }
     pub(crate) fn cancel(&mut self) {
         self.terminal = true;
@@ -375,6 +381,7 @@ impl<'transport> FrameBridge<'transport> {
             let held = self
                 .io_held()?
                 .checked_add(self.transport.retained_bytes())
+                .and_then(|n| n.checked_sub(self.decoder.retained_bytes()))
                 .ok_or(Error::Limit)?;
             let wire = &self.wire;
             let fed = self
@@ -427,7 +434,13 @@ impl<'transport> FrameBridge<'transport> {
         &mut self,
         session: &mut PreparedNativeKernelStartup<'_, '_>,
     ) -> Result<Pump, Error> {
-        let result = self.pump_inner(session);
+        let result = self.pump_inner(session).and_then(|pump| {
+            // Even an early Progress/Idle return after a short write may have
+            // grown the endpoint. No successful pump permits guest entry with
+            // a stale external counter. Errors retain/cancel owners instead.
+            self.admit(session)?;
+            Ok(pump)
+        });
         if result.is_err() {
             self.cancel();
         }
@@ -468,7 +481,7 @@ impl<'transport> FrameBridge<'transport> {
         }
         self.flush()?;
         self.read_controls()?;
-        self.held_limit()?;
+        self.admit(session)?;
         if let Some(tick) = self.pending_tick {
             let handle = self.surface_handle.ok_or(Error::Protocol)?;
             match session.graphics_video_observe_vblank(handle, self.surface_generation, tick) {
@@ -559,12 +572,9 @@ impl<'transport> FrameBridge<'transport> {
             return Ok(Pump::Progress);
         }
         self.next_sequence.checked_add(1).ok_or(Error::Limit)?;
-        if metadata.capacity() > self.limits.wire.max_frame_bytes
-            || self
-                .held_limit()?
-                .checked_add(metadata.capacity())
-                .is_none_or(|n| n > self.limits.wire.max_staging_bytes)
-        {
+        // This moves one already-counted queue allocation; it does not create
+        // a second copy. Core atomically transfers its capacity to external.
+        if metadata.capacity() > self.limits.wire.max_frame_bytes {
             return Err(Error::Limit);
         }
         self.last_take_tick = tick;
@@ -576,6 +586,7 @@ impl<'transport> FrameBridge<'transport> {
         };
         // Retain the genuine Frame BEFORE any later fallible protocol work.
         self.frame = Some(frame);
+        self.admit(session)?;
         let header = self
             .wire
             .begin_frame(metadata.width(), metadata.height(), flags)

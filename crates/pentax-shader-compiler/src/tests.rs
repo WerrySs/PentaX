@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Original end-to-end programs for the Rust port. No upstream or guest fixtures.
+mod capacities;
 mod fixtures;
 mod matrix;
 use super::*;

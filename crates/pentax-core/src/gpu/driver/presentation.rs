@@ -18,7 +18,7 @@ impl Driver {
         max_frame_bytes: usize,
         max_held_bytes: usize,
         external_held: usize,
-    ) -> Result<(), Failure> {
+    ) -> Result<usize, Failure> {
         if self.poisoned {
             return Err(Failure::Poisoned);
         }
@@ -44,7 +44,10 @@ impl Driver {
             max_held_bytes: held,
             external_held,
         });
-        Ok(())
+        // Census only: no numeric capacity grants access or ownership. The
+        // non-guest transport pump includes these still-queued allocations
+        // in every decoder/backend growth admission until the next census.
+        Ok(self.video.retained_frame_bytes())
     }
     pub(super) fn presentation_limits(
         &self,
@@ -66,7 +69,6 @@ impl Driver {
                 .limits
                 .graphics
                 .max_host_bytes
-                .min(consumer.max_held_bytes)
                 .checked_sub(consumer.external_held)
                 .ok_or(Failure::Limit),
             None => Ok(self.limits.graphics.max_host_bytes),
@@ -447,17 +449,28 @@ mod tests {
         // Consumer metadata can only tighten policy; it grants no dequeue or
         // acknowledgment. Existing captured capacity participates immediately.
         let max_frame = driver.limits.video_presentation.max_frame_bytes;
-        let max_held = driver.limits.video_presentation.max_held_bytes;
+        let max_held = driver
+            .limits
+            .video_presentation
+            .max_held_bytes
+            .min(64 * 1024 * 1024);
         assert_eq!(
             driver.video_consumer_admit(&memory, max_frame, max_held, max_held),
             Err(Failure::Limit)
         );
-        driver
+        let queued = driver
             .video_consumer_admit(&memory, max_frame, max_held, 1024)
             .unwrap();
+        assert_eq!(queued, metadata.capacity());
         assert_eq!(
             driver.presentation_limits().unwrap().max_held_bytes,
             max_held - 1024
+        );
+        // The session pixel ceiling does not replace the independent graphics
+        // compiler/workspace ceiling. Actual external memory counts in both.
+        assert_eq!(
+            driver.graphics_host_limit().unwrap(),
+            driver.limits.graphics.max_host_bytes - 1024
         );
         let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
         assert!(matches!(

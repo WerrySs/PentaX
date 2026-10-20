@@ -8,6 +8,22 @@ still force the existing switch path. Exact requested priority/policy remain
 kernel metadata; POSIX setschedparam does not change an already running class.
 These cooperative quanta are PentaX policy and never change host priorities.
 
+The optional frame-window bridge shares a64MiB CPU pixel/transport staging
+ceiling with core capture and draw pixels. Before each non-guest pump, core
+returns a metadata-only census of its still-queued Frame capacities. Decoder
+and presenter growth includes that census, the original handed-off Frame,
+actual endpoint capacities and inline bridge storage; requested and actual
+growth are checked at that phase. A future16MiB decode or24MiB backend cap is
+not treated as already allocated. The presenter still admits its backend cap
+before opening, then reports actual mapped upload and metadata capacities.
+Every successful pump return refreshes core's actual external-capacity count
+before guest entry, including short-write and early-control paths. Handoff
+moves one existing allocation from core to transport without counting it twice.
+Pressure may still refuse/cancel explicitly while retaining original owners;
+this does not promise arbitrary queued-frame closure or a rendered title frame.
+Shader/command compiler workspace and native execution caches retain their
+independent finite bounds and are not claimed to fit inside this pixel ceiling.
+
 The source-window buffer is reused within one source epoch. Every attempted
 block still freshly checks and reads its complete executable window, including
 plan-cache hits. Allocation ceilings, full live-window comparisons and dispatch

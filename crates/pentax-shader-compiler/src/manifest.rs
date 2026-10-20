@@ -134,6 +134,29 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Actual recursive vector capacities retained by this manifest. Fixed
+    /// metadata is inline; there are no other owned allocations in its fields.
+    pub fn retained_host_bytes(&self) -> usize {
+        self.buffers
+            .capacity()
+            .saturating_mul(std::mem::size_of::<BufferElement>())
+            .saturating_add(
+                self.inputs
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<InputInterface>()),
+            )
+            .saturating_add(
+                self.outputs
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<OutputInterface>()),
+            )
+            .saturating_add(
+                self.push_data
+                    .as_ref()
+                    .map_or(0, |push| push.user_sgprs.capacity()),
+            )
+    }
+
     pub fn required_features(&self) -> &RequiredFeatures {
         &self.required_features
     }
