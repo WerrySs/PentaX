@@ -165,6 +165,7 @@ pub(super) struct NativeSessionProgress {
     pub output_bytes: u64,
     pub kernel_handles: Option<pentax_kernel::HandleUsage>,
     pub audio_out2: Option<pentax_kernel::AudioOut2Usage>,
+    window: frame_bridge::Observations,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
     dispatch_context: dispatch_context::DispatchContext,
@@ -265,8 +266,14 @@ impl NativeSessionProgress {
                 usage.mix_frames, usage.logical_output_batches
             )
         });
+        let window = format!(
+            "\twindow_configured={}\twindow_frames_presented={}\twindow_frames_acknowledged={}",
+            u8::from(self.window.configured),
+            self.window.presented,
+            self.window.acknowledged,
+        );
         format!(
-            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}{audio}",
+            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}{audio}{window}",
             self.dispatch.native_entries,
             self.dispatch.cache_publications,
             self.dispatch.cache_reuses,
@@ -460,6 +467,7 @@ pub(super) fn run_prepared_with_consumer<'plan, 'image>(
         consumer.as_deref_mut(),
     );
     if let Some(consumer) = consumer {
+        progress.window = consumer.observations();
         if result.is_ok() && consumer.is_pending() {
             result = Err(NativeSessionError::Frame(frame_bridge::Error::Cancelled));
         }
@@ -803,7 +811,9 @@ fn execute_epoch<'plan, 'image>(
                     .frame_pump_blocks
                     .is_none_or(|old| engine.usage().blocks.saturating_sub(old) >= 1024)
             {
-                match consumer.pump(session).map_err(NativeSessionError::Frame)? {
+                let pumped = consumer.pump(session);
+                progress.window = consumer.observations();
+                match pumped.map_err(NativeSessionError::Frame)? {
                     frame_bridge::Pump::RetryEventDelivery => {
                         let wake = consumer
                             .external_wake()

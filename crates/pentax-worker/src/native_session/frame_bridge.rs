@@ -77,6 +77,14 @@ pub(crate) enum Pump {
     RetryEventDelivery,
     NeedsEventDelivery,
 }
+
+/// Historical observations, never display or core acknowledgement authority.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Observations {
+    pub configured: bool,
+    pub presented: u64,
+    pub acknowledged: u64,
+}
 #[derive(Clone, Copy)]
 enum Outgoing {
     None,
@@ -112,6 +120,20 @@ pub(crate) struct FrameBridge<'transport> {
     terminal: bool,
 }
 impl<'transport> FrameBridge<'transport> {
+    pub(crate) fn observations(&self) -> Observations {
+        let taken = self.next_sequence.saturating_sub(1);
+        let acknowledged = taken.saturating_sub(u64::from(self.frame.is_some()));
+        let receipt = self.frame.is_some()
+            && self
+                .wire
+                .pending()
+                .is_some_and(|pending| pending.receipt_observed());
+        Observations {
+            configured: self.ready,
+            presented: acknowledged.saturating_add(u64::from(receipt)),
+            acknowledged,
+        }
+    }
     pub(crate) fn new(
         transport: &'transport mut dyn Transport,
         nonce: Nonce,

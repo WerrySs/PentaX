@@ -196,6 +196,9 @@ fn original_native_cpu_flip_is_presented_by_local_window_and_acknowledged_once()
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
     assert_eq!(fields["unavailable_functions"], "0", "{text}");
+    assert_eq!(fields["window_configured"], "1", "{text}");
+    assert_eq!(fields["window_frames_presented"], "1", "{text}");
+    assert_eq!(fields["window_frames_acknowledged"], "1", "{text}");
     assert!(fields["native_instructions"].parse::<u64>().unwrap() > 0);
     // Eight fixed calls plus n status observations and n-1 actual timed waits.
     // No implicit clock/equeue service is invented for the real core ack.
