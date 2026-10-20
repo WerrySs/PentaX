@@ -68,10 +68,12 @@ jobs:
       - name: Build the desktop, CLI and worker
         run: cargo build --locked --release -p pentax-desktop -p pentax-cli -p pentax-worker
       - name: Test timestamp admission and state
-        run: cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1
       - name: Test live stack permissions
         run: cargo test --locked -p pentax-platform --lib combined_stack_preflight_checks_live_full_spans_cpu_rights_holes_and_poison -- --test-threads=1
       - name: Test the native CPU and kernel counter boundary
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
-        run: cargo test --locked -p pentax-worker --test image_probe kernel_results::timestamp_counter:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::timestamp_counter:: -- --test-threads=1
