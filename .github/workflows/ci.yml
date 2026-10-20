@@ -102,6 +102,9 @@ jobs:
       - name: Test saturating packed-integer state and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::saturating_packs_tests:: -- --test-threads=1
+      - name: Test signed packed-word multiply-add state and refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::multiply_add_words_tests:: -- --test-threads=1
       - name: Test the native CPU and kernel counter boundary
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -122,3 +125,8 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::saturating_packs:: -- --test-threads=1
+      - name: Test native signed packed-word multiply-add
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::multiply_add_words:: -- --test-threads=1

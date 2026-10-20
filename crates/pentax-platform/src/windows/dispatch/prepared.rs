@@ -418,6 +418,8 @@ mod float_ops;
 mod fused_float;
 #[path = "prepared/mask_comparisons.rs"]
 mod mask_comparisons;
+#[path = "prepared/multiply_add_words.rs"]
+mod multiply_add_words;
 #[path = "prepared/mxcsr_control.rs"]
 mod mxcsr_control;
 #[path = "prepared/packed_convert.rs"]

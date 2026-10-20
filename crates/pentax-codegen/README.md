@@ -6,6 +6,12 @@ host pointers, install exception handlers or authorize execution. The crate's
 own Rust code forbids `unsafe`. Its decoder/encoder is the pinned, pure-Rust
 `iced-x86` 1.21.0 dependency, rather than a second byte parser.
 
+VPMADDWD remains mediated in both VEX widths, retaining its exact register or
+complete memory source and original RIP target. Declared AVX/AVX2 features do
+not broaden native policy. Legacy XMM PMADDWD keeps its existing SSE2 native
+admission; the pure mediator tests exercise its checked fallback through an
+explicit missing-feature declaration. MMX and EVEX remain excluded.
+
 The legacy PCMPGTQ and VEX.128/256 VPCMPGTQ forms retain their exact operands,
 complete source widths and original RIP targets in mediated exits. Declaring
 SSE4.2, AVX or AVX2 does not emit these instructions into the native cache.

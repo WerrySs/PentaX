@@ -1,5 +1,12 @@
 # Upstream provenance
 
+The three non-MMX/non-EVEX PMADDWD forms use original Rust signed-word
+multiplication and wrapping dword addition following the
+[Intel Volume 2B PMADDWD contract](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)
+and [Volume 2A Type 4 alignment rules](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf).
+No manual pseudocode, external emulator implementation, host vector intrinsic
+or commercial guest content is copied into the checked mediator.
+
 The three non-EVEX PCMPGTQ/VPCMPGTQ forms use original checked Rust signed
 integer comparisons, following the
 [Intel Volume 2B instruction contract](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)

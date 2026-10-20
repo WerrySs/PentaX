@@ -47,6 +47,8 @@ mod lane_extract;
 mod mask_comparisons;
 #[path = "minimum_position.rs"]
 mod minimum_position;
+#[path = "multiply_add_words.rs"]
+mod multiply_add_words;
 #[path = "packed_convert.rs"]
 mod packed_convert;
 #[path = "qword_comparisons.rs"]

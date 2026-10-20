@@ -57,6 +57,8 @@ mod mask_comparisons_tests;
 mod minimum_position;
 #[path = "tests/minmax_vectors.rs"]
 mod minmax_vectors;
+#[path = "tests/multiply_add_words.rs"]
+mod multiply_add_words_tests;
 #[path = "tests/multiply_vectors.rs"]
 mod multiply_vectors;
 #[path = "tests/mxcsr_registers.rs"]

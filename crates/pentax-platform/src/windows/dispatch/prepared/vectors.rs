@@ -362,6 +362,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || binary_width(instruction.code()).is_some()
         || qword_comparison(instruction.code()).is_some()
         || saturating_packs::form(instruction.code()).is_some()
+        || multiply_add_words::form(instruction.code()).is_some()
         || vector_shifts::form(instruction.code()).is_some()
         || mxcsr_control::store(instruction.code()).is_some()
         || x87_control::supported(instruction.code())
@@ -718,6 +719,40 @@ impl NativeBlockStepper<'_, '_, '_> {
             next.xmm[destination..destination + 16].copy_from_slice(&output);
             if !legacy {
                 next.ymm_upper[destination..destination + 16].fill(0);
+            }
+        } else if let Some(form) = multiply_add_words::form(instruction.code()) {
+            let size = form.vector_bytes;
+            let right_operand = if form.legacy { 1 } else { 2 };
+            if instruction.op_count() != right_operand + 1 {
+                return Err(NativeDispatchError::UnsupportedVectorInstruction);
+            }
+            let destination = register_slot(instruction, 0, size)?;
+            let left = vector_register(instruction, if form.legacy { 0 } else { 1 }, size, &next)?;
+            let right = if instruction.op_kind(right_operand) == OpKind::Memory {
+                if instruction.memory_size().size() != size {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                let source_address = address(instruction, right_operand, &next)?;
+                if form.legacy && source_address & 15 != 0 {
+                    return Err(NativeDispatchError::UnsupportedVectorInstruction);
+                }
+                transferred = size as u64;
+                self.machine
+                    .usage
+                    .vector_bytes
+                    .checked_add(transferred)
+                    .ok_or(NativeDispatchError::Budget("vector bytes"))?;
+                let mut bytes = [0; 32];
+                // Never shorten the read for zeros or already-overflowing pairs.
+                memory.read(source_address, &mut bytes[..size])?;
+                bytes
+            } else {
+                vector_register(instruction, right_operand, size, &next)?
+            };
+            let output = multiply_add_words::calculate(form, &left, &right);
+            next.xmm[destination..destination + 16].copy_from_slice(&output[..16]);
+            if !form.legacy {
+                next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
             }
         } else if let Some(form) = saturating_packs::form(instruction.code()) {
             let size = form.vector_bytes;

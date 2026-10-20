@@ -1,5 +1,18 @@
 # Native block dispatch
 
+The checked PMADDWD/VPMADDWD mediator multiplies signed 16-bit elements and
+adds adjacent product pairs into 32-bit results with wrapping addition. It does
+not saturate: two pairs of -32768 values produce `0x80000000`. The exact legacy
+128-bit and VEX.128/256 forms snapshot both sources before destination aliases
+change; legacy preserves upper YMM, VEX.128 clears it and VEX.256 replaces it.
+Complete memory reads are 16/32 bytes, with legacy m128 alignment required and
+unaligned VEX memory permitted. Existing prefix, continuation, work and counter
+admission precedes staged register publication; flags and MXCSR are unchanged.
+The existing native legacy SSE2 policy remains intact. MMX and EVEX forms are
+excluded; VEX.W is ignored and vvvv supplies SRC1. Contracts follow
+[Intel PMADDWD, Volume 2B pages 4-311–314](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf)
+and the [Type 4 exception table](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf).
+
 PCMPGTQ and VEX.128/256 VPCMPGTQ compare corresponding signed 64-bit elements
 into complete zero/all-one qword masks. Sources are captured before destination
 aliases change. Legacy preserves upper YMM; VEX.128 zeros it and VEX.256 replaces

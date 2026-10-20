@@ -10,6 +10,7 @@ mod lea;
 mod materialized;
 mod memory;
 mod minimum_position;
+mod multiply_add_words;
 mod packed_convert;
 mod qword_comparisons;
 mod saturating_packs;
