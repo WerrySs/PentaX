@@ -36,14 +36,13 @@ jobs:
         run: |
           printf 'CARGO_HOME=%s\n' "$CI_CARGO_HOME" >> "$GITHUB_ENV"
           printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
-      - name: Install desktop build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Check all targets with Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Check portable library targets with Clippy
+        run: >-
+          cargo clippy --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --all-targets -- -D warnings
       - name: Test portable library contracts
         run: cargo test --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --lib -- --test-threads=2
 
@@ -65,6 +64,8 @@ jobs:
           printf 'RUSTFLAGS=--remap-path-prefix=%s=/source --remap-path-prefix=%s=/cargo\n' "$CI_SOURCE_ROOT" "$CI_CARGO_HOME" >> "$GITHUB_ENV"
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
+      - name: Check the complete Windows workspace with Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build the desktop, CLI and worker
         run: cargo build --locked --release -p pentax-desktop -p pentax-cli -p pentax-worker
       - name: Test timestamp admission and state

@@ -16,7 +16,10 @@ sudo apt-get install pkg-config libudev-dev libxkbcommon-dev libwayland-dev libx
 ```
 
 Run these checks locally before requesting review. GitHub Actions covers portable
-library checks, Windows builds and selected original CPU contracts. GPU execution,
+library checks, strict complete-workspace Windows analysis, Windows builds and
+selected original CPU contracts. Native dispatch and callback execution currently
+target Windows x64; their other-platform stubs are not the Linux strict-analysis
+target. GPU execution,
 desktop interaction and commercial-title behavior need separate local evidence:
 
 ```sh
@@ -28,6 +31,14 @@ cargo run -p pentax-cli --locked -- self-test-startup
 cargo run -p pentax-cli --locked -- self-test-gpu
 cargo run -p pentax-cli --locked -- self-test-hle
 cargo run -p pentax-cli --locked -- self-test-shader
+```
+
+Use the complete-workspace commands above on Windows x64. The portable CI subset
+on Linux is:
+
+```sh
+cargo clippy --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --all-targets -- -D warnings
+cargo test --locked -p pentax-loader -p pentax-linker -p pentax-codegen -p pentax-shader -p pentax-shader-compiler -p pentax-gpu -p pentax-config -p pentax-kernel --lib
 ```
 
 For dependency changes, commit the updated `Cargo.lock` and run
