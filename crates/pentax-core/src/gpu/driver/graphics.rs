@@ -8,13 +8,23 @@ use super::{Driver, Failure, NativeRange, PausedNativeMemory, add, compute, draw
 use std::mem::size_of;
 
 impl Driver {
-    /// Snapshot and plan every root stream before executing any draw. The
-    /// source has one graphics processor, independent of its 56 ACB queues.
-    /// Unknown reset registers remain unknown, rather than invented defaults.
+    #[cfg(test)]
     pub(super) fn submit_graphics(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
         ranges: &[NativeRange],
+    ) -> Result<u64, Failure> {
+        self.submit_graphics_with_context(memory, ranges, None, None)
+    }
+    /// Snapshot and plan every root stream before executing any draw. The
+    /// source has one graphics processor, independent of its 56 ACB queues.
+    /// Unknown reset registers remain unknown, rather than invented defaults.
+    pub(super) fn submit_graphics_with_context(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        ranges: &[NativeRange],
+        mut kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
     ) -> Result<u64, Failure> {
         if self
             .graphics_owner
@@ -182,7 +192,93 @@ impl Driver {
                     .and_then(|ranges| bytes.checked_add(ranges))
             })
             .ok_or(Failure::Limit)?;
-        for command in plan.draws() {
+        if plan.usage().flips != 0 && (kernel.is_none() || clock.is_none()) {
+            return Err(Failure::Kernel(pentax_kernel::Failure::Unsupported(
+                "bound GPU flip process clock",
+            )));
+        }
+        self.video.check_owner(memory.owner_id())?;
+        // Pre-admit every pending slot and old+staged capture peak before any
+        // draw can retire. Full queues stop explicitly; no consumer is invented.
+        let mut planned = [0usize; 3];
+        let mut frame_bytes = self.video.retained_frame_bytes();
+        let mut capture_work = 0u64;
+        for action in plan.actions() {
+            let draw::Action::Flip(flip) = action else {
+                continue;
+            };
+            let surface = self.video.gpu_capture_surface(*flip)?;
+            let slot = usize::try_from(flip.handle() - 1)
+                .ok()
+                .filter(|i| *i < 3)
+                .ok_or(Failure::UnsupportedVideo)?;
+            planned[slot] += 1;
+            if self
+                .video
+                .gpu_pending(flip.handle())?
+                .checked_add(planned[slot])
+                .is_none_or(|n| n > 16)
+            {
+                return Err(Failure::Waiting);
+            }
+            let tight = usize::try_from(u64::from(surface.width) * u64::from(surface.height) * 4)
+                .map_err(|_| Failure::Limit)?;
+            let source = usize::try_from(surface.data.size).map_err(|_| Failure::Limit)?;
+            if source > self.limits.video_presentation.max_frame_bytes
+                || tight > self.limits.video_presentation.max_frame_bytes
+            {
+                return Err(Failure::Limit);
+            }
+            let peak = frame_bytes
+                .checked_add(source)
+                .and_then(|n| n.checked_add(tight))
+                .ok_or(Failure::Limit)?;
+            if peak > self.limits.video_presentation.max_held_bytes {
+                return Err(Failure::Limit);
+            }
+            host_add(retained, peak, self.limits.graphics.max_host_bytes)?;
+            frame_bytes = frame_bytes.checked_add(tight).ok_or(Failure::Limit)?;
+            capture_work = capture_work
+                .checked_add(surface.data.size)
+                .and_then(|n| n.checked_add(tight as u64 * 5 + 256))
+                .ok_or(Failure::Limit)?;
+        }
+        self.video
+            .admit_gpu_capture_budget(capture_work, &self.limits.video_presentation)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            capture_work,
+            self.limits.max_preparation_work,
+        )?;
+        let owner = memory.owner_id();
+        let mut cursor = Cursor::Paused(memory);
+        for action in plan.actions() {
+            let command = match action {
+                draw::Action::Draw(index) => &plan.draws()[*index],
+                draw::Action::Flip(flip) => {
+                    let Cursor::Draw(current) = cursor else {
+                        return Err(Failure::UnsupportedVideo);
+                    };
+                    let mut limits = self.limits.video_presentation;
+                    limits.max_held_bytes = limits.max_held_bytes.min(
+                        self.limits
+                            .graphics
+                            .max_host_bytes
+                            .checked_sub(retained)
+                            .ok_or(Failure::Limit)?,
+                    );
+                    let kernel = kernel.as_deref_mut().ok_or(Failure::UnsupportedVideo)?;
+                    let clock = clock.ok_or(Failure::UnsupportedVideo)?;
+                    let (memory, result) =
+                        self.video
+                            .submit_gpu_flip(current, *flip, &limits, |memory| {
+                                clock(kernel, memory)
+                            });
+                    result?;
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
+            };
             let mut limits = self.limits.graphics;
             limits.max_work = limits.max_work.min(
                 self.limits
@@ -194,11 +290,15 @@ impl Driver {
                 .min(self.limits.max_vertices.saturating_sub(self.usage.vertices));
             limits.max_host_bytes = limits
                 .max_host_bytes
-                .checked_sub(retained)
+                .checked_sub(host_add(
+                    retained,
+                    self.video.retained_frame_bytes(),
+                    self.limits.graphics.max_host_bytes,
+                )?)
                 .ok_or(Failure::Limit)?;
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
-            let report = super::super::graphics::execute_draw_admitted(
-                memory,
+            let current = super::super::graphics::execute_draw_current(
+                cursor.into_pause(),
                 command,
                 &limits,
                 &self.limits.gpu,
@@ -239,15 +339,27 @@ impl Driver {
             self.usage.written_bytes = self
                 .usage
                 .written_bytes
-                .saturating_add(report.written_bytes as u64);
-            // Linear draw completion cannot attest a tiled VideoOut target.
-            // Presentation must establish its own actual layout/owner receipt.
+                .saturating_add(current.written_bytes() as u64);
+            cursor = Cursor::Draw(current);
         }
         self.graphics = plan.final_state();
-        self.graphics_owner = Some(memory.owner_id());
+        self.graphics_owner = Some(owner);
         self.frame.reset_before_graphics = false;
         self.poisoned = false;
         Ok(0)
+    }
+}
+
+enum Cursor<'borrow, 'owner> {
+    Paused(&'borrow mut PausedNativeMemory<'owner>),
+    Draw(super::super::graphics::CurrentDraw<'borrow, 'owner>),
+}
+impl<'borrow, 'owner> Cursor<'borrow, 'owner> {
+    fn into_pause(self) -> &'borrow mut PausedNativeMemory<'owner> {
+        match self {
+            Self::Paused(memory) => memory,
+            Self::Draw(current) => current.into_pause(),
+        }
     }
 }
 

@@ -13,12 +13,16 @@ use pentax_platform::{
     vulkan::GpuLimits,
 };
 
+#[path = "driver/flip_encoder.rs"]
+mod flip_encoder;
 #[path = "driver/graphics.rs"]
 mod graphics;
 #[path = "driver/interrupts.rs"]
 mod interrupts;
 #[path = "driver/presentation.rs"]
 mod presentation;
+pub(crate) type GraphicsClock =
+    fn(&mut pentax_kernel::Kernel, &mut PausedNativeMemory<'_>) -> Result<u64, Failure>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Function {
@@ -58,6 +62,7 @@ pub enum Function {
     VideoSubmitFlip,
     VideoGetFlipStatus,
     VideoIsFlipPending,
+    AgcDcbSetFlip,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -265,7 +270,7 @@ impl Driver {
         args: [u64; 6],
         stack: Option<u64>,
     ) -> Result<u64, Failure> {
-        self.submit_impl(memory, function, args, stack, None)
+        self.submit_impl(memory, function, args, stack, None, None)
     }
     pub(crate) fn submit_with_kernel(
         &mut self,
@@ -275,7 +280,18 @@ impl Driver {
         stack: Option<u64>,
         kernel: &mut pentax_kernel::Kernel,
     ) -> Result<u64, Failure> {
-        self.submit_impl(memory, function, args, stack, Some(kernel))
+        self.submit_impl(memory, function, args, stack, Some(kernel), None)
+    }
+    pub(crate) fn submit_with_kernel_clock(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+        stack: Option<u64>,
+        kernel: &mut pentax_kernel::Kernel,
+        clock: GraphicsClock,
+    ) -> Result<u64, Failure> {
+        self.submit_impl(memory, function, args, stack, Some(kernel), Some(clock))
     }
     /// The real HLE context supplies the process-relative clock lazily, after
     /// source handle/mode/index/queue admission. No extra kernel call is minted.
@@ -298,11 +314,15 @@ impl Driver {
         args: [u64; 6],
         stack: Option<u64>,
         mut kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<GraphicsClock>,
     ) -> Result<u64, Failure> {
         if self.poisoned {
             return Err(Failure::Poisoned);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        if function == Function::AgcDcbSetFlip {
+            return self.encode_flip(memory, args);
+        }
         if matches!(
             function,
             Function::VideoGetFlipStatus | Function::VideoIsFlipPending
@@ -445,7 +465,12 @@ impl Driver {
                 function,
                 Function::CommandBuffer | Function::MultiCommandBuffers
             ) {
-                return self.submit_graphics(memory, &ranges);
+                return self.submit_graphics_with_context(
+                    memory,
+                    &ranges,
+                    kernel.as_deref_mut(),
+                    clock,
+                );
             }
             return Err(Failure::UnsupportedQueue);
         }

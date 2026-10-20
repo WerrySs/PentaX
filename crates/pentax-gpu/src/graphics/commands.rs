@@ -35,9 +35,38 @@ pub struct CommandUsage {
     pub packets: u64,
     pub draw_packets: u64,
     pub zero_draws: u64,
+    pub flips: u64,
     pub vertices: u64,
     pub host_bytes: usize,
     pub work: u64,
+}
+
+/// Exact source R_FLIP payload, decoded only from tagged0xc004105c.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Flip {
+    handle: i32,
+    buffer: i32,
+    mode: i32,
+    argument: i64,
+}
+impl Flip {
+    pub fn handle(self) -> i32 {
+        self.handle
+    }
+    pub fn buffer(self) -> i32 {
+        self.buffer
+    }
+    pub fn mode(self) -> i32 {
+        self.mode
+    }
+    pub fn argument(self) -> i64 {
+        self.argument
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Draw(usize),
+    Flip(Flip),
 }
 
 /// Private immutable snapshot from one actual DRAW_INDEX_AUTO packet.
@@ -64,6 +93,7 @@ impl fmt::Debug for Draw {
 }
 pub struct CommandPlan {
     draws: Vec<Draw>,
+    actions: Vec<Action>,
     final_state: GraphicsState,
     usage: CommandUsage,
 }
@@ -78,6 +108,9 @@ impl fmt::Debug for CommandPlan {
 impl CommandPlan {
     pub fn draws(&self) -> &[Draw] {
         &self.draws
+    }
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
     }
     pub fn final_state(&self) -> GraphicsState {
         self.final_state
@@ -129,7 +162,16 @@ pub fn plan_commands(
         .max_draws
         .checked_mul(size_of::<Draw>())
         .ok_or(Error::Limit("draw storage"))?;
+    let action_count = limits
+        .max_draws
+        .checked_mul(2)
+        .ok_or(Error::Limit("action storage"))?;
+    let action_bytes = action_count
+        .checked_mul(size_of::<Action>())
+        .ok_or(Error::Limit("action storage"))?;
     usage.host_bytes = draw_bytes
+        .checked_add(action_bytes)
+        .ok_or(Error::Limit("action storage"))?
         .checked_add(size_of::<CommandPlan>())
         .and_then(|n| n.checked_add(size_of::<GraphicsState>()))
         .filter(|n| *n <= limits.max_host_bytes)
@@ -156,7 +198,22 @@ pub fn plan_commands(
         .checked_add(excess)
         .filter(|n| *n <= limits.max_host_bytes)
         .ok_or(Error::Limit("command host bytes"))?;
+    let mut actions = Vec::new();
+    actions
+        .try_reserve_exact(action_count)
+        .map_err(|_| Error::Allocation)?;
+    usage.host_bytes = usage
+        .host_bytes
+        .checked_add(
+            (actions.capacity() - action_count)
+                .checked_mul(size_of::<Action>())
+                .ok_or(Error::Limit("action storage"))?,
+        )
+        .filter(|n| *n <= limits.max_host_bytes)
+        .ok_or(Error::Limit("command host bytes"))?;
+    work(&mut usage, limits, action_bytes as u64)?;
     let mut state = initial;
+    let mut fresh_draw = false;
     for (buffer_index, bytes) in buffers.iter().enumerate() {
         let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
         let mut at = 0;
@@ -175,6 +232,8 @@ pub fn plan_commands(
             };
             let length = if header.raw() == 0x8000_0000 {
                 1
+            } else if header.raw() == 0xc004_105c {
+                6
             } else if header.packet_type() == 3 && header.low_byte() == 0 {
                 if header.opcode() == 0x10 && header.count() == 0x3fff {
                     1
@@ -188,6 +247,28 @@ pub fn plan_commands(
                 .checked_add(length)
                 .filter(|n| *n <= bytes.len() / 4)
                 .ok_or(fail("truncated packet"))?;
+            if header.raw() == 0xc004_105c {
+                if !fresh_draw {
+                    return Err(Error::Unsupported("GPU flip needs a fresh draw"));
+                }
+                work(&mut usage, limits, size_of::<Action>() as u64)?;
+                actions.push(Action::Flip(Flip {
+                    handle: word(at + 1) as i32,
+                    buffer: word(at + 2) as i32,
+                    mode: word(at + 3) as i32,
+                    argument: (u64::from(word(at + 4)) | (u64::from(word(at + 5)) << 32)) as i64,
+                }));
+                usage.flips += 1;
+                fresh_draw = false;
+                at = end;
+                continue;
+            }
+            if length > 1
+                && header.opcode() == 0x10
+                && matches!(word(at + 1), 0x6875_0777 | 0x6875_0778 | 0x6875_0781)
+            {
+                return Err(Error::Unsupported("unsupported graphics flip marker"));
+            }
             if length == 1 || header.opcode() == 0x10 {
                 at = end;
                 continue;
@@ -242,6 +323,8 @@ pub fn plan_commands(
                             .filter(|n| *n <= limits.max_vertices)
                             .ok_or(Error::Limit("draw vertices"))?;
                         work(&mut usage, limits, size_of::<Draw>() as u64)?;
+                        actions.push(Action::Draw(draws.len()));
+                        fresh_draw = true;
                         draws.push(Draw {
                             state,
                             vertex_count,
@@ -256,6 +339,7 @@ pub fn plan_commands(
     }
     Ok(CommandPlan {
         draws,
+        actions,
         final_state: state,
         usage,
     })

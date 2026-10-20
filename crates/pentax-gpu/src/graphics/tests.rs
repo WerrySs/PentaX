@@ -4,6 +4,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
+mod flips;
 mod tiled;
 
 const VS: u64 = 0x10000;

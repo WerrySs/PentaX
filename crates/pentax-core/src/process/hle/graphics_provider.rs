@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 106] = {
+const ENTRIES: [(&str, Function, usize, usize); 108] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 106] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 106];
+    let mut entries = [BASE_ENTRIES[0]; 108];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -130,6 +130,8 @@ const ENTRIES: [(&str, Function, usize, usize); 106] = {
         entries[103 + i * 2] = (nid, function, 2, 2);
         i += 1;
     }
+    entries[106] = ("YUeqkyT7mEQ", Function::AgcDcbSetFlip, 1, 1);
+    entries[107] = ("YUeqkyT7mEQ", Function::AgcDcbSetFlip, 2, 2);
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -323,4 +325,38 @@ pub fn build_graphics_provider(
 }
 fn put(image: &mut [u8], at: usize, bytes: &[u8]) {
     image[at..at + bytes.len()].copy_from_slice(bytes);
+}
+
+#[cfg(test)]
+mod flip_tests {
+    use super::*;
+    #[test]
+    fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
+        let provider = build_graphics_provider(8192).unwrap();
+        assert_eq!(provider.function_count(), 108);
+        assert_eq!(provider.image().len(), 8192);
+        let old_last = provider.markers().nth(105).unwrap();
+        assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
+        assert_eq!(old_last.function, Function::AgcCreateInterpolantMapping2);
+        for (index, rva, id, scope) in [
+            (106, 0x7a0, 0x5058_476bu32, 1),
+            (107, 0x7b0, 0x5058_476c, 2),
+        ] {
+            assert_eq!(
+                ENTRIES[index],
+                ("YUeqkyT7mEQ", Function::AgcDcbSetFlip, scope, scope)
+            );
+            let marker = provider.markers().nth(index).unwrap();
+            assert_eq!((marker.rva(), marker.id()), (rva, id));
+            let id = id.to_le_bytes();
+            assert_eq!(
+                &provider.image()[rva as usize..rva as usize + 8],
+                &[0xb8, id[0], id[1], id[2], id[3], 15, 5, 0xc3]
+            );
+        }
+        assert!(matches!(
+            build_graphics_provider(8191),
+            Err(KernelProviderError::Budget)
+        ));
+    }
 }

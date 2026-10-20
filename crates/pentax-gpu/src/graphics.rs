@@ -16,7 +16,7 @@ use std::fmt;
 mod commands;
 mod prepare;
 mod state;
-pub use commands::{CommandLimits, CommandPlan, CommandUsage, Draw, plan_commands};
+pub use commands::{Action, CommandLimits, CommandPlan, CommandUsage, Draw, Flip, plan_commands};
 pub use prepare::prepare_draw;
 pub use prepare::prepare_draw_with_target;
 pub use state::GraphicsState;

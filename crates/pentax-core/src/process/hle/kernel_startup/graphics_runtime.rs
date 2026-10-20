@@ -229,6 +229,32 @@ pub(super) fn stop(
             marker.function == driver::Function::AgcGetRegisterDefaultsInternal,
             request.args[0],
         )
+    } else if matches!(
+        marker.function,
+        driver::Function::CommandBuffer | driver::Function::MultiCommandBuffers
+    ) {
+        driver.submit_with_kernel_clock(
+            &mut paused,
+            marker.function,
+            request.args,
+            request.stack_pointer,
+            &mut session.kernel,
+            |kernel, paused| {
+                let guest = super::super::kernel_adapter::KernelMemory {
+                    paused,
+                    source: None,
+                    supplied_modules: 0,
+                    lookup_limits: None,
+                    lookup_work: None,
+                    loaded_modules: None,
+                    thread_tls: None,
+                    initial_entry: None,
+                };
+                kernel
+                    .process_time_counter(&guest)
+                    .map_err(driver::Failure::Kernel)
+            },
+        )
     } else {
         driver.submit_with_kernel(
             &mut paused,
@@ -411,6 +437,11 @@ mod tests {
             ("libSceAgc", "libSceAgc", 1, "f3dg2CSgRKY", 0),
             ("libSceAgc", "libSceAgc", 2, "f3dg2CSgRKY", 0),
             ("Graphics5Driver", "Graphics5Driver", 1, "f3dg2CSgRKY", 1),
+            ("Graphics5", "Graphics5", 1, "YUeqkyT7mEQ", 0),
+            ("libSceAgc", "libSceAgc", 1, "YUeqkyT7mEQ", 0),
+            ("Graphics5", "Graphics5", 2, "YUeqkyT7mEQ", 0),
+            ("Graphics5", "libSceAgc", 1, "YUeqkyT7mEQ", 1),
+            ("Graphics5Driver", "Graphics5Driver", 1, "YUeqkyT7mEQ", 1),
         ] {
             let mut input = original_input(1);
             let strings = u64::from_le_bytes(input[0x208..0x210].try_into().unwrap()) as usize;
@@ -449,7 +480,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 106);
+            assert_eq!(binding.factory.function_count(), 108);
             let open = binding
                 .factory
                 .markers()

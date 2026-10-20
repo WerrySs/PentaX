@@ -19,6 +19,9 @@ const SENTINEL: [u8; 4] = [17, 31, 47, 63];
 const RED: [u8; 4] = [255, 0, 0, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
 
+#[path = "eop_tests.rs"]
+mod eop_tests;
+
 fn unary(op: u32, dst: u32, src: u32) -> u32 {
     0x7e00_0000 | (dst << 17) | (op << 9) | src
 }

@@ -321,3 +321,21 @@ GPL-2.0-only and the retained original Kyty copyright/MIT grant apply.
 PentaX modifications2026 append only the demonstrated QcteRwbsnV0 identity
 under libkernel1.1/libScePosix1, reusing the same low32-microsecond service.
 This finite compatibility scope is not an assertion of a public POSIX wrapper.
+
+The ordered GPU-EOP flip bridge and fit-only AgcDcbSetFlip encoder additionally
+adapt PUBLIC KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp, blob a29801fdf992948c594f62ec9045853e6158fd6e
+  src/libs/agc.h, blob ac4337c9d2c425c90bb669524bf0428fe7e6ffe8
+  src/libs/libAgcDriver.cpp, blob 02b40351d1cc84fb20d601a09652b688721307b5
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp,
+    blob 19034daafbd6da20d11f634debbf666c1054eed7
+  src/graphics/presentation/videoOut.cpp,
+    blob 247df7a480a88d7f45f88495f2806744917b20d8
+  src/graphics/host_gpu/renderer/sync.cpp,
+    blob 59f00e1e95e0288e28fcb2ef4a6a3a75b48a6dfb
+Copyright(c)2021 InoriRus; GPL-2.0-only and the original Kyty MIT grant retained
+above continue to apply. PentaX modifications2026: bounded ordered action
+execution, exclusive current-draw authority, live registered-surface validation,
+actual owned GPU-ready capture, failed-reservation rollback and atomic fit-only
+packet/cursor publication. No game assets or proprietary command data copied.
+Readiness does not fabricate vblank, presentation acknowledgement or events.

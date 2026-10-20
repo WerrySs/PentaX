@@ -101,6 +101,46 @@ pub struct Report {
     pub completion: GraphicsCompletion,
 }
 
+/// Current execution authority retains the unique pause loan. It cannot be
+/// constructed from a public Report or kept while its owner resumes. Returning
+/// the pause consumes/drops the receipt; a flip consumes it exactly once.
+pub(super) struct CurrentDraw<'borrow, 'owner> {
+    memory: &'borrow mut PausedNativeMemory<'owner>,
+    report: Report,
+}
+impl<'borrow, 'owner> CurrentDraw<'borrow, 'owner> {
+    pub(super) fn written_bytes(&self) -> usize {
+        self.report.written_bytes
+    }
+    pub(super) fn into_pause(self) -> &'borrow mut PausedNativeMemory<'owner> {
+        self.memory
+    }
+    pub(super) fn consume<T>(
+        self,
+        action: impl FnOnce(
+            &mut PausedNativeMemory<'owner>,
+            &GraphicsCompletion,
+        ) -> Result<T, super::driver::Failure>,
+    ) -> (
+        &'borrow mut PausedNativeMemory<'owner>,
+        Result<T, super::driver::Failure>,
+    ) {
+        let result = action(self.memory, &self.report.completion);
+        (self.memory, result)
+    }
+}
+pub(super) fn execute_draw_current<'borrow, 'owner>(
+    memory: &'borrow mut PausedNativeMemory<'owner>,
+    draw: &Draw,
+    limits: &Limits,
+    gpu_limits: &GpuLimits,
+    command_ranges: &[CommandRange],
+    admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
+) -> Result<CurrentDraw<'borrow, 'owner>, Error> {
+    let report = execute_draw_admitted(memory, draw, limits, gpu_limits, command_ranges, admit)?;
+    Ok(CurrentDraw { memory, report })
+}
+
 /// No Vulkan call happens until the entire destination and its disjointness
 /// from retained command sources are admitted. The exclusive pause lasts across
 /// preparation, execution, fence and all-or-nothing guest publication.

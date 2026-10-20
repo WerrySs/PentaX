@@ -559,6 +559,26 @@ host storage budgets and reverse work are admitted before GPU effects. Atomic
 writeback then produces a private receipt with actual layout/geometry/range.
 This RGBA8_UNORM byte receipt does not perform VideoOut sRGB transfer conversion,
 acknowledge a flip, emit GPU-EOP or establish a rendered game frame.
+
+The ordered graphics driver separately admits the exact six-dword R_FLIP packet
+`0xc004105c`. A fresh fenced tiled draw retains its exclusive native pause until
+the next flip consumes it. Matching the live registered surface, owner, port
+generation and full geometry precedes owned capture and GPU-ready publication.
+Multiple Draw/Flip cycles retain order; display count, vblank and events do not
+advance. Old reports and numeric receipt fields cannot authorize this path.
+Queue and capture quotas are admitted before GPU work. A failed new capture
+removes its reservation; effects already retired remain terminal and cannot
+replay. Full queues stop explicitly until real consumer wake is implemented.
+
+`AgcDcbSetFlip` appends two exact exports: canonical Graphics5 and demonstrated
+libSceAgc module/library pairs, each module1.1/library1. The five-GP source ABI
+writes six packet words and advances the source56-byte command buffer's cursor.
+The finite fit path reads only cursor/reservation fields and atomically publishes
+the24-byte packet plus eight-byte cursor. Growth/callback, malformed spans and
+descriptor/packet physical aliases refuse before effects. All106 prior marker
+IDs/RVAs remain fixed; the provider now has108 exports within its existing8KiB
+file bound. This is command encoding and real GPU-ready capture, not desktop
+transport or an actual presentation acknowledgement.
 The provider keeps its8KiB file and one RX guest page, with dynamic metadata at
 0x7c0 and string/symbol tables at0x900/0x1100. These positions derive from the
 fixed export count and exact name bytes under the same image bound; appending

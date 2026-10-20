@@ -73,3 +73,14 @@ continue to apply. Modified2026: finite exact swizzle/geometry admission,
 immutable padded LOAD ownership and a bounded pure decode hook for the native
 core's existing conversion. No game/image/shader asset is copied. No hardware
 tiling support beyond the declared one-level32bpp profile is implied.
+
+The bounded ordered R_FLIP action planner additionally follows PUBLIC
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp, blob a29801fdf992948c594f62ec9045853e6158fd6e
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp,
+    blob 19034daafbd6da20d11f634debbf666c1054eed7
+Copyright(c)2021 InoriRus; GPL-2.0-only and the original Kyty MIT grant retained
+above continue to apply. PentaX modifications2026 retain only the exact tagged
+six-dword source packet, bounded action indices and fresh draw/flip ordering.
+Pure plans grant no native owner, GPU completion or display authority. All
+packet fixtures remain original PentaX inputs.

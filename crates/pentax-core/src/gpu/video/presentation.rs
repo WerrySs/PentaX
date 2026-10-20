@@ -205,6 +205,132 @@ impl Queue {
     }
 }
 impl super::State {
+    pub(in crate::gpu) fn retained_frame_bytes(&self) -> usize {
+        self.presentation.held
+    }
+    pub(in crate::gpu) fn admit_gpu_capture_budget(
+        &self,
+        work: u64,
+        limits: &PresentationLimits,
+    ) -> Result<(), Failure> {
+        self.presentation
+            .work
+            .checked_add(work)
+            .filter(|n| *n <= limits.max_work)
+            .map(|_| ())
+            .ok_or(Failure::Limit)
+    }
+
+    /// Metadata only, not readiness or execution authority. Called for the
+    /// whole ordered stream before its first possible GPU side effect.
+    pub(in crate::gpu) fn gpu_capture_surface(
+        &self,
+        flip: pentax_gpu::graphics::Flip,
+    ) -> Result<Surface, Failure> {
+        let port = self.port(flip.handle()).ok_or(Failure::UnsupportedVideo)?;
+        if !matches!(flip.mode(), 1..=4) || port.master_handle.is_some() || port.slave_count != 0 {
+            return Err(Failure::UnsupportedVideo);
+        }
+        let surface = self
+            .surface(flip.handle(), flip.buffer())
+            .ok_or(Failure::UnsupportedVideo)?;
+        if surface.compression != super::Compression::None
+            || surface.metadata.is_some()
+            || surface.bytes_per_pixel != 4
+            || surface.format != super::PixelFormat::Rgba8Srgb
+            || surface.options != 0
+            || surface.dcc_control != 0
+        {
+            return Err(Failure::UnsupportedVideo);
+        }
+        Ok(surface)
+    }
+    pub(in crate::gpu) fn gpu_pending(&self, handle: i32) -> Result<usize, Failure> {
+        let slot = index(handle)
+            .filter(|i| self.ports[*i].open)
+            .ok_or(Failure::UnsupportedVideo)?;
+        usize::try_from(self.presentation.statuses[slot].pending)
+            .map_err(|_| Failure::UnsupportedVideo)
+    }
+
+    /// Consume genuine current draw authority while its unique pause loan is
+    /// still held. No API accepts a public old Report, numeric serial or tag.
+    pub(in crate::gpu) fn submit_gpu_flip<'borrow, 'owner>(
+        &mut self,
+        current: crate::gpu::graphics::CurrentDraw<'borrow, 'owner>,
+        flip: pentax_gpu::graphics::Flip,
+        limits: &PresentationLimits,
+        clock: impl FnOnce(&mut PausedNativeMemory<'owner>) -> Result<u64, Failure>,
+    ) -> (&'borrow mut PausedNativeMemory<'owner>, Result<(), Failure>) {
+        current.consume(|memory, completed| {
+            self.check_owner(memory.owner_id())?;
+            let surface = self.gpu_capture_surface(flip)?;
+            let geometry = completed.geometry();
+            if completed.owner() != memory.owner_id()
+                || completed.layout() != crate::gpu::graphics::TargetLayout::RenderTarget64KbRgba8
+                || surface.data != completed.target()
+                || surface.width != geometry.width()
+                || surface.height != geometry.height()
+                || surface.pitch != geometry.pitch()
+                || surface.data.size != geometry.guest_bytes() as u64
+            {
+                return Err(Failure::UnsupportedVideo);
+            }
+            let slot = index(flip.handle()).ok_or(Failure::UnsupportedVideo)?;
+            let previous_status = self.presentation.statuses[slot];
+            let previous_owner = self.presentation.owner;
+            let ticket = match self.reserve_flip_with_clock(
+                flip.handle(),
+                flip.buffer(),
+                flip.mode(),
+                flip.argument(),
+                FlipSource::GpuEop,
+                memory.owner_id(),
+                || clock(memory),
+            )? {
+                FlipSubmission::Accepted(ticket) => ticket,
+                FlipSubmission::Rejected(0x8029_0012) => return Err(Failure::Waiting),
+                FlipSubmission::Rejected(_) => return Err(Failure::UnsupportedVideo),
+            };
+            let result = (|| {
+                self.prepare_flip(ticket, memory, limits)?;
+                let position = self.presentation.position(ticket)?;
+                let request = self.presentation.requests[position].as_mut().unwrap();
+                if request.phase != Phase::Recording
+                    || request.source != FlipSource::GpuEop
+                    || request
+                        .frame
+                        .as_ref()
+                        .is_none_or(|frame| frame.surface != surface)
+                    || self.ports[slot].state.generation != ticket.generation
+                {
+                    return Err(Failure::UnsupportedVideo);
+                }
+                // Fence and full retiled writeback preceded CurrentDraw. This
+                // changes GPU readiness only, never presentation.
+                request.phase = Phase::Ready;
+                Ok(())
+            })();
+            if result.is_err() {
+                // Roll back only this failed reservation/capture. Earlier
+                // ready frames and the retired draw remain intact; the driver
+                // remains terminal after those irreversible GPU effects.
+                if let Some(position) = self
+                    .presentation
+                    .requests
+                    .iter()
+                    .position(|r| r.as_ref().is_some_and(|r| r.ticket == ticket))
+                    && let Some(request) = self.presentation.requests[position].take()
+                    && let Some(frame) = request.frame
+                {
+                    self.presentation.held -= frame.capacity();
+                }
+                self.presentation.statuses[slot] = previous_status;
+                self.presentation.owner = previous_owner;
+            }
+            result
+        })
+    }
     /// Read-only ownership attestation; queries never bind an unowned state.
     /// Fresh state may report source null/invalid-handle errors before any
     /// video operation has selected an owner. Initialized foreign state refuses.

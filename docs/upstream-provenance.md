@@ -1588,3 +1588,43 @@ are not supplied by this cooperative slice. Original modeled clocks exercise
 deadline, width, budget, ownership, replay and retry contracts; original native
 consumers exercise actual cross-thread continuation rather than claiming source
 host-thread race equivalence.
+
+## Ordered GPU-ready flip capture and command encoding
+
+This bounded route independently pins public KytyPS5/KytyPS5 revision
+`7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3`:
+
+- [agc.cpp](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp),
+  blob `a29801fdf992948c594f62ec9045853e6158fd6e`: source56-byte
+  CommandBuffer fields, allocation ordering and five-GP AgcDcbSetFlip encoder.
+- `src/libs/agc.h`, blob `ac4337c9d2c425c90bb669524bf0428fe7e6ffe8`, and
+  `src/libs/libAgcDriver.cpp`, blob `02b40351d1cc84fb20d601a09652b688721307b5`:
+  declaration, public NID `YUeqkyT7mEQ` and Graphics5 module1.1/library1.
+- [pm4Handlers.cpp](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp),
+  blob `19034daafbd6da20d11f634debbf666c1054eed7`: exact tagged six-dword
+  R_FLIP header `0xc004105c`, signed argument reconstruction and immediate flip.
+- `src/graphics/presentation/videoOut.cpp`, blob
+  `247df7a480a88d7f45f88495f2806744917b20d8`,
+  `src/graphics/host_gpu/renderer/sync.cpp`, blob
+  `59f00e1e95e0288e28fcb2ef4a6a3a75b48a6dfb`, and
+  `src/graphics/host_gpu/renderer/commandScheduler.cpp`, blob
+  `afab5519ef407b431af6b73e856fce0818aaf699`: pending reservation, fenced
+  preparation, GPU-ready completion and separate real presentation.
+
+PentaX adds finite ordered actions, source-preserving Draw/Flip cycles and a
+private proof retaining the actual native pause through fenced tiled writeback
+and same-surface capture. Pure metadata, public old reports and source tags
+cannot mark a request ready. Failed new capture rolls back its own reservation;
+earlier effects remain terminal and cannot replay. Queuefull is an explicit
+controlled stop until genuine consumer wake exists. The fit-only encoder
+atomically writes packet/cursor and refuses growth callbacks or unsupported
+aliases before effects. Only the canonical pair and independently demonstrated
+libSceAgc full-prefix pair are exported; previous marker ordinals remain fixed.
+
+GPU readiness neither acknowledges presentation nor creates vblank/events.
+RGBA8_UNORM draw bytes and the admitted sRGB scanout storage share a checked byte
+layout; transfer/color-management equivalence is not inferred. Desktop transport,
+actual presentation and callback-based command-buffer growth remain unfinished.
+Original packet/shader fixtures establish test contracts, not game compatibility
+or executed results. Copyright(c)2021 InoriRus, GPL-2.0-only and the retained
+original Kyty MIT grant continue to apply in the GPU/core NOTICE files.

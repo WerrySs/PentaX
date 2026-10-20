@@ -38,11 +38,25 @@ The oldest incomplete request blocks later hand-offs. Buffer retirement waits
 while requests remain. Closing a port cancels retained requests and invalidates
 old frame acknowledgements before its next generation opens.
 
-`complete_flip` currently completes only CPU preparation. A GPU-EOP tag never
-provides fence evidence and cannot advance a request to ready. The separate
-linear draw completion receipt does not attest a RenderTarget64KB buffer;
-fenced execution, explicit validated retile/writeback and same-surface receipt
-integration are required before enabling GPU-EOP completion.
+`complete_flip` completes only CPU preparation. A GPU-EOP tag alone never
+provides fence evidence. The ordered graphics path separately consumes a private
+`CurrentDraw` holding the actual owner's exclusive pause and a genuine fenced,
+retiled writeback. It compares the current registered surface, port generation,
+full padded range, dimensions and pitch before capture. The admitted bridge is
+uncompressed four-byte RGBA8 storage, with no metadata/options/DCC or compositing.
+It captures owned pixels and marks only GPU readiness. The RGBA8_UNORM draw
+receipt does not establish an sRGB transfer conversion or color-management
+equivalence merely because the registered byte layout matches.
+
+All packet/state admission and conservative queue/capture quotas precede GPU
+effects. Each draw prepares live resources in order, so later LOADs see earlier
+writebacks. A flip consumes its fresh current draw; a later draw may create new
+authority for another flip. No old public report, address, source tag or resumed
+owner can recreate that proof. A failed capture rolls back only its new
+reservation/frame/status; earlier queued frames and irreversible draw effects
+remain. Any failure after possible effects leaves the driver terminal, preventing
+prefix replay. A full queue returns a controlled `Waiting` stop before execution;
+consumer-driven suspension/wakeup is not implemented by this path.
 
 `take_frame` requires a nonzero caller-provided real vblank count, observes the
 configured flip-rate interval and permits at most one acknowledged frame per
@@ -57,5 +71,12 @@ The queue does not create a vblank clock, deliver kernel equeue events, present 
 desktop texture or implement IPC. Those integrations must retain actual event
 owners, bound outstanding frame capacities and acknowledge only real consumer
 presentation. Master/slave compositing and explicit black/blank flip indices
-remain typed refusals. No window, real game image, frame rate or GPU-EOP
-completion is established by the original unit fixtures.
+remain typed refusals. No window, real game image, frame rate, display
+acknowledgement or kernel event delivery is established by GPU readiness.
+
+The exact R_FLIP route follows public KytyPS5/KytyPS5 revision
+`7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3`, `src/libs/agc.cpp`,
+`src/graphics/guest_gpu/command_processor/pm4Handlers.cpp`,
+`src/graphics/presentation/videoOut.cpp` and
+`src/graphics/host_gpu/renderer/sync.cpp`. Exact blobs and retained licensing
+are recorded in the core NOTICE and upstream provenance document.

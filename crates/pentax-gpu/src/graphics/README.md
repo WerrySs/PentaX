@@ -11,6 +11,16 @@ indexed draws, barriers, completion writes and unknown registers are refused.
 No reset register value is invented. Final state is published by a queue owner
 only after execution; a failed plan returns no executable prefix.
 
+The source-specific six-dword tagged NOP `0xc004105c` produces an ordered
+`Action::Flip`, retaining its handle, buffer, mode and signed64-bit argument.
+This is Kyty's R_FLIP convention, not a generic AMD NOP side effect. Only that
+exact header is admitted. Other low-header flags and the separate flip/label/
+interrupt marker payloads remain unsupported. Every flip requires a preceding
+nonzero draw not already consumed by another flip; multiple Draw/Flip cycles
+remain ordered. The plan retains private draw snapshots plus bounded action
+indices, with at most twice the admitted draw count. A plan grants no fence,
+surface ownership, frame readiness or presentation authority.
+
 `prepare_draw` reads the actual ES/PS program addresses, validates terminated
 instruction boundaries with the existing shader decoder, refuses backward
 branches and compiles both guest programs through the existing Rust compiler.
@@ -115,7 +125,16 @@ that allowance. Active pixels overlay the retained original padded
 snapshot, preserving every unused byte. The private completion carries actual
 layout, geometry and padded range only after fenced same-owner atomic writeback.
 That RGBA8_UNORM receipt is not a VideoOut sRGB transfer conversion, GPU-EOP
-event or presentation acknowledgement.
+event or presentation acknowledgement. The native ordered driver can separately
+consume a genuine current paused draw to capture an exactly matching registered
+tiled surface; the pure planner cannot manufacture that authority.
+
+The R_FLIP encoder/consumer contract additionally follows public revision
+`7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3`, `src/libs/agc.cpp` (blob
+`a29801fdf992948c594f62ec9045853e6158fd6e`) and
+`src/graphics/guest_gpu/command_processor/pm4Handlers.cpp` (blob
+`19034daafbd6da20d11f634debbf666c1054eed7`). The bounded Rust action walker
+is a PentaX modification under the retained GPL-2.0-only/Kyty MIT notices.
 
 Public execution ordering is independently anchored to
 [KytyPS5 at7b7f9a70](https://github.com/KytyPS5/KytyPS5/tree/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3):
