@@ -77,11 +77,22 @@ eight reserved-zero bytes. The complete file is at most 336 bytes. There is no
 absolute PC, thread identifier, code byte or host execution context. **Register
 values can contain guest pointers or title-specific data: keep the file private.**
 PCs must map unambiguously to initialized executable nonwritable bytes in the
-actual source epoch. Invalid geometry, an outer return marker or exhausted
-independent finite observer work omits the artifact; no approximate PC is used.
+actual source epoch, including execute-only segments. This matches execution's
+source geometry and reads no guest payload; a guest data-read permission is
+not required for immutable metadata normalization. Each role is independent:
+an unmappable PC, such as an outer return marker, omits only that row, preserving
+the other valid context. No approximate PC is used. Invalid source epochs or
+exhausted independent finite observer work omit the artifact.
 Only an explicit request adds final `private_thread_states_status` with
 `written`, `unavailable` or `write-failed`. File output follows execution and
-cannot replace its result. The snapshot can support a bounded local analysis of
+cannot replace its result. That same explicit request adds final-only
+`private_thread_states_main` and `private_thread_states_active_child` with closed
+row labels: `captured`, `unavailable-context`, `not-captured`, `epoch`,
+`observer-work`, `geometry`, `no-initialized-executable` or `ambiguous`.
+`unavailable-context` does not guess whether a role was absent or its actual
+identity check refused selection. The labels describe capture, not file-write
+success or guest behavior. Default output and PROGRESS stay unchanged.
+The snapshot can support a bounded local analysis of
 the stopped branch and its registers. It does not by itself establish useful
 progress, polling, starvation, deadlock or a cause of missing rendering.
 

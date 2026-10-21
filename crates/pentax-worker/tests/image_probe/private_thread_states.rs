@@ -198,7 +198,9 @@ fn private_thread_states_preserve_stop_samples_and_fresh_file_capability() {
     code.extend([0x49, 0xbd]);
     code.extend(CHILD_VALUE.to_le_bytes());
     code.extend([0x4d, 0x39, 0xed, 0x0f, 0x0b]);
-    let source = input(&code, false);
+    let mut bytes = module_bytes(&code, false, None);
+    put(&mut bytes, 68, &1_u32.to_le_bytes()); // PF_X only, as allowed by execution.
+    let source = create_input(bytes);
     let baseline = files.path("baseline.bin");
     let samples = files.path("samples.bin");
     let states = files.path("states.bin");
@@ -207,12 +209,19 @@ fn private_thread_states_preserve_stop_samples_and_fresh_file_capability() {
     assert_eq!(off["code"], "unsupported-instruction");
     assert_eq!(off["instruction"], "Ud2");
     assert!(!off.contains_key("private_thread_states_status"));
+    assert!(!off.contains_key("private_thread_states_main"));
+    assert!(!off.contains_key("private_thread_states_active_child"));
     assert!(!states.exists());
     let (status, mut on, text) = run(&source, Some(&states), Some(&samples));
     assert_eq!(status, off_status, "{text}");
     assert_eq!(
         on.remove("private_thread_states_status").unwrap(),
         "written"
+    );
+    assert_eq!(on.remove("private_thread_states_main").unwrap(), "captured");
+    assert_eq!(
+        on.remove("private_thread_states_active_child").unwrap(),
+        "unavailable-context"
     );
     assert_eq!(without_durations(on), without_durations(off));
     let retained = std::fs::read(&states).unwrap();
@@ -245,7 +254,18 @@ fn private_thread_states_preserve_stop_samples_and_fresh_file_capability() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["private_thread_states_status"], "unavailable");
+    assert_eq!(
+        fields["private_thread_states_main"],
+        "no-initialized-executable"
+    );
+    assert_eq!(
+        fields["private_thread_states_active_child"],
+        "unavailable-context"
+    );
     assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
+    println!(
+        "private_thread_states_execute_only_available=true\tprivate_thread_states_execute_only_rows=1"
+    );
 }
 
 #[test]
@@ -282,6 +302,11 @@ fn private_thread_states_capture_parked_main_and_actual_active_child_before_stop
     assert_eq!(
         on.remove("private_thread_states_status").unwrap(),
         "written"
+    );
+    assert_eq!(on.remove("private_thread_states_main").unwrap(), "captured");
+    assert_eq!(
+        on.remove("private_thread_states_active_child").unwrap(),
+        "captured"
     );
     assert_eq!(without_durations(on), without_durations(off));
     let captured = rows(&path);

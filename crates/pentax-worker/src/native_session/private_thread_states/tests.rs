@@ -29,7 +29,7 @@ fn image(flags: u32) -> Vec<u8> {
 
 fn with_sources(flags: u32, check: impl FnOnce(&SymbolicLinkPlan<'_>, &SymbolicLinkPlan<'_>)) {
     let first = image(flags);
-    let second = image(5);
+    let second = image(1); // Independent execute-only initialized source.
     let inputs = [
         ModuleInput::new(open_executable(&first).unwrap(), 0x100000),
         ModuleInput::new(open_executable(&second).unwrap(), 0x200000),
@@ -96,10 +96,12 @@ fn private_thread_states_encode_actual_roles_registers_and_current_epoch_only() 
         capture.capture(source, states);
         assert!(capture.bytes().is_none());
         assert_eq!(capture.work, work);
+        assert_eq!(capture.labels(), ["epoch", "epoch"]);
         capture.capture(next, [None, Some(&child)]);
         let bytes = capture.bytes().unwrap();
         assert_eq!(bytes.len(), 176);
         assert_eq!(&bytes[20..24], &1_u32.to_le_bytes());
+        assert_eq!(capture.labels(), ["unavailable-context", "captured"]);
     });
 }
 
@@ -112,14 +114,57 @@ fn private_thread_states_refuse_bss_writable_or_unmapped_pc_without_guessing() {
             capture.begin_epoch(source.identity());
             let mut cpu = NativeCpuState::new(0x100fff, 0x300000);
             capture.capture(source, [Some(&cpu), None]);
-            assert_eq!(capture.bytes().is_some(), flags == 5);
+            assert_eq!(capture.bytes().is_some(), flags != 7);
             for pc in [0x101000, 0x103fff, 0x104000, 0xfffff, u64::MAX] {
                 cpu.guest_pc = pc;
                 capture.capture(source, [Some(&cpu), None]);
                 assert!(capture.bytes().is_none());
+                assert_eq!(
+                    capture.labels(),
+                    ["no-initialized-executable", "unavailable-context"]
+                );
             }
         });
     }
+}
+
+#[test]
+fn private_thread_states_keep_valid_roles_when_another_pc_cannot_be_normalized() {
+    with_sources(1, |source, _| {
+        // Both PCs first normalize in independent execute-only modules. No
+        // guest data-read permission or actual payload read is introduced.
+        let mut main = NativeCpuState::new(0x100200, 0x300000);
+        let mut child = NativeCpuState::new(0x200240, 0x400000);
+        main.gpr[12] = 17;
+        child.gpr[12] = 29;
+        let mut capture = PrivateThreadStates::default();
+        capture.enable();
+        capture.begin_epoch(source.identity());
+        capture.capture(source, [Some(&main), Some(&child)]);
+        assert_eq!(capture.bytes().unwrap().len(), 336);
+        assert_eq!(capture.labels(), ["captured", "captured"]);
+
+        main.guest_pc = 0x101000; // BSS, never initialized code.
+        capture.capture(source, [Some(&main), Some(&child)]);
+        let bytes = capture.bytes().unwrap();
+        assert_eq!(bytes.len(), 176);
+        assert_eq!(&bytes[8..12], &1_u32.to_le_bytes());
+        assert_eq!(&bytes[12..16], &[0; 4]);
+        assert_eq!(&bytes[20..24], &1_u32.to_le_bytes());
+        assert_eq!(word(bytes, 24), 0x240);
+        assert_eq!(word(bytes, 32 + 12 * 8), 29);
+        assert_eq!(capture.labels(), ["no-initialized-executable", "captured"]);
+
+        main.guest_pc = 0x100200;
+        child.guest_pc = u64::MAX;
+        capture.capture(source, [Some(&main), Some(&child)]);
+        let bytes = capture.bytes().unwrap();
+        assert_eq!(bytes.len(), 176);
+        assert_eq!(&bytes[20..24], &0_u32.to_le_bytes());
+        assert_eq!(word(bytes, 24), 0x200);
+        assert_eq!(word(bytes, 32 + 12 * 8), 17);
+        assert_eq!(capture.labels(), ["captured", "no-initialized-executable"]);
+    });
 }
 
 #[test]
@@ -150,5 +195,19 @@ fn private_thread_states_work_refusal_is_artifact_only_and_never_public_payload(
         assert_eq!(cpu, before);
         assert_eq!(progress.protocol_fields(), public);
         assert_eq!(progress.progress_fields(), ordinary);
+        assert_eq!(
+            progress.private_thread_states.labels(),
+            ["observer-work", "observer-work"]
+        );
+        progress.private_thread_states_status = Some("unavailable");
+        let final_fields = progress.protocol_fields();
+        assert!(final_fields.contains("\tprivate_thread_states_main=observer-work"));
+        assert!(final_fields.contains("\tprivate_thread_states_active_child=observer-work"));
+        assert_eq!(progress.progress_fields(), ordinary);
+        let [main, child] = progress.private_thread_states.labels();
+        let rendered = format!(
+            "\tprivate_thread_states_main={main}\tprivate_thread_states_active_child={child}"
+        );
+        assert!(rendered.len() <= 128);
     });
 }

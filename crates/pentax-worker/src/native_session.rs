@@ -242,7 +242,8 @@ impl NativeSessionProgress {
         let contexts = self
             .private_thread_states_status
             .map_or_else(String::new, |status| {
-                format!("\tprivate_thread_states_status={status}")
+                let [main, child] = self.private_thread_states.labels();
+                format!("\tprivate_thread_states_status={status}\tprivate_thread_states_main={main}\tprivate_thread_states_active_child={child}")
             });
         let causality = causality::fields(
             &self.dispatch,
