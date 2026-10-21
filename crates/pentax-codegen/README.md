@@ -215,6 +215,43 @@ counter checks. Concurrent bounded diagnostic drains are shared with the prior
 measurement helper. Timings include process startup/teardown; no title speedup
 or whole-run instruction-frequency inference is made.
 
+`with_native_scalar_float()` separately requests exactly six decoded VEX
+ADDSS/SD, SUBSS/SD and MULSS/SD instructions with either an XMM or memory right
+source: twelve operand shapes. It requires the full-YMM request and declared
+AVX; actual CPU/OS vector-state admission remains the native runtime's separate
+obligation. No AVX2 feature is needed. All three registers, where present, are
+XMM0..15. A memory right source must be one ordinary 64-bit address with an
+exact 4/8-byte read; unaligned reads are allowed. Address32, segment overrides,
+VSIB, writes, EVEX and adjacent scalar DIV/MIN/MAX/SQRT/FMA/conversion or merge
+families gain no admission. The old register-only and packed-memory requests
+continue to mediate scalar arithmetic when this separate request is absent.
+
+Only the low scalar element performs arithmetic. The rest of the low128 bits
+comes from logical source1, including when destination aliases either source;
+the destination's upper128 bits are zeroed. Inactive source elements are copied
+as raw bits and cannot raise numeric exceptions. The same admitted all-masked
+MXCSR, ordered NaN operands, rounding, DAZ/FTZ and sticky status as the scalar
+mediator apply. RFLAGS and unrelated registers are preserved. Guest unmasked
+numeric traps, signal delivery and new control instructions remain unsupported.
+The pinned encoder emits canonical scalar VEX.L=0, including a decoded LIG
+input with L=1; original planning fixtures verify the actual emitted prefix.
+
+`BlockPlan::emits_scalar_float_memory()` and its materialized counterpart are
+immutable classifications of actual emitted reads, not requests or numeric
+permission grants. They require full span/dependency preflight even on the
+manual native path. The ordinary footprint evaluator already supports these
+4/8-byte reads, so no generic size ceiling changes. Source identity, current
+GPRs, live backing/permissions, owner, stack, continuation and cache attestation
+still apply on every entry. Whole-block preflight can reject a later bad access
+before earlier newly coalesced arithmetic executes; identical partial-fault
+state across former mediated boundaries and precise guest fault recovery are
+not claimed. Newly native scalar arithmetic contributes to native instruction
+counts instead of mediated vector counters. The six-code source audit finds no
+eligible instruction in existing worker fixtures with exact counters; their
+literal results and counter assertions remain unchanged. New original native
+proofs must establish actual execution separately from planning/source review.
+Sampled planned exits alone do not establish retired frequency or a speedup.
+
 `with_native_streaming_stores()` separately requests exactly VEX.128/256
 VMOVNTDQ memory destinations, with XMM0..15/YMM0..15 sources and ordinary 64-bit
 addresses. The full-YMM request and independently admitted actual AVX are also

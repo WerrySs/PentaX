@@ -144,6 +144,9 @@ jobs:
       - name: Test exact native vector memory copies and pre-entry refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_vector_memory_tests:: -- --test-threads=1
+      - name: Test exact native scalar arithmetic and pre-entry refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_scalar_float_tests:: -- --test-threads=1
       - name: Test original native packed floating-point continuations
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -169,6 +172,11 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_memory:: -- --test-threads=1
+      - name: Test original scalar arithmetic across real native boundaries
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_scalar_float:: -- --test-threads=1
       - name: Test existing non-temporal store consumers
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

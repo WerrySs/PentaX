@@ -1359,6 +1359,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         )?;
         if block.emits_non_temporal_store()
             || block.emits_vector_memory_move()
+            || block.emits_scalar_float_memory()
             || block
                 .instructions()
                 .iter()
@@ -1706,12 +1707,14 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
     ) -> Result<bool, NativeDispatchError> {
         if ((block.policy().requests_native_packed_float_memory()
             || block.policy().requests_native_streaming_stores()
-            || block.policy().requests_native_vector_moves())
+            || block.policy().requests_native_vector_moves()
+            || block.policy().requests_native_scalar_float())
             && !block.policy().requests_native_ymm_registers())
             || ((block.policy().requests_native_ymm_registers()
                 || block.policy().requests_native_packed_float_memory()
                 || block.policy().requests_native_streaming_stores()
-                || block.policy().requests_native_vector_moves())
+                || block.policy().requests_native_vector_moves()
+                || block.policy().requests_native_scalar_float())
                 && self.machine.vector_mode.features().is_none())
         {
             return Err(NativeDispatchError::InvalidState);

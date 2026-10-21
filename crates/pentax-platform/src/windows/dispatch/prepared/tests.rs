@@ -75,6 +75,8 @@ mod native_cache;
 mod native_packed_float_memory_tests;
 #[path = "tests/native_packed_float.rs"]
 mod native_packed_float_tests;
+#[path = "tests/native_scalar_float.rs"]
+mod native_scalar_float_tests;
 #[path = "tests/native_streaming_stores.rs"]
 mod native_streaming_stores_tests;
 #[path = "tests/native_vector_memory.rs"]

@@ -57,6 +57,7 @@ pub struct TranslationPolicy {
     native_packed_float_memory: bool,
     native_streaming_stores: bool,
     native_vector_moves: bool,
+    native_scalar_float: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -69,6 +70,7 @@ impl TranslationPolicy {
             native_packed_float_memory: false,
             native_streaming_stores: false,
             native_vector_moves: false,
+            native_scalar_float: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -113,6 +115,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_vector_moves(self) -> bool {
         self.native_vector_moves
+    }
+    /// Separately request exactly VEX scalar ADD/SUB/MUL SS/SD, with an XMM
+    /// or ordinary4/8-byte right source. Runtime admission must bind full-YMM
+    /// state, actual AVX, masked MXCSR and every live memory read independently.
+    pub const fn with_native_scalar_float(mut self) -> Self {
+        self.native_scalar_float = true;
+        self
+    }
+    pub const fn requests_native_scalar_float(self) -> bool {
+        self.native_scalar_float
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -245,9 +257,17 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_vector_moves()
         && native_vector_move_shape(instruction).is_some();
+    let vex_scalar = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_scalar_float()
+        && native_scalar_float_width(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
-        && (native_ymm_registers(instruction) || vex_memory || vex_streaming || vex_moves);
+        && (native_ymm_registers(instruction)
+            || vex_memory
+            || vex_streaming
+            || vex_moves
+            || vex_scalar);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -266,7 +286,8 @@ pub(crate) fn ordinary(
         // Exact gates prove either same-width registers only, or two such
         // registers plus the separately requested ordinary64-bit read, or one
         // vector source plus a separately requested exact streaming write, or
-        // one exact requested temporal vector/scalar transfer. No other
+        // one exact requested temporal vector/scalar transfer, or the separate
+        // scalar arithmetic register/exact4-or8-byte read shape. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -317,6 +338,60 @@ pub(crate) fn ordinary(
         }
     }
     Ok(())
+}
+
+/// Six exact decoded scalar arithmetic forms. Registers remain XMM even for
+/// a 4/8-byte memory source; a size here is immutable shape, not live authority.
+pub(crate) fn native_scalar_float_width(instruction: &Instruction) -> Option<usize> {
+    use Code::*;
+    let width = match instruction.code() {
+        VEX_Vaddss_xmm_xmm_xmmm32 | VEX_Vsubss_xmm_xmm_xmmm32 | VEX_Vmulss_xmm_xmm_xmmm32 => 4,
+        VEX_Vaddsd_xmm_xmm_xmmm64 | VEX_Vsubsd_xmm_xmm_xmmm64 | VEX_Vmulsd_xmm_xmm_xmmm64 => 8,
+        _ => return None,
+    };
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 3
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+    {
+        return None;
+    }
+    for operand in 0..2 {
+        let register = instruction.op_register(operand);
+        if instruction.op_kind(operand) != OpKind::Register
+            || !register.is_xmm()
+            || register > Register::XMM15
+        {
+            return None;
+        }
+    }
+    match instruction.op2_kind() {
+        OpKind::Register => {
+            let register = instruction.op2_register();
+            if !register.is_xmm() || register > Register::XMM15 {
+                return None;
+            }
+        }
+        OpKind::Memory => {
+            let base = instruction.memory_base();
+            let index = instruction.memory_index();
+            if instruction.memory_size().size() != width
+                || instruction.is_vsib()
+                || !(base == Register::None || base == Register::RIP || base.is_gpr64())
+                || !(index == Register::None || index.is_gpr64())
+                || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+                // Displacement-only addr32 SIB has no GPR to expose its width.
+                || (base == Register::None
+                    && index == Register::None
+                    && instruction.memory_displ_size() != 8)
+            {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    Some(width)
 }
 
 /// Exact temporal memory shape: (memory bytes, write). Scalar memory widths

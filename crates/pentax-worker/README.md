@@ -648,6 +648,38 @@ counts do not prove accessible pixel backing, readiness or a completed frame.
 Together with the real window state they can investigate a possible dependency
 between a guest's first vblank wait and the first submitted flip.
 
+The separate native scalar arithmetic request covers VEX ADD/SUB/MUL SS/SD
+with an XMM register or an exact 4/8-byte read as the final operand. It requires
+the existing full-YMM request and actual AVX admission. Only the active scalar
+element is evaluated; the remaining low 128 bits come from source1 and the
+upper 128 bits are cleared. Current masked MXCSR controls, ordered NaN behavior,
+flags and all other vector state remain enforced. The emitted scalar-memory
+flag independently requires live span/dependency checks in manual and diagnostic
+entry paths. Divide, square root, fused arithmetic and EVEX gain no authority.
+Original consumers retain a real modeled VMOVQ boundary and verify inactive
+signaling-NaN payloads without introducing spurious exceptions. A finite
+comparison selects its preceding release artifact explicitly; the observed
+native vector mode alone does not identify an artifact's scalar policy.
+
+Final-only graphics fields expose existing committed accounting:
+`graphics_calls` includes all implemented graphics-provider calls, including
+VideoOut and shader helpers; `graphics_command_buffers` counts nonempty admitted
+command ranges before parsing. `graphics_draw_attempts` and
+`graphics_dispatch_attempts` count charged attempts, not completed execution.
+`graphics_written_bytes` includes committed PM4 memory/label writes as well as
+actual draw/compute writeback, so it cannot prove that a draw completed.
+
+The fixed retained presentation snapshot reports `video_flip_reserved`,
+`video_flip_recording_with_frame`, `video_flip_ready_with_frame`,
+`video_flip_presenting` and `video_flip_acknowledged`. It visits at most 48
+request slots and three current live ports without guest reads or readiness,
+clock or permission probes. Ready requests include those blocked behind an
+older incomplete FIFO request. Presenting means core Frame handoff, not display
+completion. Acknowledgements aggregate current live-port counts with saturation
+and reset on close. An empty snapshot cannot distinguish no request from a
+rejected/rolled-back request or one removed by closing its port. These fields
+add no progress polling or scheduling, budget, window or rendering behavior.
+
 Service profiles count admission actions. A parked wait is not an immediate
 nonzero return, and its later resumption/timeout is not recorded by that profile.
 Zero nonzero-return counts therefore do not establish immediate mutex success

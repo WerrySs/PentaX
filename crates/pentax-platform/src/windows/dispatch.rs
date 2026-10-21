@@ -913,12 +913,14 @@ fn publish_block_with_mode(
     // A declared vector request cannot override that immutable entry/tail pair.
     if ((plan.policy().requests_native_packed_float_memory()
         || plan.policy().requests_native_streaming_stores()
-        || plan.policy().requests_native_vector_moves())
+        || plan.policy().requests_native_vector_moves()
+        || plan.policy().requests_native_scalar_float())
         && !plan.policy().requests_native_ymm_registers())
         || ((plan.policy().requests_native_ymm_registers()
             || plan.policy().requests_native_packed_float_memory()
             || plan.policy().requests_native_streaming_stores()
-            || plan.policy().requests_native_vector_moves())
+            || plan.policy().requests_native_vector_moves()
+            || plan.policy().requests_native_scalar_float())
             && mode.features().is_none())
     {
         return Err(PlatformError::UnsupportedHostFeature {
@@ -1239,7 +1241,10 @@ fn preflight_diagnostic_vector_memory(
     space: &mut NativeAddressSpace,
     plan: &BlockPlan<'_, '_>,
 ) -> Result<(), PlatformError> {
-    if !plan.emits_non_temporal_store() && !plan.emits_vector_memory_move() {
+    if !plan.emits_non_temporal_store()
+        && !plan.emits_vector_memory_move()
+        && !plan.emits_scalar_float_memory()
+    {
         return Ok(());
     }
     // SAFETY: run_one_block's caller holds DispatchGuard. No bridge call is in

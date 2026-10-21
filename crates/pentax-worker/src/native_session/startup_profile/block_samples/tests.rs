@@ -295,6 +295,16 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         "video_vblank_subscriptions",
         "video_registered_buffers",
         "video_open_ports",
+        "graphics_calls",
+        "graphics_command_buffers",
+        "graphics_draw_attempts",
+        "graphics_dispatch_attempts",
+        "graphics_written_bytes",
+        "video_flip_reserved",
+        "video_flip_recording_with_frame",
+        "video_flip_ready_with_frame",
+        "video_flip_presenting",
+        "video_flip_acknowledged",
     ] {
         assert!(!progress.progress_fields().contains(name));
         assert!(progress.protocol_fields().contains(&format!("{name}=0")));

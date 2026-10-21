@@ -91,6 +91,10 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
             let queue = u64::from_le_bytes(read(session, scratch));
             assert_eq!(session.video_registration_counts(), (0, 0, 0));
             assert_eq!(
+                session.graphics_video_flip_observations(),
+                crate::gpu::video::FlipObservations::default()
+            );
+            assert_eq!(
                 call(
                     session,
                     driver::Function::VideoOpen,
@@ -165,6 +169,10 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 0
             );
             let metadata = session.graphics_video_peek_ready_frame().unwrap().unwrap();
+            assert_eq!(
+                session.graphics_video_flip_observations().ready_with_frame,
+                1
+            );
             assert_eq!(metadata.handle(), 1);
             assert_eq!(poll(session, scratch, queue), 0x8002_003c); // Capture is no event.
             session
@@ -178,7 +186,10 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
             assert_eq!(poll(session, scratch, queue), 0);
             assert_eq!(u64::from_le_bytes(read(session, scratch + 384)), 1);
             let frame = session.graphics_video_take_frame(10).unwrap().unwrap();
+            assert_eq!(session.graphics_video_flip_observations().presenting, 1);
             let mut completion = Some(session.graphics_video_acknowledge_frame(&frame).unwrap());
+            assert_eq!(session.graphics_video_flip_observations().acknowledged, 1);
+            assert_eq!(session.graphics_video_flip_observations().presenting, 0);
             assert_eq!(poll(session, scratch, queue), 0x8002_003c); // Ack alone does not deliver.
             session
                 .graphics_video_deliver_completion(&mut completion)
@@ -217,6 +228,10 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
             );
             assert_eq!(session.video_registration_counts(), (0, 0, 0));
             assert_eq!(poll(session, scratch, queue), 0x8002_003c);
+            assert_eq!(
+                session.graphics_video_flip_observations(),
+                crate::gpu::video::FlipObservations::default()
+            );
             Ok::<_, ()>(())
         },
     )

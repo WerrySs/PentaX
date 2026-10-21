@@ -146,15 +146,22 @@ impl Default for Limits {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Usage {
     pub interrupts: u64,
+    /// Admitted provider calls, including VideoOut, AGC and shader helpers;
+    /// source-defined rejected return values still consume their call attempt.
     pub calls: u64,
+    /// Attempts charged before resource preparation and actual GPU execution.
     pub dispatches: u64,
+    /// Attempts charged before resource preparation and actual GPU execution.
     pub draws: u64,
     pub vertices: u64,
+    /// Nonempty direct command ranges charged before copying and parsing.
     pub command_buffers: u64,
     pub indirect_buffers: u64,
     pub command_bytes: u64,
     pub invocations: u64,
     pub preparation_work: u64,
+    /// Saturating committed writes: fenced draw/compute writeback and PM4
+    /// memory/label stores. A positive total does not prove a completed draw.
     pub written_bytes: u64,
     pub memory_commands: u64,
     pub memory_written_bytes: u64,
@@ -217,6 +224,9 @@ impl Driver {
     }
     pub(crate) fn usage(&self) -> Usage {
         self.usage
+    }
+    pub(crate) fn video_flip_observations(&self) -> super::video::FlipObservations {
+        self.video.flip_observations()
     }
     pub(crate) fn frame_state(&self) -> FrameState {
         self.frame

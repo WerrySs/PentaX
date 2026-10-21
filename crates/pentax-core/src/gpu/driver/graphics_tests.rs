@@ -68,6 +68,11 @@ fn context_graphics_retains_one_queue_state_but_explicit_acb_and_done_do_not_inv
     );
     assert!(!driver.frame.reset_before_graphics);
     assert_eq!(driver.graphics_owner, Some(memory.owner_id()));
+    assert_eq!(driver.usage.calls, 1);
+    assert_eq!(driver.usage.command_buffers, 1);
+    assert_eq!(driver.usage.draws, 0);
+    assert_eq!(driver.usage.dispatches, 0);
+    assert_eq!(driver.usage.written_bytes, 0);
     // A different non-ACB selector is the same source graphics processor.
     memory
         .write(base + 4, &0xffff_ffff_u32.to_le_bytes())
@@ -83,6 +88,8 @@ fn context_graphics_retains_one_queue_state_but_explicit_acb_and_done_do_not_inv
         Ok(0)
     );
     assert_eq!(driver.usage.draws, 0);
+    assert_eq!(driver.usage.calls, 2);
+    assert_eq!(driver.usage.command_buffers, 2);
     assert_eq!(
         driver.submit(&mut memory, Function::Acb, [0, base + 0x20, 0, 0, 0, 0]),
         Err(Failure::UnsupportedQueue)

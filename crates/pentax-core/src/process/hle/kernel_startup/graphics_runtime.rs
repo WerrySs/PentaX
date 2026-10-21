@@ -296,6 +296,14 @@ impl PreparedNativeKernelStartup<'_, '_> {
             .as_ref()
             .map_or_else(driver::Usage::default, driver::Driver::usage)
     }
+    /// Current owner-retained flip phases only; no guest access or readiness
+    /// probe. An absent graphics driver has no requests or acknowledgements.
+    pub fn graphics_video_flip_observations(&self) -> crate::gpu::video::FlipObservations {
+        self.graphics.as_ref().map_or_else(
+            crate::gpu::video::FlipObservations::default,
+            driver::Driver::video_flip_observations,
+        )
+    }
     pub fn graphics_frame_state(&self) -> Option<driver::FrameState> {
         self.graphics.as_ref().map(driver::Driver::frame_state)
     }

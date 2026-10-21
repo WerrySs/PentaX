@@ -1,5 +1,33 @@
 # Upstream provenance
 
+The separate native scalar-floating request admits only VEX ADDSS/SD,
+SUBSS/SD and MULSS/SD, with an XMM or exact4/8-byte memory right source.
+The instruction contracts follow the ADDSS/ADDSD, SUBSS/SUBSD and MULSS/MULSD
+entries in the primary
+[Intel instruction reference](https://cdrdv2-public.intel.com/671110/325383-sdm-vol-2abcd.pdf).
+They define AVX admission, logical source order, active scalar arithmetic,
+source1 low128 merge, destination upper clearing, unaligned Type3 memory and
+unchanged RFLAGS. Numeric controls retain the existing all-masked MXCSR
+profile. [Intel Volume1](https://cdrdv2-public.intel.com/843827/253665-sdm-vol-1-dec-24.pdf)
+section4.8.3.5/Table4-7 defines SSE/AVX NaN source priority; inactive scalar
+elements perform no arithmetic and do not contribute exceptions.
+
+Intel warns against executing scalar VEX.L=1. Pinned Iced1.21.0
+[encoder defaults](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/src/rust/iced-x86/src/encoder.rs),
+[generated scalar encodings](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/src/rust/iced-x86/src/encoder/encoder_data.rs)
+and its [VEX handler](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/src/rust/iced-x86/src/encoder/op_code_handler.rs)
+canonicalize the six decoded LIG forms to emittedL=0; PentaX keeps that default
+and checks both inputL values in original planning fixtures. Source LIG bytes
+are not copied directly into the native cache. No new dependency, assembly,
+guest CPUID advertisement, unmasked numeric exception authority or generic
+memory footprint exception is introduced. Exact immutable emitted-memory
+metadata preserves manual/full live preflight. Earlier arithmetic may now
+coalesce with a later access refused before entry; existing fail-closed blocks
+are preserved, not a claim of identical partial fault state or guest#PF recovery.
+All fixtures and operand patterns are original PentaX work. Sampled plans and
+source review establish neither a whole-run instruction frequency nor measured
+performance, title progress or a frame.
+
 The separate native packed-floating memory request admits only the same twelve
 VEX ADDPS/PD, SUBPS/PD and MULPS/PD forms with one exact 16/32-byte ordinary read.
 [Intel SDM Volume 2A](https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf)

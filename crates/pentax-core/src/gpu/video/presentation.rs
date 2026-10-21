@@ -187,6 +187,19 @@ enum Phase {
     Ready,
     Presenting,
 }
+/// Current retained phases, not a lifetime submission history. Rejected,
+/// rolled-back and closed requests cannot be reconstructed from this snapshot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FlipObservations {
+    pub reserved: u64,
+    pub recording_with_frame: u64,
+    pub ready_with_frame: u64,
+    /// Core Frame handed to the consumer, not WSI acceptance or presentation.
+    pub presenting: u64,
+    /// Sum of current live ports' real acknowledgement counts, saturating at
+    /// u64::MAX. Closing a port resets its contribution.
+    pub acknowledged: u64,
+}
 struct Request {
     ticket: FlipTicket,
     buffer: i32,
@@ -239,6 +252,34 @@ impl Queue {
     }
 }
 impl super::State {
+    /// Fixed 48-slot/three-port metadata census; no memory, clock, permission,
+    /// readiness, handoff or completion operation participates. Count every
+    /// READY frame, including one blocked behind an older incomplete request.
+    pub(crate) fn flip_observations(&self) -> FlipObservations {
+        let mut counts = FlipObservations::default();
+        for request in self.presentation.requests.iter().flatten() {
+            if self
+                .port(request.ticket.handle)
+                .is_none_or(|port| port.generation != request.ticket.generation)
+            {
+                continue;
+            }
+            match request.phase {
+                Phase::Reserved => counts.reserved += 1,
+                Phase::Recording if request.frame.is_some() => counts.recording_with_frame += 1,
+                Phase::Ready if request.frame.is_some() => counts.ready_with_frame += 1,
+                Phase::Presenting => counts.presenting += 1,
+                _ => {}
+            }
+        }
+        for (port, status) in self.ports.iter().zip(&self.presentation.statuses) {
+            if port.open {
+                counts.acknowledged = counts.acknowledged.saturating_add(status.count);
+            }
+        }
+        counts
+    }
+
     /// Preserve FIFO: a later ready request cannot bypass an older incomplete
     /// or handed-off request. Does not observe ticks or mutate queue state.
     pub(crate) fn peek_ready_frame(&self) -> Result<Option<ReadyFrameMetadata>, Failure> {

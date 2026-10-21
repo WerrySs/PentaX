@@ -94,6 +94,8 @@ mod multiply_add_words;
 mod native_packed_float;
 #[path = "native_packed_float_memory.rs"]
 mod native_packed_float_memory;
+#[path = "native_scalar_float.rs"]
+mod native_scalar_float;
 #[path = "native_streaming_stores.rs"]
 mod native_streaming_stores;
 #[path = "native_vector_memory.rs"]

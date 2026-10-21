@@ -180,6 +180,7 @@ fn presentation_cpu_frames_capture_real_pixels_fifo_pacing_and_actual_acknowledg
     let mut memory = owner.pause().unwrap();
     let mut state = State::default();
     setup(&mut state, base, &mut memory);
+    assert_eq!(state.flip_observations(), FlipObservations::default());
     assert_eq!(
         invoke(
             &mut state,
@@ -193,22 +194,33 @@ fn presentation_cpu_frames_capture_real_pixels_fifo_pacing_and_actual_acknowledg
     let first_pixels = pixels(&mut memory, base, 1);
     let first = reserve(&mut state, memory.owner_id(), 11, FlipSource::Cpu);
     let second = reserve(&mut state, memory.owner_id(), 22, FlipSource::Cpu);
+    assert_eq!(state.flip_observations().reserved, 2);
     let limits = PresentationLimits::default();
     assert_eq!(state.complete_flip(first), Err(Failure::UnsupportedVideo));
     state.prepare_flip(first, &memory, &limits).unwrap();
+    assert_eq!(state.flip_observations().recording_with_frame, 1);
+    assert_eq!(state.flip_observations().reserved, 1);
     let second_pixels = pixels(&mut memory, base, 80);
     state.prepare_flip(second, &memory, &limits).unwrap();
     state.complete_flip(second).unwrap();
+    assert_eq!(state.flip_observations().ready_with_frame, 1);
+    assert_eq!(state.flip_observations().recording_with_frame, 1);
     assert!(state.take_frame(2).unwrap().is_none()); // Oldest is not ready.
+    assert_eq!(state.flip_observations().ready_with_frame, 1); // Include FIFO-blocked READY.
     state.complete_flip(first).unwrap();
+    assert_eq!(state.flip_observations().ready_with_frame, 2);
     assert!(state.take_frame(0).unwrap().is_none());
     assert!(state.take_frame(1).unwrap().is_none());
     let frame = state.take_frame(2).unwrap().unwrap();
+    assert_eq!(state.flip_observations().presenting, 1);
+    assert_eq!(state.flip_observations().ready_with_frame, 1);
     assert_eq!((frame.width(), frame.height()), (2, 2));
     assert_eq!(frame.rgba8(), first_pixels);
     assert_eq!(state.flip_status(1).unwrap().count, 0);
     assert_eq!(state.flip_status(1).unwrap().pending, 2);
     let completion = state.acknowledge_frame(&frame, 100, 1000).unwrap();
+    assert_eq!(state.flip_observations().acknowledged, 1);
+    assert_eq!(state.flip_observations().presenting, 0);
     assert_eq!(
         (
             completion.flip_arg(),
@@ -247,6 +259,24 @@ fn presentation_cpu_frames_capture_real_pixels_fifo_pacing_and_actual_acknowledg
     assert_eq!(&encoded[72..], &[0; 56]);
     assert_eq!(state.presentation.held, 0);
     assert!(!state.buffer_pending(1, 0));
+    assert_eq!(
+        state.flip_observations(),
+        FlipObservations {
+            acknowledged: 2,
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        invoke(
+            &mut state,
+            Function::VideoClose,
+            [1, 0, 0, 0, 0, 0],
+            base,
+            &mut memory
+        ),
+        Ok(0)
+    );
+    assert_eq!(state.flip_observations(), FlipObservations::default());
 }
 
 #[test]
@@ -291,6 +321,13 @@ fn presentation_gpu_rights_owner_and_quota_failures_keep_pending_state_truthful(
     assert_eq!(state.presentation.held, 0);
     assert_eq!(state.flip_status(1).unwrap().pending, 1);
     assert_eq!(state.flip_status(1).unwrap().count, 0);
+    assert_eq!(
+        state.flip_observations(),
+        FlipObservations {
+            reserved: 1,
+            ..Default::default()
+        }
+    );
     state
         .prepare_flip(ticket, &owner.pause().unwrap(), &limits)
         .unwrap(); // GPU-only backing is valid.
@@ -323,6 +360,7 @@ fn presentation_gpu_rights_owner_and_quota_failures_keep_pending_state_truthful(
     }
     assert!(state.acknowledge_frame(&frame, 1, 1).is_err());
     assert_eq!(state.flip_status(1).unwrap().count, 0);
+    assert_eq!(state.flip_observations(), FlipObservations::default());
 }
 
 #[test]

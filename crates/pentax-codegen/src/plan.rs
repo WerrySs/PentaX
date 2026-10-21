@@ -94,6 +94,7 @@ pub(crate) fn plan_window<'plan, 'image>(
     let mut written_registers = 0_u16;
     let mut emits_non_temporal_store = false;
     let mut emits_vector_memory_move = false;
+    let mut emits_scalar_float_memory = false;
     let exit;
     loop {
         if records.len() as u64 == limits.max_instructions || position == window.relocated.len() {
@@ -288,6 +289,8 @@ pub(crate) fn plan_window<'plan, 'image>(
         bytes.extend_from_slice(&encoded);
         emits_non_temporal_store |= crate::policy::non_temporal_store_width(&instruction).is_some();
         emits_vector_memory_move |= crate::policy::vector_memory_move(&instruction);
+        emits_scalar_float_memory |= instruction.op2_kind() == iced_x86::OpKind::Memory
+            && crate::policy::native_scalar_float_width(&instruction).is_some();
         encoded.clear();
         encoder.set_buffer(encoded);
         records.push(InstructionRecord {
@@ -329,6 +332,7 @@ pub(crate) fn plan_window<'plan, 'image>(
         policy: *policy,
         emits_non_temporal_store,
         emits_vector_memory_move,
+        emits_scalar_float_memory,
         usage,
     })
 }

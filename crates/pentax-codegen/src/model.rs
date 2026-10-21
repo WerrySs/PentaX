@@ -245,6 +245,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) policy: TranslationPolicy,
     pub(crate) emits_non_temporal_store: bool,
     pub(crate) emits_vector_memory_move: bool,
+    pub(crate) emits_scalar_float_memory: bool,
     pub(crate) usage: BlockUsage,
 }
 impl fmt::Debug for BlockPlan<'_, '_> {
@@ -300,6 +301,11 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     /// It grants neither backing authority nor a non-temporal fence requirement.
     pub const fn emits_vector_memory_move(&self) -> bool {
         self.emits_vector_memory_move
+    }
+    /// Actual emitted scalar ADD/SUB/MUL reads require full live preflight,
+    /// including manual execution without an independent-memory policy request.
+    pub const fn emits_scalar_float_memory(&self) -> bool {
+        self.emits_scalar_float_memory
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage

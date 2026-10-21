@@ -292,6 +292,9 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
     pub const fn emits_vector_memory_move(&self) -> bool {
         self.inner.emits_vector_memory_move()
     }
+    pub const fn emits_scalar_float_memory(&self) -> bool {
+        self.inner.emits_scalar_float_memory()
+    }
     pub const fn usage(&self) -> BlockUsage {
         self.inner.usage()
     }
