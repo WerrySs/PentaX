@@ -221,7 +221,16 @@ fn reader_records_are_preadmitted_for_waiters_and_quota_failures_preserve_member
     assert_eq!(exhausted.load(Ordering::Relaxed), u64::MAX);
     let mut faulted = self::owner(Default::default());
     let mut denied = TestGuest::new();
-    denied.regions[0].protection = 1;
+    denied
+        .apply(
+            crate::MemoryEffect::Protect {
+                address: ARG,
+                length: crate::tests::PAGE,
+                protection: 1,
+            },
+            &[],
+        )
+        .unwrap();
     assert!(matches!(
         faulted.begin_rwlock_wait(RwlockReadLock, args(&[ARG]), &mut denied),
         Err(Failure::Guest(_))
