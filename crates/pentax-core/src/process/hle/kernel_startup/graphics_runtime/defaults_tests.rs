@@ -238,6 +238,22 @@ fn register_defaults_keep_all_source_versions_aliases_patches_and_mutable_lifeti
             }
         }
         let mapped = 6 * PAGE_SIZE;
+        assert_eq!(
+            session
+                .graphics_function_profile()
+                .count(driver::Function::AgcGetRegisterDefaults),
+            14
+        );
+        assert_eq!(
+            session
+                .graphics_function_profile()
+                .count(driver::Function::AgcGetRegisterDefaultsInternal),
+            14
+        );
+        assert_eq!(
+            session.graphics_function_profile().last(),
+            "AgcGetRegisterDefaultsInternal"
+        );
         assert_eq!(session.memory().mapped_bytes() - before, mapped);
         assert_eq!(session.kernel_usage().mapped_bytes, mapped);
         assert_eq!(session.kernel_usage().handles_live, 1);
@@ -300,6 +316,20 @@ fn register_defaults_keep_all_source_versions_aliases_patches_and_mutable_lifeti
             }
         }
         assert_eq!(found, 2);
+        assert_eq!(
+            session.graphics_function_profile().top(),
+            [
+                Some(("AgcGetRegisterDefaults", 17)),
+                Some(("AgcGetRegisterDefaultsInternal", 15)),
+                None,
+                None,
+            ]
+        );
+        assert_eq!(
+            session.graphics_function_profile().last(),
+            "AgcGetRegisterDefaults"
+        );
+        assert_eq!(session.graphics_usage().calls, 32);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |other, _| {
             let other_address = call(other, false, 0).unwrap();
             let other_record = record(other, other_address);
@@ -331,6 +361,17 @@ fn register_defaults_refuse_shared_work_and_kernel_resources_without_publishing_
             assert_eq!(session.memory().mapped_bytes(), before);
             assert_eq!(session.kernel_usage().handles_live, 0);
             assert_eq!(session.kernel_usage().mapped_bytes, 0);
+            assert_eq!(
+                session
+                    .graphics_function_profile()
+                    .count(driver::Function::AgcGetRegisterDefaults),
+                1
+            );
+            assert_eq!(
+                session.graphics_function_profile().last(),
+                "AgcGetRegisterDefaults"
+            );
+            assert_eq!(session.graphics_usage().calls, 1);
             Ok::<_, ()>(())
         })
         .unwrap();

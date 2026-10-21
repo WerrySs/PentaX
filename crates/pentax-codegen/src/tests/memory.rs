@@ -225,6 +225,32 @@ fn stack_footprints_use_original_push_rsp_post_increment_pop_and_leave_rbp() {
             .accesses(),
         [access(0x7ffe, 2, MemoryAccessKind::Write)]
     );
+    // Immutable summaries include implicit stack memory and all written
+    // aliases, including RSP in XCHG's second explicit operand. No GPR values
+    // or InstructionInfoFactory are needed to read these retained facts.
+    for (code, has_memory, address, written) in [
+        (&[0x50, 0xc3][..], true, 1 << 4, 1 << 4),
+        (&[0x58, 0xc3][..], true, 1 << 4, (1 << 0) | (1 << 4)),
+        (&[0xc9, 0xc3][..], true, 1 << 5, (1 << 4) | (1 << 5)),
+        (&[0x48, 0x87, 0xe0, 0xc3][..], false, 0, (1 << 0) | (1 << 4)),
+        (&[0x83, 0xc4, 8, 0xc3][..], false, 0, 1 << 4),
+        (&[0x48, 0x85, 0xc0, 0xc3][..], false, 0, 0),
+    ] {
+        let bytes = image(code);
+        let source = link(&[(&bytes, BIAS)]);
+        let plan = make(&source);
+        assert_eq!(
+            plan.instructions()[0].immutable_memory_summary(),
+            Some((has_memory, MemoryRegisterDependencies { address, written }))
+        );
+        assert_eq!(
+            plan.instructions()
+                .last()
+                .unwrap()
+                .immutable_memory_summary(),
+            None
+        );
+    }
 }
 
 #[test]

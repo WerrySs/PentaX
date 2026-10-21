@@ -216,6 +216,14 @@ impl InstructionRecord {
     pub const fn instruction(&self) -> &Instruction {
         &self.instruction
     }
+    /// Allocation-free summary of the retained decoded template, including
+    /// implicit memory and written GPR aliases. None means unknown; this is
+    /// neither a live address/permission check nor native execution authority.
+    pub fn immutable_memory_summary(&self) -> Option<(bool, crate::MemoryRegisterDependencies)> {
+        self.memory_template
+            .as_ref()
+            .map(|template| (template.has_memory(), template.register_dependencies()))
+    }
     pub const fn rip_relative_target(&self) -> Option<u64> {
         self.rip_target
     }

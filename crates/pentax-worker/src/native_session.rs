@@ -611,6 +611,7 @@ fn run_prepared_consumer_inner<'plan, 'image>(
             session.video_registration_counts(),
             session.graphics_usage(),
             session.graphics_video_flip_observations(),
+            session.graphics_function_profile(),
         );
         match outcome? {
             None => {

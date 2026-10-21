@@ -7,8 +7,16 @@
 //! planned exits, not whole-run frequencies or proof that an exit instruction
 //! ran. Main/child refers to the actual selected thread
 //! context, including callbacks on it, and establishes no scheduling fairness.
+//! Self-target counters describe only completed periodic samples. Strict native
+//! register bodies conservatively exclude unknown templates and are not proof
+//! of safe native looping or whole-run instruction frequency.
+//! A self-target observation concerns the planned direct Jcc target, whether
+//! the branch was actually taken or not; no branch outcome is recorded.
 
-use pentax_codegen::{Code, Instruction, MaterializedBlockPlan, OpKind, Register};
+use pentax_codegen::{
+    Code, ExitKind, FlowControl, Instruction, MaterializedBlockPlan, MemoryRegisterDependencies,
+    Mnemonic, OpKind, Register,
+};
 use pentax_linker::SourceIdentity;
 use std::fmt::{self, Write};
 
@@ -16,7 +24,9 @@ const CAPACITY: usize = 64;
 const EXIT_CAPACITY: usize = 64;
 const MAX_WORK: u64 = 64 * 1024 * 1024;
 const FIXED_WORK: u64 = 4 * CAPACITY as u64 + 64 + EXIT_CAPACITY as u64;
-const RECORD_WORK: u64 = 32;
+// Includes the original FP classification and immutable loop-summary visits.
+// This is an observer-only precharge within the unchanged MAX_WORK allowance.
+const RECORD_WORK: u64 = 64;
 
 // Exact public forms shared with the separately reviewed native FP candidate.
 // Counting an occurrence does not establish host, prefix or MXCSR admission.
@@ -58,6 +68,12 @@ enum ExitUpdate {
     NoInstruction(u64),
 }
 
+struct SampleRecord<'a> {
+    instruction: &'a Instruction,
+    emitted: bool,
+    memory: Option<(bool, MemoryRegisterDependencies)>,
+}
+
 pub(in crate::native_session) struct PendingSample {
     key: Key,
     planned: Option<Code>,
@@ -67,6 +83,9 @@ pub(in crate::native_session) struct PendingSample {
     exit: ExitUpdate,
     main_context: u64,
     child_context: u64,
+    self_target_branches: u64,
+    self_target_native_register_blocks: u64,
+    self_target_native_register_instructions: u64,
 }
 
 pub(in crate::native_session) struct BlockSamples {
@@ -87,6 +106,9 @@ pub(in crate::native_session) struct BlockSamples {
     exit_no_instruction: u64,
     main_context: u64,
     child_context: u64,
+    self_target_branches: u64,
+    self_target_native_register_blocks: u64,
+    self_target_native_register_instructions: u64,
     work: u64,
     maximum_work: u64,
     disabled: bool,
@@ -113,6 +135,9 @@ impl Default for BlockSamples {
             exit_no_instruction: 0,
             main_context: 0,
             child_context: 0,
+            self_target_branches: 0,
+            self_target_native_register_blocks: 0,
+            self_target_native_register_instructions: 0,
             work: 0,
             maximum_work: MAX_WORK,
             disabled: false,
@@ -192,22 +217,27 @@ impl BlockSamples {
         maximum_records: u64,
         is_main: bool,
     ) -> Option<PendingSample> {
-        self.prepare_records(
+        let self_target = matches!(block.exit().kind(), ExitKind::Conditional { target, .. }
+            if target == block.guest_pc());
+        self.prepare_observed_records(
             Key {
                 epoch,
                 module: block.module().index(),
                 pc: block.guest_pc(),
             },
             block.exit().instruction().map(|i| i.code()),
-            block
-                .instructions()
-                .iter()
-                .map(|record| record.instruction()),
+            block.instructions().iter().map(|record| SampleRecord {
+                instruction: record.instruction(),
+                emitted: record.emitted_len() != 0,
+                memory: record.immutable_memory_summary(),
+            }),
             maximum_records,
             is_main,
+            self_target,
         )
     }
 
+    #[cfg(test)]
     fn prepare_records<'a>(
         &mut self,
         key: Key,
@@ -215,6 +245,29 @@ impl BlockSamples {
         instructions: impl ExactSizeIterator<Item = &'a Instruction>,
         maximum_records: u64,
         is_main: bool,
+    ) -> Option<PendingSample> {
+        self.prepare_observed_records(
+            key,
+            planned,
+            instructions.map(|instruction| SampleRecord {
+                instruction,
+                emitted: false,
+                memory: None,
+            }),
+            maximum_records,
+            is_main,
+            false,
+        )
+    }
+
+    fn prepare_observed_records<'a>(
+        &mut self,
+        key: Key,
+        planned: Option<Code>,
+        instructions: impl ExactSizeIterator<Item = SampleRecord<'a>>,
+        maximum_records: u64,
+        is_main: bool,
+        self_target: bool,
     ) -> Option<PendingSample> {
         if self.disabled {
             return None;
@@ -250,7 +303,9 @@ impl BlockSamples {
             self.overflow = true;
             return None;
         };
-        for instruction in instructions {
+        let mut native_register = self_target && count > 1;
+        for (index, record) in instructions.enumerate() {
+            let instruction = record.instruction;
             if let Some((form, kind)) = candidate(instruction) {
                 let Some(next) = counts[form][kind].checked_add(1) else {
                     self.disabled = true;
@@ -259,7 +314,42 @@ impl BlockSamples {
                 };
                 counts[form][kind] = next;
             }
+            if self_target {
+                if index as u64 + 1 == count {
+                    // Only the known final, nonemitted direct Jcc is excluded
+                    // from the body. It must target this exact block start.
+                    native_register &= !record.emitted
+                        && instruction.flow_control() == FlowControl::ConditionalBranch
+                        && instruction.op0_kind() == OpKind::NearBranch64
+                        && instruction.near_branch_target() == key.pc;
+                } else {
+                    native_register &= native_register_record(&record);
+                }
+            }
         }
+        let self_target_branches = self
+            .self_target_branches
+            .checked_add(u64::from(self_target));
+        let self_target_native_register_blocks = self
+            .self_target_native_register_blocks
+            .checked_add(u64::from(native_register));
+        let self_target_native_register_instructions = self
+            .self_target_native_register_instructions
+            .checked_add(if native_register { count - 1 } else { 0 });
+        let (
+            Some(self_target_branches),
+            Some(self_target_native_register_blocks),
+            Some(self_target_native_register_instructions),
+        ) = (
+            self_target_branches,
+            self_target_native_register_blocks,
+            self_target_native_register_instructions,
+        )
+        else {
+            self.disabled = true;
+            self.overflow = true;
+            return None;
+        };
         let main_context = self.main_context.checked_add(u64::from(is_main));
         let child_context = self.child_context.checked_add(u64::from(!is_main));
         let (Some(main_context), Some(child_context)) = (main_context, child_context) else {
@@ -277,6 +367,9 @@ impl BlockSamples {
             exit,
             main_context,
             child_context,
+            self_target_branches,
+            self_target_native_register_blocks,
+            self_target_native_register_instructions,
         })
     }
 
@@ -368,6 +461,10 @@ impl BlockSamples {
         }
         self.main_context = pending.main_context;
         self.child_context = pending.child_context;
+        self.self_target_branches = pending.self_target_branches;
+        self.self_target_native_register_blocks = pending.self_target_native_register_blocks;
+        self.self_target_native_register_instructions =
+            pending.self_target_native_register_instructions;
     }
 
     pub(super) fn protocol_fields(&self) -> String {
@@ -405,12 +502,15 @@ impl BlockSamples {
         }
         let _ = write!(
             fields,
-            "\tsample_exit_capacity={EXIT_CAPACITY}\tsample_exit_codes_retained={}\tsample_exit_overflow={}\tsample_exit_no_instruction={}\tsample_main_context={}\tsample_child_context={}\tsample_exit_top=",
+            "\tsample_exit_capacity={EXIT_CAPACITY}\tsample_exit_codes_retained={}\tsample_exit_overflow={}\tsample_exit_no_instruction={}\tsample_main_context={}\tsample_child_context={}\tsample_self_target_branches={}\tsample_self_target_native_register_blocks={}\tsample_self_target_native_register_instructions={}\tsample_exit_top=",
             self.exit_codes_retained,
             self.exit_overflow,
             self.exit_no_instruction,
             self.main_context,
-            self.child_context
+            self.child_context,
+            self.self_target_branches,
+            self.self_target_native_register_blocks,
+            self.self_target_native_register_instructions
         );
         // Sorting copies only 64 inline catalogue-code/count pairs, once when
         // reporting. Counts descend, with static Code order breaking ties.
@@ -432,6 +532,25 @@ impl BlockSamples {
         }
         fields
     }
+}
+
+fn native_register_record(record: &SampleRecord<'_>) -> bool {
+    record.emitted
+        && record.memory.is_some_and(|(has_memory, dependencies)| {
+            !has_memory && dependencies.written & (1 << 4) == 0
+        })
+        && record.instruction.flow_control() == FlowControl::Next
+        && !record
+            .instruction
+            .op_kinds()
+            .any(|kind| kind == OpKind::Memory)
+        && !record.instruction.is_stack_instruction()
+        && !record.instruction.is_save_restore_instruction()
+        && !record.instruction.is_privileged()
+        && !matches!(
+            record.instruction.mnemonic(),
+            Mnemonic::Div | Mnemonic::Idiv | Mnemonic::Lfence | Mnemonic::Mfence | Mnemonic::Sfence
+        )
 }
 
 fn candidate(instruction: &Instruction) -> Option<(usize, usize)> {

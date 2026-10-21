@@ -170,6 +170,16 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
             );
             let metadata = session.graphics_video_peek_ready_frame().unwrap().unwrap();
             assert_eq!(
+                session
+                    .graphics_function_profile()
+                    .count(driver::Function::VideoSubmitFlip),
+                1
+            );
+            assert_eq!(
+                session.graphics_function_profile().last(),
+                "VideoSubmitFlip"
+            );
+            assert_eq!(
                 session.graphics_video_flip_observations().ready_with_frame,
                 1
             );

@@ -112,6 +112,17 @@ fn context_graphics_retains_one_queue_state_but_explicit_acb_and_done_do_not_inv
     assert!(!driver.poisoned);
     assert_eq!(driver.usage.written_bytes, 0);
     // Retained register state is never accepted on a different actual owner.
+    assert_eq!(
+        driver.function_profile().top(),
+        [
+            Some(("CommandBuffer", 3)),
+            Some(("Acb", 1)),
+            Some(("SuspendPoint", 1)),
+            None,
+        ]
+    );
+    assert_eq!(driver.function_profile().last(), "CommandBuffer");
+    assert_eq!(driver.usage.calls, 5);
     let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
     let mut foreign_memory = foreign.pause().unwrap();
     assert_eq!(

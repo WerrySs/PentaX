@@ -357,6 +357,30 @@ mod tests {
         );
         assert_eq!(fresh_samples.get(), 0);
         assert_eq!(
+            driver.function_profile().count(Function::VideoSubmitFlip),
+            1
+        );
+        assert_eq!(
+            driver
+                .function_profile()
+                .count(Function::VideoGetFlipStatus),
+            2
+        );
+        assert_eq!(driver.function_profile().last(), "VideoSubmitFlip");
+        let profile = driver.function_profile();
+        let maximum = driver.limits.max_calls;
+        driver.limits.max_calls = driver.usage().calls;
+        assert_eq!(
+            driver.submit_video_flip_with_clock(&mut memory, [99, 0, 1, 0, 0, 0], |_| {
+                fresh_samples.set(fresh_samples.get() + 1);
+                Err(Failure::Memory)
+            }),
+            Err(Failure::Limit)
+        );
+        assert_eq!(driver.function_profile(), profile);
+        assert_eq!(fresh_samples.get(), 0);
+        driver.limits.max_calls = maximum;
+        assert_eq!(
             driver.submit(&mut memory, Function::VideoOpen, [255, 0, 0, 0, 0, 0]),
             Ok(1)
         );
@@ -429,6 +453,19 @@ mod tests {
         );
         assert_eq!(samples.get(), 2);
         assert_eq!(driver.usage().calls, calls); // Caller already owns guest-call admission.
+        assert_eq!(
+            driver.function_profile().count(Function::VideoSubmitFlip),
+            1
+        );
+        assert_eq!(
+            driver.function_profile().top(),
+            [
+                Some(("VideoGetFlipStatus", 2)),
+                Some(("VideoOpen", 1)),
+                Some(("VideoRegisterBuffers2", 1)),
+                Some(("VideoSubmitFlip", 1)),
+            ]
+        ); // Direct helpers above must not double-count the outer admission.
         let before_peek = driver.video_flip_status(&memory, 1).unwrap();
         let metadata = driver.video_peek_ready_frame(&memory).unwrap().unwrap();
         assert_eq!(

@@ -296,6 +296,13 @@ impl PreparedNativeKernelStartup<'_, '_> {
             .as_ref()
             .map_or_else(driver::Usage::default, driver::Driver::usage)
     }
+    /// Historical admitted API calls only, not in-flight or successful work.
+    pub fn graphics_function_profile(&self) -> driver::FunctionProfile {
+        self.graphics.as_ref().map_or_else(
+            driver::FunctionProfile::default,
+            driver::Driver::function_profile,
+        )
+    }
     /// Current owner-retained flip phases only; no guest access or readiness
     /// probe. An absent graphics driver has no requests or acknowledgements.
     pub fn graphics_video_flip_observations(&self) -> crate::gpu::video::FlipObservations {

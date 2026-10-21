@@ -2,11 +2,14 @@
 //! Original pure observations; no native entry, guest reads or clock sampling.
 use super::super::StartupProfile;
 use super::*;
-use pentax_codegen::{Decoder, DecoderOptions};
+use pentax_codegen::{
+    BlockLimits, CachePlacement, Decoder, DecoderOptions, TranslationPolicy,
+    declare_materialized_source, plan_materialized_block,
+};
 use pentax_linker::{ModuleInput, SymbolicLimits, plan_symbolic};
 use pentax_loader::open_executable;
 
-fn identity() -> SourceIdentity {
+fn original_image(code: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0; 4096];
     bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     for (at, value) in [(16, 3_u16), (18, 62), (52, 64), (54, 56), (56, 1)] {
@@ -24,11 +27,35 @@ fn identity() -> SourceIdentity {
     ] {
         bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
     }
-    bytes[0x200] = 0xc3;
+    bytes[0x200..0x200 + code.len()].copy_from_slice(code);
+    bytes
+}
+fn identity() -> SourceIdentity {
+    let bytes = original_image(&[0xc3]);
     let inputs = [ModuleInput::new(open_executable(&bytes).unwrap(), 0x100000)];
     plan_symbolic(&inputs, &SymbolicLimits::default())
         .unwrap()
         .identity()
+}
+fn with_block(code: &[u8], check: impl FnOnce(SourceIdentity, &MaterializedBlockPlan<'_, '_, '_>)) {
+    let bytes = original_image(code);
+    let inputs = [ModuleInput::new(open_executable(&bytes).unwrap(), 0x100000)];
+    let source = plan_symbolic(&inputs, &SymbolicLimits::default()).unwrap();
+    let declaration = declare_materialized_source(&source, &[], &BlockLimits::default()).unwrap();
+    let block = plan_materialized_block(
+        &declaration,
+        0,
+        0x100200,
+        code,
+        CachePlacement {
+            address: 0x1000_0000,
+            capacity: 0x4000,
+        },
+        &TranslationPolicy::x64_sse2().with_independent_memory(),
+        &BlockLimits::default(),
+    )
+    .unwrap();
+    check(source.identity(), &block);
 }
 fn instruction(bytes: &[u8]) -> Instruction {
     let decoded = Decoder::with_ip(64, bytes, 0, DecoderOptions::NONE).decode();
@@ -275,6 +302,9 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         exit_no_instruction: u64::MAX,
         main_context: u64::MAX,
         child_context: u64::MAX,
+        self_target_branches: u64::MAX,
+        self_target_native_register_blocks: u64::MAX,
+        self_target_native_register_instructions: u64::MAX,
         disabled: true,
         overflow: true,
         ..Default::default()
@@ -290,6 +320,19 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
     assert!(!progress.progress_fields().contains("sample_exit_top="));
     assert!(progress.protocol_fields().contains("sample_completed=0"));
     assert!(progress.protocol_fields().contains("scheduling_threads=0"));
+    for name in [
+        "sample_self_target_branches",
+        "sample_self_target_native_register_blocks",
+        "sample_self_target_native_register_instructions",
+    ] {
+        assert!(!progress.progress_fields().contains(name));
+        assert!(progress.protocol_fields().contains(&format!("{name}=0")));
+        assert_eq!(fields.matches(&format!("{name}=")).count(), 1);
+    }
+    for name in ["graphics_function_top", "graphics_function_last"] {
+        assert!(!progress.progress_fields().contains(name));
+        assert!(progress.protocol_fields().contains(&format!("{name}=none")));
+    }
     for name in [
         "scheduling_pending_equeue_waits",
         "video_vblank_subscriptions",
@@ -313,6 +356,151 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         progress
             .protocol_fields()
             .contains("sample_exit_capacity=64")
+    );
+}
+
+#[test]
+fn completed_self_target_samples_require_real_emitted_memory_free_rsp_preserving_bodies() {
+    // Literal original byte programs end in a Jcc back to their exact start,
+    // except the final nonself/control cases. No code is executed by this test.
+    for (code, self_target, native_instructions) in [
+        (&[0x83, 0xc0, 1, 0x83, 0xf8, 2, 0x75, 0xf8][..], true, 2),
+        (&[0x8b, 0x00, 0x85, 0xc0, 0x75, 0xfa][..], true, 0), // memory poll
+        (&[0x48, 0x87, 0xe0, 0x75, 0xfb][..], true, 0),       // XCHG RAX,RSP
+        (&[0x83, 0xc4, 8, 0x75, 0xfb][..], true, 0),          // ESP alias write
+        (&[0x50, 0x75, 0xfd][..], true, 0),                   // implicit stack write
+        (&[0x58, 0x75, 0xfd][..], true, 0),                   // implicit stack read
+        (&[0xc9, 0x75, 0xfd][..], true, 0),                   // LEAVE implicit memory/RSP
+        (&[0xf7, 0xf1, 0x75, 0xfc][..], true, 0),             // DIV ECX
+        (&[0xf7, 0xf9, 0x75, 0xfc][..], true, 0),             // IDIV ECX
+        (&[0x0f, 0xae, 0xe8, 0x75, 0xfb][..], true, 0),       // LFENCE
+        (&[0x48, 0x8d, 0x00, 0x75, 0xfb][..], true, 0),       // conservative LEA exclusion
+        (&[0x75, 0xfe][..], true, 0),                         // no native body
+        (&[0x83, 0xc0, 1, 0x75, 0][..], false, 0),            // nonself target
+        (&[0xe2, 0xfe][..], false, 0),                        // LOOP is not a direct Jcc
+        (&[0xeb, 0xfe][..], false, 0),                        // unconditional jump
+        (&[0x0f, 0x05][..], false, 0),                        // service boundary
+        (&[0xc5, 0xf2, 0x5e, 0xc2, 0x75, 0xf8][..], false, 0), // mediated arithmetic
+    ] {
+        with_block(code, |epoch, block| {
+            let mut observer = BlockSamples::default();
+            observer.begin_epoch(epoch);
+            let pending = observer.prepare(epoch, block, 256, true).unwrap();
+            assert_eq!(
+                (
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions
+                ),
+                (0, 0, 0)
+            );
+            observer.complete(pending);
+            assert_eq!(
+                (
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions
+                ),
+                (
+                    u64::from(self_target),
+                    u64::from(native_instructions != 0),
+                    native_instructions
+                ),
+                "{code:x?}"
+            );
+            assert_eq!(observer.completed, 1);
+        });
+    }
+    // Missing retained information cannot be promoted to eligibility even for
+    // a harmless-looking decoded instruction. This is not a fabricated plan.
+    let mov = instruction(&[0x89, 0xc0]);
+    assert!(!native_register_record(&SampleRecord {
+        instruction: &mov,
+        emitted: true,
+        memory: None,
+    }));
+    assert!(!native_register_record(&SampleRecord {
+        instruction: &mov,
+        emitted: false,
+        memory: Some((false, MemoryRegisterDependencies::default())),
+    }));
+}
+
+#[test]
+fn self_target_sample_discard_work_and_counter_refusals_publish_no_eligibility() {
+    with_block(
+        &[0x83, 0xc0, 1, 0x83, 0xf8, 2, 0x75, 0xf8],
+        |epoch, block| {
+            let mut observer = BlockSamples::default();
+            observer.begin_epoch(epoch);
+            let pending = observer.prepare(epoch, block, 256, false).unwrap();
+            let _ = pending; // Actual dispatch failure discards this staged receipt.
+            assert_eq!(
+                (
+                    observer.completed,
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions
+                ),
+                (0, 0, 0, 0)
+            );
+            let pending = observer.prepare(epoch, block, 256, false).unwrap();
+            observer.complete(pending);
+            assert_eq!(
+                (
+                    observer.completed,
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions
+                ),
+                (1, 1, 1, 2)
+            );
+            observer.begin_epoch(identity());
+            assert_eq!(
+                (
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions
+                ),
+                (1, 1, 2)
+            );
+
+            for case in 0..5 {
+                let mut observer = BlockSamples::default();
+                observer.begin_epoch(epoch);
+                match case {
+                    0 => observer.maximum_work = observer.work + FIXED_WORK + 3 * RECORD_WORK - 1,
+                    1 => {}
+                    2 => observer.self_target_branches = u64::MAX,
+                    3 => observer.self_target_native_register_blocks = u64::MAX,
+                    4 => observer.self_target_native_register_instructions = u64::MAX - 1,
+                    _ => unreachable!(),
+                }
+                let before = (
+                    observer.self_target_branches,
+                    observer.self_target_native_register_blocks,
+                    observer.self_target_native_register_instructions,
+                );
+                assert!(
+                    observer
+                        .prepare(epoch, block, if case == 1 { 0 } else { 256 }, true)
+                        .is_none()
+                );
+                assert!(observer.disabled);
+                assert_eq!(observer.overflow, case >= 2);
+                assert_eq!(observer.completed, 0);
+                assert_eq!(observer.counts, [[0; 2]; 12]);
+                assert_eq!(observer.exit_codes_retained, 0);
+                assert_eq!(
+                    (
+                        observer.self_target_branches,
+                        observer.self_target_native_register_blocks,
+                        observer.self_target_native_register_instructions
+                    ),
+                    before
+                );
+            }
+        },
     );
 }
 

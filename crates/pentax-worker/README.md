@@ -680,6 +680,29 @@ and reset on close. An empty snapshot cannot distinguish no request from a
 rejected/rolled-back request or one removed by closing its port. These fields
 add no progress polling or scheduling, budget, window or rendering behavior.
 
+`graphics_function_top` and `graphics_function_last` retain a fixed history of
+44 closed graphics Function variants. Every existing call-admission path records
+once after its current quota debit, including register defaults and the bound
+VideoOut flip route. Normal source-defined rejected returns and subsequent
+preparation failures still count as admitted attempts. Quota refusal before
+admission retains the prior history. The top four use fixed catalogue order for
+ties; the last label is historical admission, not an in-flight function, fault
+attribution or successful GPU execution. No arguments, registry identities or
+guest text enter this profile.
+
+The periodic completed-block observer also reports
+`sample_self_target_branches`, `sample_self_target_native_register_blocks` and
+`sample_self_target_native_register_instructions`. These describe sampled plans
+whose direct conditional exit targets their exact block start, including when
+the condition is untaken. The strict register-body subset requires a nonempty
+actually emitted body, known immutable memory summaries, no explicit/implicit
+memory or RSP writes, and no stack, divide, fence or control instructions.
+Unknown summaries are excluded. The instruction total excludes the terminating
+branch. Counts commit only after successful sampled dispatch, within the existing
+1-in-4093 sampling and unchanged observer quota; they add no guest reads or new
+planning. They are candidate-selection observations, not taken-loop counts,
+whole-run frequencies or execution authority for a native loop.
+
 Service profiles count admission actions. A parked wait is not an immediate
 nonzero return, and its later resumption/timeout is not recorded by that profile.
 Zero nonzero-return counts therefore do not establish immediate mutex success

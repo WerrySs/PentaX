@@ -15,6 +15,9 @@ use pentax_platform::{
 
 #[path = "driver/flip_encoder.rs"]
 mod flip_encoder;
+#[path = "driver/function_profile.rs"]
+mod function_profile;
+pub use function_profile::FunctionProfile;
 #[path = "driver/graphics.rs"]
 mod graphics;
 #[path = "driver/interrupts.rs"]
@@ -188,6 +191,7 @@ pub enum Failure {
 pub(crate) struct Driver {
     limits: Limits,
     usage: Usage,
+    function_profile: FunctionProfile,
     queues: [compute::ComputeState; 56],
     graphics: draw::GraphicsState,
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
@@ -210,6 +214,7 @@ impl Driver {
         Self {
             limits,
             usage: Usage::default(),
+            function_profile: FunctionProfile::default(),
             queues: [compute::ComputeState::empty(); 56],
             graphics: draw::GraphicsState::empty(),
             graphics_owner: None,
@@ -224,6 +229,9 @@ impl Driver {
     }
     pub(crate) fn usage(&self) -> Usage {
         self.usage
+    }
+    pub(crate) fn function_profile(&self) -> FunctionProfile {
+        self.function_profile
     }
     pub(crate) fn video_flip_observations(&self) -> super::video::FlipObservations {
         self.video.flip_observations()
@@ -261,6 +269,11 @@ impl Driver {
             return Err(Failure::Memory);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.function_profile.record(if internal {
+            Function::AgcGetRegisterDefaultsInternal
+        } else {
+            Function::AgcGetRegisterDefaults
+        });
         self.usage.preparation_work = add(
             self.usage.preparation_work,
             if self.defaults.is_some() {
@@ -339,6 +352,7 @@ impl Driver {
             return Err(Failure::Poisoned);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.function_profile.record(Function::VideoSubmitFlip);
         self.video_submit_flip(memory, args, clock)
     }
     fn submit_impl(
@@ -354,6 +368,7 @@ impl Driver {
             return Err(Failure::Poisoned);
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.function_profile.record(function);
         if matches!(
             function,
             Function::VideoAddFlipEvent
@@ -908,6 +923,8 @@ mod suspend_tests {
             max_calls: 1,
             ..Default::default()
         });
+        assert_eq!(driver.function_profile().last(), "none");
+        assert_eq!(driver.function_profile().top(), [None; 4]);
         assert_eq!(
             driver.submit(&mut memory, Function::AgcRegistryUnavailable, [u64::MAX; 6]),
             Ok(0x8a6c_9018)
@@ -915,10 +932,18 @@ mod suspend_tests {
         assert_eq!(driver.frame_state(), FrameState::default());
         assert_eq!(driver.usage().dispatches, 0);
         assert_eq!(driver.video_port(1), None);
+        let admitted = driver.function_profile();
+        assert_eq!(admitted.count(Function::AgcRegistryUnavailable), 1);
+        assert_eq!(admitted.last(), "AgcRegistryUnavailable");
         assert_eq!(
-            driver.submit(&mut memory, Function::AgcRegistryUnavailable, [0; 6]),
+            admitted.top(),
+            [Some(("AgcRegistryUnavailable", 1)), None, None, None]
+        );
+        assert_eq!(
+            driver.submit(&mut memory, Function::AgcInit, [0; 6]),
             Err(Failure::Limit)
         );
+        assert_eq!(driver.function_profile(), admitted);
         let mut limited = Driver::new(Limits {
             max_preparation_work: 7,
             ..Default::default()
@@ -928,10 +953,14 @@ mod suspend_tests {
             Err(Failure::Limit)
         );
         limited.poisoned = true;
+        let admitted = limited.function_profile();
+        assert_eq!(admitted.count(Function::AgcRegistryUnavailable), 1);
+        assert_eq!(limited.usage.calls, 1); // Work refusal followed admitted call.
         assert_eq!(
             limited.submit(&mut memory, Function::AgcRegistryUnavailable, [0; 6]),
             Err(Failure::Poisoned)
         );
+        assert_eq!(limited.function_profile(), admitted);
     }
 
     #[test]

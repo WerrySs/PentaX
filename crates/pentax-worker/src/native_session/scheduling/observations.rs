@@ -3,7 +3,11 @@
 //! Final-only queue snapshot. Pending waits are not readiness or deadlock proof.
 
 use super::Scheduling;
-use pentax_core::gpu::{driver::Usage, video::FlipObservations};
+use pentax_core::gpu::{
+    driver::{FunctionProfile, Usage},
+    video::FlipObservations,
+};
+use std::fmt::Write;
 
 #[derive(Debug, Default)]
 pub(in crate::native_session) struct Observations {
@@ -19,6 +23,7 @@ pub(in crate::native_session) struct Observations {
     // Written bytes include committed PM4 memory/label stores as well as
     // draw/compute writeback, so they do not prove a completed draw.
     graphics: Usage,
+    graphics_functions: FunctionProfile,
     flips: FlipObservations,
     main_state: Option<&'static str>,
     main_wait: Option<&'static str>,
@@ -27,7 +32,7 @@ pub(in crate::native_session) struct Observations {
 
 impl Observations {
     pub(in crate::native_session) fn protocol_fields(&self) -> String {
-        format!(
+        let mut fields = format!(
             "\tscheduling_threads={}\tscheduling_pending_waits={}\tscheduling_pending_equeue_waits={}\tscheduling_returned={}\tscheduling_main_state={}\tscheduling_main_wait={}\tscheduling_active_role={}\tvideo_open_ports={}\tvideo_registered_buffers={}\tvideo_vblank_subscriptions={}\tgraphics_calls={}\tgraphics_command_buffers={}\tgraphics_draw_attempts={}\tgraphics_dispatch_attempts={}\tgraphics_written_bytes={}\tvideo_flip_reserved={}\tvideo_flip_recording_with_frame={}\tvideo_flip_ready_with_frame={}\tvideo_flip_presenting={}\tvideo_flip_acknowledged={}",
             self.threads,
             self.waiting,
@@ -49,7 +54,24 @@ impl Observations {
             self.flips.ready_with_frame,
             self.flips.presenting,
             self.flips.acknowledged,
-        )
+        );
+        // Final-only bounded rendering: four closed labels/counts and one
+        // historical last-admitted label, never arguments or runtime identity.
+        fields.push_str("\tgraphics_function_top=");
+        let mut separator = "";
+        for (label, count) in self.graphics_functions.top().into_iter().flatten() {
+            let _ = write!(fields, "{separator}{label}:{count}");
+            separator = ",";
+        }
+        if separator.is_empty() {
+            fields.push_str("none");
+        }
+        let _ = write!(
+            fields,
+            "\tgraphics_function_last={}",
+            self.graphics_functions.last()
+        );
+        fields
     }
 }
 
@@ -61,6 +83,7 @@ impl Scheduling<'_, '_> {
         video: (u64, u64, u64),
         graphics: Usage,
         flips: FlipObservations,
+        graphics_functions: FunctionProfile,
     ) -> Observations {
         let mut snapshot = Observations {
             threads: self.threads.len() as u64,
@@ -69,6 +92,7 @@ impl Scheduling<'_, '_> {
             video_registered_buffers: video.1,
             video_vblank_subscriptions: video.2,
             graphics,
+            graphics_functions,
             flips,
             ..Default::default()
         };

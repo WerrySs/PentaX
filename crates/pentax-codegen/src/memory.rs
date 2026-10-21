@@ -32,6 +32,9 @@ impl InstructionMemoryTemplate {
     pub(crate) fn register_dependencies(&self) -> MemoryRegisterDependencies {
         self.dependencies
     }
+    pub(crate) fn has_memory(&self) -> bool {
+        self.memory_count != 0
+    }
 }
 
 fn dependencies(info: &InstructionInfo, instruction: &Instruction) -> MemoryRegisterDependencies {
