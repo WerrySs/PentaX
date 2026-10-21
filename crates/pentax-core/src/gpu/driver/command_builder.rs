@@ -755,38 +755,38 @@ impl Driver {
                 pending.preflight_work,
             )?;
         }
-        if let Some((source, length)) = pending.packet.payload {
-            if length != 0 {
-                let destination = up
-                    .checked_add(pending.packet.written as u64 * 4)
-                    .ok_or(Failure::Memory)?;
-                // Cursor and header are now the actual current guest bytes.
-                // Descriptor/header-as-input cases therefore read the source's
-                // post-allocation values. memcpy payload overlap is undefined;
-                // its checked refusal preserves the already published prefix.
-                memory
-                    .preflight_disjoint_backing(
-                        NativeRange {
-                            address: source,
-                            size: length as u64,
-                        },
-                        NativeRange {
-                            address: destination,
-                            size: length as u64,
-                        },
-                        pending.preflight_work,
-                    )
-                    .map_err(|_| Failure::Memory)?;
-                memory
-                    .read(source, &mut pending.payload)
-                    .map_err(|_| Failure::Memory)?;
-                self.command_write(
-                    memory,
-                    destination,
-                    &pending.payload,
+        if let Some((source, length)) = pending.packet.payload
+            && length != 0
+        {
+            let destination = up
+                .checked_add(pending.packet.written as u64 * 4)
+                .ok_or(Failure::Memory)?;
+            // Cursor and header are now the actual current guest bytes.
+            // Descriptor/header-as-input cases therefore read the source's
+            // post-allocation values. memcpy payload overlap is undefined;
+            // its checked refusal preserves the already published prefix.
+            memory
+                .preflight_disjoint_backing(
+                    NativeRange {
+                        address: source,
+                        size: length as u64,
+                    },
+                    NativeRange {
+                        address: destination,
+                        size: length as u64,
+                    },
                     pending.preflight_work,
-                )?;
-            }
+                )
+                .map_err(|_| Failure::Memory)?;
+            memory
+                .read(source, &mut pending.payload)
+                .map_err(|_| Failure::Memory)?;
+            self.command_write(
+                memory,
+                destination,
+                &pending.payload,
+                pending.preflight_work,
+            )?;
         }
         self.poisoned = false;
         Ok(up)

@@ -67,8 +67,6 @@ fn keyboard_type_cross_page_refusal_preserves_bytes_then_uses_current_writable_b
                 Err(KernelStartupError::SiteMismatch { .. })
             ));
             assert_eq!(session.kernel_usage().attempts, attempts);
-            Ok::<_, ()>(())
         },
-    )
-    .unwrap();
+    );
 }

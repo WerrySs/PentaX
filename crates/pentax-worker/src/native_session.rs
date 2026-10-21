@@ -1795,6 +1795,8 @@ fn fetch_window_into<'window>(
 }
 
 #[cfg(test)]
+mod agc_callback_tests;
+#[cfg(test)]
 mod netctl_tests;
 #[cfg(test)]
 #[path = "native_session/segment_tests.rs"]

@@ -93,6 +93,9 @@ jobs:
           cargo test --locked -p pentax-core --lib -- --test-threads=1
           --skip gpu::shaders::tests::registered_shader_extent_is_consumed_by_actual_compute_preparation_and_gpu_writeback
           --skip process::hle::kernel_startup::graphics_runtime::interrupt_tests::fenced_compute_then_label_and_interrupt_deliver_actual_ordered_coalesced_state
+      - name: Test actual command callback mutations and late fault retirement
+        run: >-
+          cargo test --locked -p pentax-worker --bin pentax-worker native_session::agc_callback_tests:: -- --test-threads=1
       - name: Test timestamp admission and state
         run: >-
           cargo test --locked -p pentax-platform --lib tests::timestamp_counter_tests:: -- --test-threads=1
