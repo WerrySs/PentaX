@@ -90,9 +90,17 @@ impl ServiceProfile {
             .map(|(name, count, _)| format!("{name}:{count}"))
             .collect::<Vec<_>>()
             .join(",");
+        // Nonzero observations need their own ranking: the most frequent calls
+        // may all return zero and otherwise hide rarer nonzero outcomes. These
+        // are raw return observations, not an error classification (IDs and
+        // other successful values can be nonzero).
+        sorted.sort_unstable_by_key(|entry| {
+            std::cmp::Reverse(entry.map_or((0, 0), |(_, calls, nonzero)| (nonzero, calls)))
+        });
         let nonzero = sorted
             .iter()
             .flatten()
+            .filter(|(_, _, count)| *count != 0)
             .take(4)
             .map(|(name, _, count)| format!("{name}:{count}"))
             .collect::<Vec<_>>()
@@ -103,6 +111,56 @@ impl ServiceProfile {
             self.other,
             self.overflow
         )
+    }
+}
+
+#[cfg(test)]
+mod service_profile_tests {
+    use super::ServiceProfile;
+
+    #[test]
+    fn infrequent_nonzero_returns_survive_hot_zero_calls_without_error_inference() {
+        let mut profile = ServiceProfile::default();
+        let mut work = 0;
+        for label in [
+            "PthreadMutexLock",
+            "PthreadMutexUnlock",
+            "pthread_mutex_lock",
+            "pthread_mutex_unlock",
+        ] {
+            for _ in 0..16 {
+                profile
+                    .record(Some(label), false, &mut work, u64::MAX)
+                    .unwrap();
+            }
+        }
+        // Both a successful nonzero identity and another nonzero result remain
+        // visible. The observer deliberately assigns neither an errno meaning.
+        profile
+            .record(Some("PthreadGetthreadid"), true, &mut work, u64::MAX)
+            .unwrap();
+        profile
+            .record(Some("Open"), true, &mut work, u64::MAX)
+            .unwrap();
+        profile
+            .record(Some("Open"), true, &mut work, u64::MAX)
+            .unwrap();
+        let fields = profile.protocol_fields();
+        let top = fields
+            .split('\t')
+            .find(|part| part.starts_with("service_top="))
+            .unwrap();
+        assert!(!top.contains("Open") && !top.contains("PthreadGetthreadid"));
+        let nonzero = fields
+            .split('\t')
+            .find(|part| part.starts_with("service_nonzero_top="))
+            .unwrap();
+        assert_eq!(nonzero, "service_nonzero_top=Open:2,PthreadGetthreadid:1");
+        assert!(fields.ends_with("service_last=Open\tservice_other=0\tservice_overflow=0"));
+        assert_eq!(
+            ServiceProfile::default().protocol_fields(),
+            "service_top=\tservice_nonzero_top=\tservice_last=other-provider\tservice_other=0\tservice_overflow=0"
+        );
     }
 }
 

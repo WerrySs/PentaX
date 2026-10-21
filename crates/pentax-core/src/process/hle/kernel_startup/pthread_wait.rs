@@ -6,7 +6,8 @@ use super::*;
 use pentax_kernel::{
     AudioOut2Wait, AudioOut2WaitAction, ConditionWait, ConditionWaitAction, EventFlagWait,
     EventFlagWaitAction, EventQueueWait, EventQueueWaitAction, MutexWait, MutexWaitAction,
-    SemaphoreWait, SemaphoreWaitAction, Service, TimeWait, TimeWaitAction,
+    RwlockWait, RwlockWaitAction, SemaphoreWait, SemaphoreWaitAction, Service, TimeWait,
+    TimeWaitAction,
 };
 use pentax_platform::native_memory::NativeOwnerId;
 
@@ -23,6 +24,7 @@ enum Ticket {
     Condition(ConditionWait),
     Semaphore(SemaphoreWait),
     Mutex(MutexWait),
+    Rwlock(RwlockWait),
     EventFlag(EventFlagWait),
     AudioOut2(AudioOut2Wait),
     Time(TimeWait),
@@ -139,6 +141,21 @@ pub(super) fn begin(
             }
             MutexWaitAction::Waiting(ticket) => Ticket::Mutex(ticket),
         }
+    } else if matches!(
+        service,
+        Service::RwlockReadLock
+            | Service::RwlockWriteLock
+            | Service::RwlockTimedReadLock
+            | Service::RwlockTimedWriteLock
+            | Service::PosixRwlockWriteLock
+    ) {
+        match kernel
+            .begin_rwlock_wait(service, args, memory)
+            .map_err(KernelStartupError::Kernel)?
+        {
+            RwlockWaitAction::Returned(value) => return Ok(NativeServiceAction::Returned(value)),
+            RwlockWaitAction::Waiting(ticket) => Ticket::Rwlock(ticket),
+        }
     } else {
         match kernel
             .begin_condition_wait(service, args, memory)
@@ -173,6 +190,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Condition(ticket) => self.kernel.condition_wait_ready(ticket),
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
             Ticket::Mutex(ticket) => self.kernel.mutex_wait_ready(ticket),
+            Ticket::Rwlock(ticket) => self.kernel.rwlock_wait_ready(ticket),
             Ticket::EventFlag(ticket) => self.kernel.event_flag_wait_ready(ticket),
             Ticket::AudioOut2(_) | Ticket::Time(_) => {
                 let (mut paused, instances) =
@@ -220,6 +238,10 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Mutex(ticket) => self
                 .kernel
                 .mutex_wait_delay(ticket)
+                .map_err(KernelStartupError::Kernel),
+            Ticket::Rwlock(ticket) => self
+                .kernel
+                .rwlock_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
             Ticket::EventFlag(ticket) => self
                 .kernel
@@ -301,6 +323,10 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::Mutex(ticket) => self
                 .kernel
                 .complete_mutex_wait(ticket)
+                .map_err(KernelStartupError::Kernel),
+            Ticket::Rwlock(ticket) => self
+                .kernel
+                .complete_rwlock_wait(ticket)
                 .map_err(KernelStartupError::Kernel),
             Ticket::Condition(ticket) => self
                 .kernel

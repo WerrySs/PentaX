@@ -361,7 +361,10 @@ may already be ready; observing it neither polls readiness nor proves deadlock.
 These fields expose no thread identity or guest data, allocate no queue storage,
 visit at most 4096 retained entries once per epoch stop and leave `PROGRESS`
 unchanged. They do not establish game boot or change scheduler behavior.
-`service_nonzero_top` counts nonzero returns for the same four labels. Nonzero
+`service_nonzero_top` independently ranks up to four retained labels by their
+nonzero-return counts and omits labels with zero such observations. Its first-64
+label bound and overflow accounting are the same as `service_top`; a rare return
+outside that retained set is not recovered. Nonzero
 does not generally mean failure: identity and pointer results can be nonzero.
 
 Scalar `VUCOMISS`/`VUCOMISD` and `VCOMISS`/`VCOMISD` use fixed SSE2 comparisons

@@ -1013,6 +1013,11 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                     | pentax_kernel::Service::PosixMutexLock
                     | pentax_kernel::Service::MutexTimedLock
                     | pentax_kernel::Service::PosixMutexTimedLock
+                    | pentax_kernel::Service::RwlockReadLock
+                    | pentax_kernel::Service::RwlockWriteLock
+                    | pentax_kernel::Service::RwlockTimedReadLock
+                    | pentax_kernel::Service::RwlockTimedWriteLock
+                    | pentax_kernel::Service::PosixRwlockWriteLock
                     | pentax_kernel::Service::AudioOut2ContextCreate
                     | pentax_kernel::Service::AudioOut2ContextDestroy
                     | pentax_kernel::Service::AudioOut2ContextAdvance

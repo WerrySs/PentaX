@@ -17,7 +17,7 @@ fn call(session: &mut PreparedNativeKernelStartup<'_, '_>, service: Service, arg
         .unwrap()
 }
 
-fn request(token: PreSyscallToken) -> NativeServiceRequest {
+pub(super) fn request(token: PreSyscallToken) -> NativeServiceRequest {
     NativeServiceRequest {
         owner_id: token.owner_id(),
         syscall_pc: token.syscall_pc(),
@@ -29,7 +29,7 @@ fn request(token: PreSyscallToken) -> NativeServiceRequest {
     }
 }
 
-fn stopped<'view, 'plan, 'image>(
+pub(super) fn stopped<'view, 'plan, 'image>(
     session: &mut PreparedNativeKernelStartup<'plan, 'image>,
     proof: &'view PreparedNativeSource<'plan, 'image>,
     stop: KernelServiceStop,
@@ -98,7 +98,7 @@ fn stopped<'view, 'plan, 'image>(
     (engine, token)
 }
 
-fn limits() -> KernelStartupLimits {
+pub(super) fn limits() -> KernelStartupLimits {
     let mut limits = KernelStartupLimits::default();
     limits.startup.static_tls.thread_control =
         crate::process::tls::ThreadControlBlockPolicy::KytyObservedSelfPointerV1;
@@ -195,7 +195,7 @@ fn usleep_and_equeue_waits_check_selected_tls_and_current_executor_before_any_ti
     }
 }
 
-fn session<'plan, 'image>(
+pub(super) fn session<'plan, 'image>(
     plan: &'plan KernelStartupPlan<'image>,
     owner: NativeAddressSpace,
     pointers: &[u64],

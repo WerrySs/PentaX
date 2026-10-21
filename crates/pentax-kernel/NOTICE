@@ -496,7 +496,17 @@ and exact libKernel.cpp registrations. PentaX retains recursive readers, writer
 ownership, reader-first unlock order, lazy initialization differences, attribute
 storage, ignored initializer attributes and error domains. Checked owned guest
 prefixes and atomic backing transactions replace host object pointers. Contended
-waits and additional guest thread scheduling remain unsupported.
+waits now retain bounded process-owned scheduler tickets and per-thread reader
+records instead of host condition-variable waits. The pinned
+RwlockLockCooperative uses steady-clock relative uint32 microseconds, attempts
+acquisition before timeout, and blocks new readers behind queued writers while
+allowing existing-reader recursion and writer-owned reads. No FIFO writer
+ordering, POSIX cancellation ABI or POSIX timed-rwlock aliases are invented.
+Wait identity, writer enrollment, timeout/cancellation cleanup and reserved
+reader capacity are checked before ownership changes. Retained reader records
+share the existing max_thread_contexts allowance across all locks; this is an
+explicit PentaX allocation limit, not a source OS limit. All new tests are
+original bounded programs, without imported guest code or data.
 
 Standard output additionally adapts the pinned libKernel.cpp write wrapper,
 fileSystem.cpp KernelWrite and their exact library registrations. PentaX keeps

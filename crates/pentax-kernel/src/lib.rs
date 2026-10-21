@@ -87,6 +87,7 @@ pub use pthread_condition::{ConditionWait, ConditionWaitAction};
 pub use pthread_create::{AdmittedPthreadCreate, PthreadCreateAction};
 pub use pthread_mutex::{MutexWait, MutexWaitAction};
 pub use pthread_once::{AdmittedPthreadOnce, PthreadOnceAction};
+pub use pthread_rwlock::{RwlockWait, RwlockWaitAction};
 pub use runtime_data::RuntimeDataOutputs;
 pub use save::SaveStorage;
 pub use sync::{EventFlagWait, EventFlagWaitAction, SemaphoreWait, SemaphoreWaitAction};

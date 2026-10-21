@@ -312,6 +312,7 @@ mod event_flag_wait;
 mod module_symbols;
 mod mutex_wait;
 mod process_parameters;
+mod rwlock_wait;
 mod thread_context;
 
 fn with_plan(

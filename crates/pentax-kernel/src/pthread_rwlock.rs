@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2021 InoriRus
-// Modified 2026 for PentaX: bounded owned initial-thread read/write locks.
+// Modified 2026 for PentaX: bounded per-thread read/write ownership.
 // Adapted from pinned kernel/pthread.cpp/h; see NOTICE.
 
-//! The current profile admits one guest thread. Reader recursion and reading
-//! while owning the writer are real retained state. Contended waits require
-//! scheduler-owned queues before additional guest threads can be admitted.
+//! Reader records share a finite process-owned pool. Cooperative wait tickets
+//! are retained by the scheduler, never host-blocking or fabricated success.
 
 use crate::budget::{Budget, Limits};
 use crate::memory::{MemoryState, PthreadObjectKind};
 use crate::{CallArgs, Errno, Failure, GuestAccess, Service};
+
+mod wait;
+pub use wait::{RwlockWait, RwlockWaitAction};
 
 struct Attribute {
     id: u64,
@@ -20,25 +22,57 @@ struct Rwlock {
     id: u64,
     _name: String,
     writer: Option<u32>,
-    reader: Option<u32>,
     readers: u32,
+    waits: usize,
+    waiting_writers: usize,
+}
+struct Reader {
+    lock: u64,
+    thread: u32,
+    count: u32,
 }
 pub(crate) struct RwlockState {
     attributes: Vec<Attribute>,
     locks: Vec<Rwlock>,
+    readers: Vec<Reader>,
+    waiters: Vec<wait::Waiter>,
+    maximum: usize,
+    reader_reservations: usize,
 }
 
 impl RwlockState {
     pub(crate) fn new(limits: Limits) -> Result<Self, Failure> {
         let mut attributes = Vec::new();
         let mut locks = Vec::new();
+        let mut readers = Vec::new();
+        let mut waiters = Vec::new();
         attributes
             .try_reserve_exact(limits.max_handles)
             .map_err(|_| Failure::Allocation)?;
         locks
             .try_reserve_exact(limits.max_handles)
             .map_err(|_| Failure::Allocation)?;
-        Ok(Self { attributes, locks })
+        // This shared pair-record allowance is independent of object handles.
+        // A thread may hold multiple locks until the finite pool is exhausted.
+        readers
+            .try_reserve_exact(limits.max_thread_contexts)
+            .map_err(|_| Failure::Allocation)?;
+        waiters
+            .try_reserve_exact(limits.max_thread_contexts)
+            .map_err(|_| Failure::Allocation)?;
+        if readers.capacity() > limits.max_thread_contexts
+            || waiters.capacity() > limits.max_thread_contexts
+        {
+            return Err(Failure::Limit("rwlock metadata capacity"));
+        }
+        Ok(Self {
+            attributes,
+            locks,
+            readers,
+            waiters,
+            maximum: limits.max_thread_contexts,
+            reader_reservations: 0,
+        })
     }
 
     fn attribute_index(
@@ -70,16 +104,74 @@ impl RwlockState {
             id,
             _name: name,
             writer: None,
-            reader: None,
             readers: 0,
+            waits: 0,
+            waiting_writers: 0,
         });
         Ok(self.locks.len() - 1)
+    }
+
+    fn reader_index(&self, lock: u64, thread: u32) -> Option<usize> {
+        self.readers
+            .iter()
+            .position(|reader| reader.lock == lock && reader.thread == thread)
+    }
+
+    fn can_acquire(&self, index: usize, thread: u32, write: bool) -> Result<bool, Failure> {
+        let value = &self.locks[index];
+        let owns_read = self.reader_index(value.id, thread).is_some();
+        if write {
+            if value.writer == Some(thread) || owns_read {
+                return Err(Errno::Deadlock.into());
+            }
+            Ok(value.writer.is_none() && value.readers == 0)
+        } else {
+            Ok(value.writer == Some(thread)
+                || value.writer.is_none() && (value.waiting_writers == 0 || owns_read))
+        }
+    }
+
+    fn acquire(
+        &mut self,
+        index: usize,
+        thread: u32,
+        write: bool,
+        reserved_reader: bool,
+    ) -> Result<(), Failure> {
+        if write {
+            self.locks[index].writer = Some(thread);
+            return Ok(());
+        }
+        let value = &self.locks[index];
+        let total = value.readers.checked_add(1).ok_or(Errno::Again)?;
+        let reader = self.reader_index(value.id, thread);
+        let count = reader
+            .map(|index| self.readers[index].count.checked_add(1).ok_or(Errno::Again))
+            .transpose()?;
+        if reader.is_none()
+            && self.readers.len() + self.reader_reservations - usize::from(reserved_reader)
+                >= self.maximum
+        {
+            return Err(Failure::Limit("rwlock reader records"));
+        }
+        if let Some(reader) = reader {
+            self.readers[reader].count = count.unwrap();
+        } else {
+            self.readers.push(Reader {
+                lock: value.id,
+                thread,
+                count: 1,
+            });
+        }
+        self.locks[index].readers = total;
+        Ok(())
     }
 
     fn lock_index(
         &mut self,
         slot: u64,
         lazy: bool,
+        needs_reader: bool,
         memory: &mut MemoryState,
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
@@ -89,6 +181,9 @@ impl RwlockState {
         }
         let id = budget.u64(guest, slot)?;
         if id == 0 && lazy {
+            if needs_reader && self.readers.len() + self.reader_reservations >= self.maximum {
+                return Err(Failure::Limit("rwlock reader records"));
+            }
             return self.create(slot, String::new(), memory, guest, budget);
         }
         self.locks
@@ -106,7 +201,13 @@ impl RwlockState {
         budget: &mut Budget,
         thread: u32,
     ) -> Result<u64, Failure> {
-        budget.work((self.attributes.len() + self.locks.len() + 1) as u64)?;
+        budget.work(
+            24 + 4
+                * (self.attributes.len()
+                    + self.locks.len()
+                    + self.readers.len()
+                    + self.waiters.len()) as u64,
+        )?;
         let a = args.0;
         use Service::*;
         match service {
@@ -160,9 +261,9 @@ impl RwlockState {
                 Ok(0)
             }
             RwlockDestroy => {
-                let index = self.lock_index(a[0], false, memory, guest, budget)?;
+                let index = self.lock_index(a[0], false, false, memory, guest, budget)?;
                 let value = &self.locks[index];
-                if value.writer.is_some() || value.readers != 0 {
+                if value.writer.is_some() || value.readers != 0 || value.waits != 0 {
                     return Err(Errno::Busy.into());
                 }
                 memory.destroy_pthread_object(
@@ -179,18 +280,27 @@ impl RwlockState {
             | RwlockTimedReadLock | RwlockTimedWriteLock | RwlockUnlock => {
                 // Unlike the other acquisition routes, source Trywrlock does
                 // not lazily initialize a zero slot.
-                let index =
-                    self.lock_index(a[0], service != RwlockTryWriteLock, memory, guest, budget)?;
-                let value = &mut self.locks[index];
+                let index = self.lock_index(
+                    a[0],
+                    service != RwlockTryWriteLock,
+                    matches!(
+                        service,
+                        RwlockReadLock | RwlockTryReadLock | RwlockTimedReadLock
+                    ),
+                    memory,
+                    guest,
+                    budget,
+                )?;
                 if service == RwlockUnlock {
                     // Source unlock releases a nested reader before its writer.
-                    if value.reader == Some(thread) && value.readers != 0 {
-                        value.readers -= 1;
-                        if value.readers == 0 {
-                            value.reader = None;
+                    if let Some(reader) = self.reader_index(self.locks[index].id, thread) {
+                        self.readers[reader].count -= 1;
+                        self.locks[index].readers -= 1;
+                        if self.readers[reader].count == 0 {
+                            self.readers.swap_remove(reader);
                         }
-                    } else if value.writer == Some(thread) {
-                        value.writer = None;
+                    } else if self.locks[index].writer == Some(thread) {
+                        self.locks[index].writer = None;
                     } else {
                         return Err(Errno::Perm.into());
                     }
@@ -200,21 +310,8 @@ impl RwlockState {
                     service,
                     RwlockWriteLock | RwlockTryWriteLock | RwlockTimedWriteLock
                 );
-                if write {
-                    if value.writer == Some(thread) || value.reader == Some(thread) {
-                        return Err(Errno::Deadlock.into());
-                    }
-                    if value.writer.is_none() && value.readers == 0 {
-                        value.writer = Some(thread);
-                        return Ok(0);
-                    }
-                } else if value.writer.is_none() || value.writer == Some(thread) {
-                    if value.reader.is_some_and(|reader| reader != thread) {
-                        return Err(Failure::Unsupported("additional rwlock reader thread"));
-                    }
-                    let readers = value.readers.checked_add(1).ok_or(Errno::Again)?;
-                    value.reader = Some(thread);
-                    value.readers = readers;
+                if self.can_acquire(index, thread, write)? {
+                    self.acquire(index, thread, write, false)?;
                     return Ok(0);
                 }
                 if matches!(service, RwlockTryReadLock | RwlockTryWriteLock) {

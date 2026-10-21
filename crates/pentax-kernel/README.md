@@ -1043,7 +1043,7 @@ or promise parallel guest execution. Registrations use exact libkernel1.1 scope
 and library version1, with prior marker IDs preserved.
 
 Read/write locks retain an owned zeroed 256-byte guest prefix, writer ownership
-and recursive reader counts. The initial thread can read while owning a writer;
+and per-thread recursive reader counts. Any owning thread can read while owning a writer;
 unlock releases its reader holds before its writer, matching the pinned source.
 Write recursion, including try-write and timed-write, returns EDEADLK. Destroying
 a held lock returns EBUSY; unlocking an unheld lock returns EPERM. Zero slots
@@ -1055,9 +1055,25 @@ Rwlock attributes own 64-byte zeroed prefixes and retain any signed type value.
 The pinned lock initializer ignores the attribute argument, so it is not read.
 The exact kernel and POSIX registrations preserve their distinct error domains;
 the POSIX-library try-lock exports intentionally retain direct kernel results.
-Timed calls can acquire an available lock without waiting. Contended waits and
-additional guest reader/writer threads require scheduler integration and remain
-unsupported; this is the existing initial-thread profile, not a full scheduler.
+Timed calls can acquire an available lock without waiting. Native blocking
+read/write calls now use scheduler-owned opaque wait tickets, bound to the
+actual selected TLS, process owner and pending executor continuation. New readers
+wait behind queued writers, but existing readers can recurse and a writer can
+read its own lock. Writers are not FIFO. Acquisition eligibility precedes timeout
+even after a late scheduler turn. SCE timed calls take low32 relative monotonic
+microseconds, not a POSIX absolute timespec. Only the existing POSIX write alias
+uses positive errno; the POSIX-library try aliases retain direct kernel results.
+
+Reader ownership pairs share one preallocated `max_thread_contexts` record pool
+across all locks, independently of lock handles. Multiple locks per thread are
+supported until this explicit finite allocation policy refuses. Each queued
+reader reserves its eventual record before enrollment; acquisition, timeout or
+internal cancellation releases that reservation exactly once. Waiter storage
+has the same independent finite count bound. Queue membership never sleeps the
+kernel host or returns success before acquisition. Internal ticket cancellation
+is cleanup only, not a guest pthread_cancel implementation. Destroying a lock
+with retained tickets returns EBUSY. Failed work/slot/storage admission preserves
+ownership and queue state; a quota-refused new lazy read does not publish its slot.
 
 One retained budget bounds total attempts, guest read/write bytes, work, live
 guest resources, scratch peak, per-I/O bytes, mapped bytes and sleep duration.
