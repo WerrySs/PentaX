@@ -11,16 +11,16 @@ fn pad_runtime_binds_seven_new_markers_and_preserves_all_historical_sites() {
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1325, 68, 70)
+        (1326, 69, 71)
     );
-    assert_eq!(provider.code_bytes().len(), 0x2a68);
+    assert_eq!(provider.code_bytes().len(), 0x2a70);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1326, 0x10000)
+        (1327, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1327, 0x10008)
+        (1328, 0x10008)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
@@ -36,7 +36,7 @@ fn pad_runtime_binds_seven_new_markers_and_preserves_all_historical_sites() {
             &marker.bytes()
         );
     }
-    let rows = &Service::registrations()[1318..];
+    let rows = &Service::registrations()[1318..1325];
     assert_eq!(rows.len(), 7);
     let bytes = consumer(b"libScePad", b"libScePad", rows).build().unwrap();
     let plan = link(&bytes, &provider).unwrap();
@@ -61,7 +61,7 @@ fn pad_runtime_binds_seven_new_markers_and_preserves_all_historical_sites() {
 #[test]
 fn pad_runtime_refuses_unqualified_namespace_version_object_and_neighbor_tokens() {
     let provider = factory();
-    for row in &Service::registrations()[1318..] {
+    for row in &Service::registrations()[1318..1325] {
         for (module, library) in [
             (b"Pad".as_slice(), b"Pad".as_slice()),
             (b"Pad".as_slice(), b"libScePad".as_slice()),

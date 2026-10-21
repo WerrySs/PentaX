@@ -268,6 +268,38 @@ impl Driver {
         for action in plan.actions() {
             let command = match action {
                 draw::Action::Draw(index) => &plan.draws()[*index],
+                draw::Action::Memory(index) => {
+                    // Consuming the current draw receipt invalidates it before
+                    // every memory/barrier action, including empty writes. A
+                    // later flip must follow a new actual owned draw.
+                    let memory = cursor.into_pause();
+                    match plan.memory_action(*index) {
+                        draw::MemoryAction::Write(write) => {
+                            self.memory_write(memory, write, &sources)?;
+                        }
+                        draw::MemoryAction::Wait(wait) => {
+                            self.usage.preparation_work = add(
+                                self.usage.preparation_work,
+                                wait.byte_count() as u64 + 1,
+                                self.limits.max_preparation_work,
+                            )?;
+                            self.usage.memory_commands =
+                                self.usage.memory_commands.saturating_add(1);
+                            if !wait
+                                .satisfied(&super::super::Memory(memory))
+                                .map_err(Failure::Preparation)?
+                            {
+                                return Err(Failure::Waiting);
+                            }
+                        }
+                        draw::MemoryAction::Release(release) => {
+                            self.retire_release(memory, release, &sources, &mut kernel, 0)?;
+                        }
+                        draw::MemoryAction::Drain => self.drain_commands()?,
+                    }
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
                 draw::Action::Flip(flip) => {
                     let Cursor::Draw(current) = cursor else {
                         return Err(Failure::UnsupportedVideo);

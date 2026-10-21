@@ -51,6 +51,8 @@ mod sysmodule;
 
 #[path = "tests/configured_memory.rs"]
 mod configured_memory;
+#[path = "tests/convert_keycode.rs"]
+mod convert_keycode;
 #[path = "tests/share.rs"]
 mod share;
 #[path = "tests/system.rs"]

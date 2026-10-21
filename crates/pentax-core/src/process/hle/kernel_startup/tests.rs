@@ -5,6 +5,8 @@
 
 #![cfg(all(target_os = "windows", target_arch = "x86_64"))]
 
+#[path = "tests/convert_keycode.rs"]
+mod convert_keycode;
 mod public_execution;
 
 use super::*;
@@ -410,7 +412,7 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
                 plan.kernel_bindings(),
                 plan.hle.provider_bindings()
             ),
-            (1325, 1, 1)
+            (1326, 1, 1)
         );
         assert_eq!(
             (

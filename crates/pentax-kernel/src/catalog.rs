@@ -631,6 +631,7 @@ pub enum Service {
     PadGetControllerInformation,
     PadSetTriggerEffect,
     PadSetLightBar,
+    ConvertKeycodeGetImeKeyboardType,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1668,6 +1669,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < CONVERT_KEYCODE_REGISTRATIONS.len() {
+        entries[output] = CONVERT_KEYCODE_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1762,6 +1769,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + USER_PRIVACY_REGISTRATIONS.len()
             + CONFIGURED_MEMORY_REGISTRATIONS.len()
             + PAD_RUNTIME_REGISTRATIONS.len()
+            + CONVERT_KEYCODE_REGISTRATIONS.len()
     },
 >();
 
@@ -1829,6 +1837,10 @@ use configured_memory::CONFIGURED_MEMORY_REGISTRATIONS;
 #[path = "catalog/pad_runtime.rs"]
 mod pad_runtime;
 use pad_runtime::PAD_RUNTIME_REGISTRATIONS;
+
+#[path = "catalog/convert_keycode.rs"]
+mod convert_keycode;
+use convert_keycode::CONVERT_KEYCODE_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a
 // separately observed full-prefix import. No mixed or inferred aliases.

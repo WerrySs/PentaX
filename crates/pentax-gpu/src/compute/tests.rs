@@ -2,6 +2,7 @@
 
 use super::*;
 use std::cell::Cell;
+mod builders;
 const CODE: u64 = 0x10000;
 const DATA: u64 = 0x20000;
 struct Source {

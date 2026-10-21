@@ -234,6 +234,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
             | NativeServiceAction::FontParser(_)
+            | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)
             | NativeServiceAction::CreateThread(_)
             | NativeServiceAction::WaitThread(_) => {
@@ -311,7 +312,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             .as_ref()
             .is_some_and(|binding| binding.contains(request.syscall_pc))
         {
-            return super::graphics_runtime::stop(self, request).map(NativeServiceAction::Returned);
+            return super::graphics_runtime::stop(self, source, request, actions);
         }
         if self
             .plan

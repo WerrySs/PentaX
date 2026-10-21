@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn posix_self_appends_only_two_exact_zero_argument_bindings() {
-        assert_eq!(REGISTRATIONS.len(), 1325);
+        assert_eq!(REGISTRATIONS.len(), 1326);
         assert_eq!(&REGISTRATIONS[1313..1315], &POSIX_SELF_REGISTRATIONS);
         for library in ["Posix", "libScePosix"] {
             let matching: Vec<_> = REGISTRATIONS

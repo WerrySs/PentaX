@@ -199,8 +199,9 @@ resource read. Exact type-2 padding and opaque NOPs are allowed. Compute SET_SH_
 updates only the named compute program, local/start dimensions, resource controls
 and sixteen user SGPR slots. Every read register must have explicit known state;
 no reset values or previous queue state are invented. Exactly one five-dword
-DISPATCH_DIRECT is admitted, with wave32 initiator 0x8001 or 0x8005; the former
-requires explicitly zero start coordinates. Unknown packets, flags, registers,
+DISPATCH_DIRECT is admitted with exact header lowbyte0 or2 and wave32 initiator
+0x8001,0x8005 or the source builder's0x8041. Modes without FORCE_START_AT_000
+require explicitly zero start coordinates. Unknown packets, flags, registers,
 truncation, subsequent state writes or a second dispatch refuse the whole job.
 
 The initial resource profile is one raw, unswizzled, stride-zero V# in s0..s3,
@@ -277,6 +278,10 @@ opcode0x49 RELEASE_MEM encodings. Immutable `Release` actions preserve optional
 labels, the low27-bit interrupt context and selectors0..4. Selectors1/2/4 notify
 after successful retirement;0/3 do not. Data selectors0..3 cover no data, dword,
 qword and the source100MHz clock. Null destinations perform no write. Source
+INT_SEL4 suppresses label and clock on both processors; graphics INT_SEL1 also
+suppresses its label, while ACB INT_SEL1 keeps the write before notification.
+That private queue distinction is selected by the actual planner path, never
+by a guest flag or a detached public execution token. Source
 cache/barrier fields cannot leave pending work in this serialized executor:
 all preceding dispatch fences and same-owner writebacks complete first. GDS,
 unsupported destinations/selectors and wait-operation modes remain typed stops. Write
@@ -296,3 +301,20 @@ captured commands. Prior GPU work has fenced and written back before a label or
 wait is observed. An unsatisfied wait returns a distinct `Waiting` stop; it does
 not spin, invent success or claim asynchronous queue suspension/resumption.
 Any failure after possible GPU or guest-memory effects leaves the driver terminal.
+
+The Gen5 tagged wait profile is admitted as a complete14/16-dword compound:
+exact lowbyte4 UCONFIG prefix,32/64-bit memory wait and exact end tag. Metadata
+selectors, size tags, normalized address identity and complete framing must
+match; standalone/malformed tags are refused. No arbitrary lowbyte4 register
+write becomes executable. Source cache-policy fields retain the same exclusive
+owner and serialized writeback boundary. A zero-count DCB write retains a real
+empty write action with no backing access; ACB construction keeps its distinct
+source zero-count refusal. Exact PFP_SYNC_ME with zero payload becomes an ordered
+Drain action, whose executor has already fenced and published preceding work.
+It does not invent an asynchronous fence or successful unsatisfied wait.
+
+The source dispatch builder's0x40 bit is ORDER_MODE=1, which permits waves to
+launch out of order. The Vulkan compute profile permits this rather than
+promising an ordered launch. Other modifier controls and wave64 remain typed
+unsupported. AMD documents this bit in the primary
+[CIK register reference, COMPUTE_DISPATCH_INITIATOR](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/programmer-references/CIK_3D_registers_v2.pdf).

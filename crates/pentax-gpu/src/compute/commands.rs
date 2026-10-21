@@ -90,6 +90,7 @@ enum Action {
     Write(MemoryWrite),
     Wait(MemoryWait),
     Release(Release),
+    Drain,
 }
 /// Immutable ordered views. Only this planner can construct the write/wait
 /// payloads, and the runtime never accepts detached command actions as input.
@@ -98,6 +99,18 @@ pub enum Command<'a> {
     Write(&'a MemoryWrite),
     Wait(&'a MemoryWait),
     Release(&'a Release),
+    /// Parser/ME synchronization. The serialized executor must finish all
+    /// earlier work and its same-owner writeback before continuing.
+    Drain,
+}
+
+/// Ordered graphics memory operation derived from a complete captured packet.
+/// These values grant no independent guest backing or execution authority.
+pub enum MemoryAction {
+    Write(MemoryWrite),
+    Wait(MemoryWait),
+    Release(Release),
+    Drain,
 }
 /// Immutable release admitted from actual packet bytes. Interrupts are emitted
 /// only after prior work and the optional label write complete successfully.
@@ -186,6 +199,7 @@ impl CommandPlan {
             Action::Write(w) => Command::Write(w),
             Action::Wait(w) => Command::Wait(w),
             Action::Release(r) => Command::Release(r),
+            Action::Drain => Command::Drain,
         })
     }
     pub fn usage(&self) -> CommandUsage {
@@ -292,6 +306,16 @@ pub fn plan_commands(
     memory: &impl Memory,
     limits: &CommandLimits,
 ) -> Result<CommandPlan, Error> {
+    plan_commands_for_queue(initial, root, memory, limits, false)
+}
+
+fn plan_commands_for_queue(
+    initial: &ComputeState,
+    root: CommandRange,
+    memory: &impl Memory,
+    limits: &CommandLimits,
+    graphics: bool,
+) -> Result<CommandPlan, Error> {
     if limits.max_depth == 0 {
         return Err(Error::Limit("command depth"));
     }
@@ -338,6 +362,9 @@ pub fn plan_commands(
             1
         } else if header.raw() == 0xc006_1060 {
             8
+        } else if header.raw() == 0xc002_7904 {
+            budget.work(8)?;
+            tagged_wait_dwords(&frame.bytes[at * 4..])?
         } else if header.packet_type() == 3 && matches!(header.low_byte(), 0 | 2) {
             if header.opcode() == 0x10 && header.count() == 0x3fff {
                 1
@@ -359,6 +386,22 @@ pub fn plan_commands(
             return Err(Error::Limit("command actions"));
         }
         match header.opcode() {
+            0x79 if header.raw() == 0xc002_7904 => {
+                // Consume all three source packets as one ordered wait. The
+                // metadata is checked, never admitted as a generic UCONFIG
+                // write or an arbitrary header with filter reset set.
+                budget.usage.packets = budget
+                    .usage
+                    .packets
+                    .checked_add(2)
+                    .filter(|count| *count <= budget.limits.max_packets)
+                    .ok_or(Error::Limit("command packets"))?;
+                budget.work(2)?;
+                actions.push(Action::Wait(decode_wait(frame, at + 4)?));
+            }
+            0x42 if header.raw() == 0xc000_4200 && frame.word(at + 1) == 0 => {
+                actions.push(Action::Drain);
+            }
             0x11 if length == 4 && header.low_byte() == 2 && frame.word(at + 1) & 15 == 1 => {
                 let address = u64::from(frame.word(at + 2) & !7)
                     | (u64::from(frame.word(at + 3) & 0xffff) << 32);
@@ -377,7 +420,7 @@ pub fn plan_commands(
                     state.write(first + index as u32, frame.word(at + 2 + index))?;
                 }
             }
-            0x15 if header.shader_type() && length == 5 => {
+            0x15 if matches!(header.low_byte(), 0 | 2) && length == 5 => {
                 if dispatches.len() >= limits.max_dispatches {
                     return Err(Error::Limit("command dispatches"));
                 }
@@ -418,16 +461,16 @@ pub fn plan_commands(
                 });
                 actions.push(Action::Dispatch(dispatches.len() - 1));
             }
-            0x37 if length >= 5 => {
+            0x37 if length >= 4 => {
                 let control = frame.word(at + 1);
                 let destination = ((control >> 30) & 1) | ((control >> 7) & 0x1e);
                 if !matches!(destination, 2 | 5)
-                    || control & !(0x4000_0000 | 0xf00 | 0x10000 | 0x100000) != 0
+                    || control & !(0x4000_0000 | 0xf00 | 0x10000 | 0x100000 | 0x0600_0000) != 0
                 {
                     return Err(Error::Unsupported("write data control"));
                 }
                 let address = u64::from(frame.word(at + 2)) | (u64::from(frame.word(at + 3)) << 32);
-                let begin = if control & (1 << 16) != 0 {
+                let begin = if length > 4 && control & (1 << 16) != 0 {
                     end - 1
                 } else {
                     at + 4
@@ -439,30 +482,7 @@ pub fn plan_commands(
                 if header.low_byte() == 0
                     && length == if header.opcode() == 0x3c { 7 } else { 9 } =>
             {
-                let size = if header.opcode() == 0x3c { 4 } else { 8 };
-                let control = frame.word(at + 1);
-                if control & 0x10 == 0 || control & !0x117 != 0 || control & 7 == 7 {
-                    return Err(Error::Unsupported("wait memory control"));
-                }
-                let address = u64::from(frame.word(at + 2) & !((size as u32) - 1))
-                    | (u64::from(frame.word(at + 3) & 0x3ffff) << 32);
-                extent(address, size, size)?;
-                let read_value = |index| {
-                    if size == 4 {
-                        u64::from(frame.word(index))
-                    } else {
-                        u64::from(frame.word(index)) | (u64::from(frame.word(index + 1)) << 32)
-                    }
-                };
-                let reference = read_value(at + 4);
-                let mask = read_value(at + 4 + size / 4);
-                actions.push(Action::Wait(MemoryWait {
-                    address,
-                    size,
-                    reference,
-                    mask,
-                    function: control & 7,
-                }));
+                actions.push(Action::Wait(decode_wait(frame, at)?));
             }
             0x10 | 0x49
                 if header.raw() == 0xc006_1060 || (header.opcode() == 0x49 && length == 8) =>
@@ -478,10 +498,14 @@ pub fn plan_commands(
                     return Err(Error::Unsupported("release memory profile"));
                 }
                 let address = u64::from(frame.word(at + 3)) | (u64::from(frame.word(at + 4)) << 32);
-                if address == 0 && destination == 1 && data != 0 && interrupt != 4 {
+                // Public WriteAtEndOfPipe INT_SEL1 returns after scheduling
+                // its interrupt on the graphics processor; ACB queues retain
+                // their label. INT_SEL4 drops the label on both processors.
+                let drops_label = interrupt == 4 || (graphics && interrupt == 1);
+                if address == 0 && destination == 1 && data != 0 && !drops_label {
                     return Err(Error::Unsupported("release memory destination"));
                 }
-                if data >= 2 && address != 0 && interrupt != 4 {
+                if data >= 2 && address != 0 && !drops_label {
                     // ExecReleaseMem normalizes the index except for the two
                     // native EOP profiles; ExecEndOfPipe still rejects unknown
                     // event combinations. Serial fencing does not waive those
@@ -511,7 +535,7 @@ pub fn plan_commands(
                         return Err(Error::Unsupported("release event profile"));
                     }
                 }
-                let write = if data != 0 && address != 0 {
+                let write = if data != 0 && address != 0 && !drops_label {
                     let length = if data == 1 { 4 } else { 8 };
                     extent(address, length, length)?;
                     let input = if data == 3 {
@@ -525,7 +549,7 @@ pub fn plan_commands(
                 };
                 actions.push(Action::Release(Release {
                     write,
-                    reference_clock: data == 3,
+                    reference_clock: data == 3 && !drops_label,
                     context: matches!(interrupt, 1 | 2 | 4)
                         .then_some(frame.word(at + 7) & 0x07ff_ffff),
                 }));
@@ -595,7 +619,15 @@ fn extent(address: u64, size: usize, alignment: usize) -> Result<(), Error> {
     Ok(())
 }
 fn owned_write(address: u64, input: &[u8], budget: &mut Budget<'_>) -> Result<MemoryWrite, Error> {
-    extent(address, input.len(), 4)?;
+    if input.is_empty() {
+        // A source DCB zero-count packet contains no data and requests no
+        // backing access. Its encoded address must still fit the profile.
+        if !address.is_multiple_of(4) || address >= 1 << 47 {
+            return Err(Error::Unsupported("memory command extent"));
+        }
+    } else {
+        extent(address, input.len(), 4)?;
+    }
     budget.usage.write_bytes = budget
         .usage
         .write_bytes
@@ -607,6 +639,126 @@ fn owned_write(address: u64, input: &[u8], budget: &mut Budget<'_>) -> Result<Me
     budget.reserve(&mut bytes, input.len())?;
     bytes.extend_from_slice(input);
     Ok(MemoryWrite { address, bytes })
+}
+
+fn decode_wait(frame: &Frame, at: usize) -> Result<MemoryWait, Error> {
+    let size = if Header::new(frame.word(at)).opcode() == 0x3c {
+        4
+    } else {
+        8
+    };
+    let control = frame.word(at + 1);
+    // Cache policy changes where the GPU polls, not the serialized comparison
+    // against the same exclusively retained owner. Other operation bits retain
+    // the existing closed profile.
+    if control & 0x10 == 0 || control & !(0x117 | 0x0600_0000) != 0 || control & 7 == 7 {
+        return Err(Error::Unsupported("wait memory control"));
+    }
+    let address = u64::from(frame.word(at + 2) & !((size as u32) - 1))
+        | (u64::from(frame.word(at + 3) & 0x3ffff) << 32);
+    extent(address, size, size)?;
+    let value = |index| {
+        if size == 4 {
+            u64::from(frame.word(index))
+        } else {
+            u64::from(frame.word(index)) | (u64::from(frame.word(index + 1)) << 32)
+        }
+    };
+    Ok(MemoryWait {
+        address,
+        size,
+        reference: value(at + 4),
+        mask: value(at + 4 + size / 4),
+        function: control & 7,
+    })
+}
+
+/// Exact public Gen5 wait compound. Called only on already captured bytes;
+/// callers charge the fixed metadata scan before invoking this function.
+pub(crate) fn tagged_wait_dwords(bytes: &[u8]) -> Result<usize, Error> {
+    let fail = || Error::Unsupported("tagged wait profile");
+    if bytes.len() < 16 {
+        return Err(fail());
+    }
+    let word =
+        |index: usize| u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap());
+    if word(0) != 0xc002_7904 || word(1) != 0x342 {
+        return Err(fail());
+    }
+    let (wait, size, central) = match word(2) & 0xffff_0000 {
+        0xc801_0000 => (7, 4u64, 0xc005_3c00),
+        0xc802_0000 => (9, 8u64, 0xc007_9300),
+        _ => return Err(fail()),
+    };
+    let total = 4 + wait + 3;
+    if bytes.len() < total * 4
+        || word(4) != central
+        || word(4 + wait) != 0xc001_7904
+        || word(5 + wait) != 0x342
+        || word(6 + wait) != 0xc800_0000
+        || word(3 + wait) > 0xffff
+    {
+        return Err(fail());
+    }
+    let tagged = u64::from(word(3)) | (u64::from(word(2) & 0xffff) << 32);
+    let actual = u64::from(word(6) & !((size as u32) - 1)) | (u64::from(word(7) & 0x3ffff) << 32);
+    if tagged & !(size - 1) != actual {
+        return Err(fail());
+    }
+    Ok(total)
+}
+
+/// Reuse the same closed effect decoder for graphics command snapshots. The
+/// source here is the immutable packet slice, never a live guest adapter. All
+/// temporary capacities/work are returned and conservatively charged by the
+/// graphics plan; dropping them never creates a quota credit.
+pub(crate) fn memory_packet(
+    bytes: &[u8],
+    host: usize,
+    work: u64,
+) -> Result<(MemoryAction, CommandUsage), Error> {
+    struct Snapshot<'a>(&'a [u8]);
+    impl Memory for Snapshot<'_> {
+        fn read(&self, address: u64, output: &mut [u8]) -> Result<(), super::MemoryError> {
+            if address != 4 || output.len() != self.0.len() {
+                return Err(super::MemoryError::Unavailable);
+            }
+            output.copy_from_slice(self.0);
+            Ok(())
+        }
+    }
+    let limits = CommandLimits {
+        max_command_bytes: bytes.len(),
+        max_host_bytes: host,
+        max_packets: 3,
+        max_indirect_buffers: 0,
+        max_depth: 1,
+        max_dispatches: 0,
+        max_actions: 1,
+        max_write_bytes: bytes.len(),
+        max_work: work,
+    };
+    let mut plan = plan_commands_for_queue(
+        &ComputeState::empty(),
+        CommandRange {
+            address: 4,
+            size: bytes.len() as u64,
+        },
+        &Snapshot(bytes),
+        &limits,
+        true,
+    )?;
+    if plan.actions.len() != 1 || !plan.dispatches.is_empty() {
+        return Err(Error::Unsupported("single memory packet profile"));
+    }
+    let action = match plan.actions.pop().unwrap() {
+        Action::Write(write) => MemoryAction::Write(write),
+        Action::Wait(wait) => MemoryAction::Wait(wait),
+        Action::Release(release) => MemoryAction::Release(release),
+        Action::Drain => MemoryAction::Drain,
+        Action::Dispatch(_) => return Err(Error::Unsupported("single memory packet profile")),
+    };
+    Ok((action, plan.usage))
 }
 
 #[cfg(test)]

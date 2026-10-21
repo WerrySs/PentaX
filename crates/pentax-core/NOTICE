@@ -441,3 +441,29 @@ links, authorship and policy adaptations are retained in pentax-kernel/NOTICE.
 PentaX changes2026 retain exact source/owner/caller/permission admission and
 transactional whole-span outputs. There is no NID-only resolver, namespace
 cross-product, host input discovery or fabricated hardware effect.
+
+The common AGC command builders additionally adapt PUBLIC KytyPS5/KytyPS5
+revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, src/libs/agc.cpp
+(Git blob a29801fdf992948c594f62ec9045853e6158fd6e) and registrations in
+src/libs/libAgcDriver.cpp (Git blob 02b40351d1cc84fb20d601a09652b688721307b5).
+Source: https://github.com/KytyPS5/KytyPS5/tree/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT
+grant above continue to apply. This covers CommandBuffer reservation/allocation,
+NOP/direct dispatch, index and instance state, direct draw packets, DCB/ACB
+write/wait packets, release-memory, parser drain, selected size helpers and
+their five address/reference/data patch helpers. PentaX modifications2026:
+bounded checked guest access, source-ordered transactional prefixes, actual
+owner/source/thread/executor-bound callback continuation and no-replay failure,
+exact paired export declarations and original tests. Graphics5/Graphics5 is the
+pinned registration pair; the separate libSceAgc/libSceAgc profile continues
+the independently retained exact prefix pair already used by this provider.
+No wildcard namespace, proprietary command stream or copied game data is used.
+Packet construction never grants unsupported GPU execution or presentation.
+
+
+The appended keyboard-type provider marker integrates pentax-kernel's
+ConvertKeycodeGetImeKeyboardType adaptation from PUBLIC KytyPS5/KytyPS5
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, libConvertKeycode.cpp Git blob
+7b3564593f884db0cd3f62c9b843e26662caab12. Copyright (c) 2021 InoriRus; see
+pentax-kernel/NOTICE, GPL-2.0-only and the retained Kyty MIT grant.
+The full-prefix module1.0/library1 tuple is a PentaX compatibility binding.

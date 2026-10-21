@@ -711,3 +711,16 @@ delegated to the supplying owner, whose checked tilt-reset generation records
 every accepted reset request. Desired trigger commands are decoded as in the
 reference; the zero status getter is not interpreted as hardware delivery.
 No host device, input capture, physical rumble or applied motion is fabricated.
+
+
+Keyboard-type query adaptation
+------------------------------
+Source: PUBLIC KytyPS5/KytyPS5 commit 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3,
+src/libs/libConvertKeycode.cpp, Git blob 7b3564593f884db0cd3f62c9b843e26662caab12.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/libConvertKeycode.cpp
+Copyright (c) 2021 InoriRus; retain the upstream GPL-2.0-only terms and the
+original Kyty MIT grant in Kyty-MIT.txt. Rust source preserves two-argument
+ABI, null-before-user validation, signed int32 user ID and uint32 output.
+The exact libSceConvertKeycode module1.0/library1 pair is an explicit PentaX
+compatibility binding; the upstream source registers ConvertKeycode.
+No upstream full-prefix registration or additional conversion API is claimed.

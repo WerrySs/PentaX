@@ -122,13 +122,15 @@ jobs:
       - name: Test native string-index state and dependent continuations
         run: >-
           cargo test --locked -p pentax-platform --lib -- native_string_index_tests:: packed_comparison_all_controls_and_lengths_match_hardware --test-threads=1 --nocapture
-      - name: Test controller state, configured memory, privacy and observations
+      - name: Test command growth, keyboard type and retained runtime contracts
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
           PENTAX_TEST_CLI: ${{ github.workspace }}/target/release/pentax-cli.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe --
-          kernel_results::pad_runtime:: kernel_results::pad:: kernel_results::configured_flexible_memory:: kernel_results::user_privacy_ws1:: kernel_results::observation_stop::
+          kernel_results::agc_command_builders:: kernel_results::convert_keycode:: kernel_results::pad_runtime:: kernel_results::pad:: kernel_results::configured_flexible_memory:: kernel_results::user_privacy_ws1:: kernel_results::observation_stop::
+          native_agc_registry_apis_keep_source_int32_error_and_exact_namespaces native_agc_trinity_void_query_preserves_neighbor_bytes_in_exact_scopes
+          native_register_defaults_return_real_guest_tables_with_source_versions_and_stable_pointers native_agc_init_preserves_source_state_and_accepts_versions_in_exact_scopes
           --test-threads=1
       - name: Test indexed graphics host admission
         run: >-

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_markers() {
     use pentax_linker::{Limits, SceLimits, SymbolBinding, SymbolType, inspect_sce};
-    let provider = build_graphics_provider(8192).unwrap();
+    let provider = build_graphics_provider(PAGE_SIZE).unwrap();
     let view = pentax_loader::open_executable(provider.image()).unwrap();
     let metadata = inspect_sce(&view, &Limits::DEFAULT, &SceLimits::DEFAULT)
         .unwrap()
@@ -16,8 +16,8 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"VideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 118);
-    assert_eq!(metadata.link().symbols().len(), 119);
+    assert_eq!(provider.function_count(), 178);
+    assert_eq!(metadata.link().symbols().len(), 179);
     for (index, nid) in [
         "HXzjK9yI30k",
         "-Ozn0F1AFRg",

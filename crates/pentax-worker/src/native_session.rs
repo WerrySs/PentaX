@@ -11,10 +11,10 @@ use pentax_codegen::{
 };
 use pentax_core::process::hle::{
     DynamicModuleInput, DynamicModuleStart, GeneratedUnavailableProvider, KernelStartupError,
-    NativeServiceAction, NativeServiceRequest, PendingModuleLoad, PreparedFontParserCallback,
-    PreparedImeCallback, PreparedNativeKernelStartup, PreparedNativeModuleStart,
-    PreparedNativeSource, PreparedNetCtlCallback, PreparedPthreadOnce, UnavailableProviderError,
-    build_unavailable_provider,
+    NativeServiceAction, NativeServiceRequest, PendingModuleLoad, PreparedAgcCommandBufferCallback,
+    PreparedFontParserCallback, PreparedImeCallback, PreparedNativeKernelStartup,
+    PreparedNativeModuleStart, PreparedNativeSource, PreparedNetCtlCallback, PreparedPthreadOnce,
+    UnavailableProviderError, build_unavailable_provider,
 };
 use pentax_platform::native_dispatch::{
     NativeBlockMachine, NativeBlockStepper, NativeBlockStop, NativeCpuState, NativeDispatchError,
@@ -811,6 +811,7 @@ enum SuspendedInitializer {
     NetCtl(PreparedNetCtlCallback),
     FontParser(PreparedFontParserCallback),
     ImeCallback(PreparedImeCallback),
+    AgcCommandGrow(PreparedAgcCommandBufferCallback),
 }
 struct RunState<'plan, 'image> {
     scheduling: Scheduling<'plan, 'image>,
@@ -1311,6 +1312,10 @@ fn execute_epoch<'plan, 'image>(
                                 .complete_ime_callback_call(
                                     proof, start, &returned, nested, &engine,
                                 )?,
+                            SuspendedInitializer::AgcCommandGrow(start) => session
+                                .complete_agc_command_buffer_call(
+                                    proof, start, &returned, nested, &engine,
+                                )?,
                         };
                         match action {
                             NativeServiceAction::Returned(value) => {
@@ -1327,6 +1332,7 @@ fn execute_epoch<'plan, 'image>(
                                     SuspendedInitializer::NetCtl(_)
                                         | SuspendedInitializer::FontParser(_)
                                         | SuspendedInitializer::ImeCallback(_)
+                                        | SuspendedInitializer::AgcCommandGrow(_)
                                 ) {
                                     progress.initializer_calls =
                                         progress.initializer_calls.checked_add(1).ok_or(
@@ -1385,6 +1391,23 @@ fn execute_epoch<'plan, 'image>(
                                     ),
                                 )?;
                                 *frame = (SuspendedInitializer::ImeCallback(next), call, phase);
+                            }
+                            NativeServiceAction::AgcCommandGrow(next) => {
+                                let call = engine.continue_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    next.entry(),
+                                    next.args(),
+                                );
+                                progress.dispatch = engine.usage();
+                                let call = call?;
+                                session.observe_agc_command_buffer_call(proof, next, &call)?;
+                                let frame = state.frames.last_mut().ok_or(
+                                    NativeSessionError::FixtureInvariant(
+                                        "missing command-buffer growth callback frame",
+                                    ),
+                                )?;
+                                *frame = (SuspendedInitializer::AgcCommandGrow(next), call, phase);
                             }
                             _ => {
                                 return Err(NativeSessionError::FixtureInvariant(
@@ -1594,6 +1617,25 @@ fn execute_epoch<'plan, 'image>(
                             session.observe_ime_callback_call(proof, start, &call)?;
                             state.frames.push((
                                 SuspendedInitializer::ImeCallback(start),
+                                call,
+                                progress.phase,
+                            ));
+                        }
+                        NativeServiceAction::AgcCommandGrow(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("callback frames"));
+                            }
+                            let call = engine.begin_syscall_call(
+                                &mut session.pause()?,
+                                token,
+                                start.entry(),
+                                start.args(),
+                            );
+                            progress.dispatch = engine.usage();
+                            let call = call?;
+                            session.observe_agc_command_buffer_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::AgcCommandGrow(start),
                                 call,
                                 progress.phase,
                             ));

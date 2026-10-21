@@ -1,5 +1,46 @@
 # PentaX core
 
+The common AGC command-buffer builders retain the pinned public allocator and
+packet contracts: NOP, direct dispatch, index type/base/count, instance count,
+direct indexed/automatic/offset draws, DCB/ACB writes and waits, release-memory,
+parser drain, their selected size helpers and five packet patch helpers.
+Thirty function identities append only the exact `Graphics5/Graphics5` and
+`libSceAgc/libSceAgc` module1.1/library1 pairs. No hybrid pair or NID-only lookup
+is added. Existing118 markers remain in place; new metadata fits the same
+16 KiB immutable provider mapping and its existing allocation limit.
+
+Insufficient capacity can suspend a builder for one genuine guest allocator
+callback, using `(buffer, requested_dwords + reserved_dwords, user_data)` with
+the source's32-bit addition. The owner/source/thread/executor-bound ticket is
+completed only by that exact nested call's actual return. The callback may
+change the descriptor and payload; completion rereads current cursor/capacity
+and reads payload only after publishing the cursor and fixed header words in
+source order. Reentrant calls receive independent admitted tickets within the
+existing32-frame bound. Callback false or insufficient returned capacity follows
+the individual source NULL/fatal branch, without retrying the callback.
+
+Finite work, output bytes and any payload capacity are admitted before callback
+entry. Each pending payload's actual capacity is bounded by both the existing
+per-call command host allowance and the source maximum65524 bytes;32 pending
+tickets therefore retain at most2096768 payload bytes plus fixed metadata. The
+per-call host allowance is not presented as an aggregate cap. A later guest
+read/write fault preserves already committed cursor/header
+prefixes, consumes the callback ticket and poisons further driver submissions;
+neither guest execution nor a partial builder is replayed. Payload `memcpy`
+overlap with its output is a typed refusal before copying; prior source-ordered
+prefixes remain visible. Packet patches retain their individual source error
+domains and masks, including low-DWORD-only wait-reference patching. The older
+flip encoder keeps its separate atomic fit-only publication profile.
+
+Constructing bytes does not claim GPU acceptance. The checked graphics executor
+retains source order for supported Write/Wait/Release/Drain actions, invalidates
+any previous current-draw receipt at every such boundary, and uses actual live
+GPU permissions and command-source physical disjointness for writes. An
+unsatisfied wait stops before later actions. Empty writes access no target;
+the drain accepts only already fenced prior work without inventing a Vulkan
+job, frame, interrupt or display acknowledgement. Unsupported packet modes
+continue to refuse explicitly.
+
 Guest memory, checked image staging, the bounded reference interpreter and original bring-up diagnostics. Guest addresses never become host pointers. General PS5 execution remains unsupported.
 
 `with_native_image_session` scopes explicit immutable position-independent inputs,
@@ -761,3 +802,10 @@ backing/current-rights checks cover full2/3/8/28/120-byte spans, and a failed
 PadRead output preserves queued input. The kernel's explicit owner API is the
 future device boundary; this provider adds no desktop/game-input bridge,
 motion fusion or hardware acknowledgement. See pentax-kernel/NOTICE.
+
+
+The keyboard-type service appends one libSceConvertKeycode module1.0/library1
+marker and its exact module/library descriptors. Existing function markers,
+object RVAs, 2048-function ceiling and image/mapped metadata bounds remain
+unchanged. Original consumers cover qualified linking, current whole-span
+write rights, cross-page refusal, and forged-site rejection.

@@ -2,7 +2,7 @@
 // Copyright (c) 2021 InoriRus
 // Modified 2026 for PentaX: bounded complete flat draw admission and snapshots.
 
-use super::{Error, GraphicsState, IndexType};
+use super::{Error, GraphicsState, IndexType, MemoryAction};
 use crate::{Header, RegisterSpace};
 use std::{fmt, mem::size_of};
 
@@ -67,6 +67,7 @@ impl Flip {
 pub enum Action {
     Draw(usize),
     Flip(Flip),
+    Memory(usize),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +102,7 @@ impl fmt::Debug for Draw {
 pub struct CommandPlan {
     draws: Vec<Draw>,
     actions: Vec<Action>,
+    memory: Vec<MemoryAction>,
     final_state: GraphicsState,
     usage: CommandUsage,
 }
@@ -118,6 +120,9 @@ impl CommandPlan {
     }
     pub fn actions(&self) -> &[Action] {
         &self.actions
+    }
+    pub fn memory_action(&self, index: usize) -> &MemoryAction {
+        &self.memory[index]
     }
     pub fn final_state(&self) -> GraphicsState {
         self.final_state
@@ -220,6 +225,7 @@ pub fn plan_commands(
         .ok_or(Error::Limit("command host bytes"))?;
     work(&mut usage, limits, action_bytes as u64)?;
     let mut state = initial;
+    let mut memory = Vec::<MemoryAction>::new();
     let mut fresh_draw = false;
     for (buffer_index, bytes) in buffers.iter().enumerate() {
         let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
@@ -241,6 +247,11 @@ pub fn plan_commands(
                 1
             } else if header.raw() == 0xc004_105c {
                 6
+            } else if header.raw() == 0xc006_1060 {
+                8
+            } else if header.raw() == 0xc002_7904 {
+                work(&mut usage, limits, 8)?;
+                crate::compute::tagged_wait_dwords(&bytes[at * 4..]).map_err(memory_error)?
             } else if header.packet_type() == 3 && header.low_byte() == 0 {
                 if header.opcode() == 0x10 && header.count() == 0x3fff {
                     1
@@ -255,6 +266,9 @@ pub fn plan_commands(
                 .filter(|n| *n <= bytes.len() / 4)
                 .ok_or(fail("truncated packet"))?;
             if header.raw() == 0xc004_105c {
+                if actions.len() >= action_count {
+                    return Err(Error::Limit("command actions"));
+                }
                 if !fresh_draw {
                     return Err(Error::Unsupported("GPU flip needs a fresh draw"));
                 }
@@ -276,7 +290,76 @@ pub fn plan_commands(
             {
                 return Err(Error::Unsupported("unsupported graphics flip marker"));
             }
-            if length == 1 || header.opcode() == 0x10 {
+            if length == 1 || (header.opcode() == 0x10 && header.raw() != 0xc006_1060) {
+                at = end;
+                continue;
+            }
+            if matches!(
+                header.opcode(),
+                0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42
+            ) || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
+            {
+                if actions.len() >= action_count {
+                    return Err(Error::Limit("command actions"));
+                }
+            }
+            if matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
+                || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
+            {
+                if memory.capacity() == 0 {
+                    let expected = action_count
+                        .checked_mul(size_of::<MemoryAction>())
+                        .ok_or(Error::Limit("memory action storage"))?;
+                    usage.host_bytes = usage
+                        .host_bytes
+                        .checked_add(expected)
+                        .filter(|n| *n <= limits.max_host_bytes)
+                        .ok_or(Error::Limit("command host bytes"))?;
+                    work(&mut usage, limits, expected as u64)?;
+                    memory
+                        .try_reserve_exact(action_count)
+                        .map_err(|_| Error::Allocation)?;
+                    let excess = memory
+                        .capacity()
+                        .checked_sub(action_count)
+                        .and_then(|n| n.checked_mul(size_of::<MemoryAction>()))
+                        .ok_or(Error::Limit("memory action storage"))?;
+                    usage.host_bytes = usage
+                        .host_bytes
+                        .checked_add(excess)
+                        .filter(|n| *n <= limits.max_host_bytes)
+                        .ok_or(Error::Limit("command host bytes"))?;
+                }
+                let (action, charged) = crate::compute::memory_packet(
+                    &bytes[at * 4..end * 4],
+                    limits
+                        .max_host_bytes
+                        .checked_sub(usage.host_bytes)
+                        .ok_or(Error::Limit("command host bytes"))?,
+                    limits
+                        .max_work
+                        .checked_sub(usage.work)
+                        .ok_or(Error::Limit("command work"))?,
+                )
+                .map_err(memory_error)?;
+                work(&mut usage, limits, charged.work)?;
+                usage.host_bytes = usage
+                    .host_bytes
+                    .checked_add(charged.host_bytes)
+                    .filter(|n| *n <= limits.max_host_bytes)
+                    .ok_or(Error::Limit("command host bytes"))?;
+                if header.raw() == 0xc002_7904 {
+                    usage.packets = usage
+                        .packets
+                        .checked_add(2)
+                        .filter(|n| *n <= limits.max_packets)
+                        .ok_or(Error::Limit("command packets"))?;
+                }
+                actions.push(Action::Memory(memory.len()));
+                memory.push(action);
+                // A later flip needs a newly completed draw. A prior receipt
+                // cannot certify pixels after a possibly aliasing memory action.
+                fresh_draw = false;
                 at = end;
                 continue;
             }
@@ -298,6 +381,27 @@ pub fn plan_commands(
                     }
                 }
                 0x2f if length == 2 => state.instances = Some(word(at + 1)),
+                0x7a if header.raw() == 0xc001_7a00 => {
+                    let value = word(at + 2);
+                    // Exact indexed register grammar emitted by SetIndexSize.
+                    // Cache policy affects residency, not the immutable upload.
+                    if word(at + 1) != 0x2000_0243 || value & !0x4c3 != 0 || value & 0x400 == 0 {
+                        return Err(fail("indexed register profile"));
+                    }
+                    state.index_type = Some(match value & 3 {
+                        0 => IndexType::U16,
+                        1 => IndexType::U32,
+                        _ => return Err(fail("index type profile")),
+                    });
+                }
+                0x26 if header.raw() == 0xc001_2600 => {
+                    let address = u64::from(word(at + 1)) | (u64::from(word(at + 2)) << 32);
+                    if address & 1 != 0 || address >= 1 << 47 {
+                        return Err(fail("index base profile"));
+                    }
+                    state.index_base = Some(address);
+                }
+                0x13 if header.raw() == 0xc000_1300 => state.index_count = Some(word(at + 1)),
                 0x2a if header.raw() == 0xc000_2a00 => {
                     state.index_type = Some(match word(at + 1) {
                         0 => IndexType::U16,
@@ -347,14 +451,16 @@ pub fn plan_commands(
                         });
                     }
                 }
-                0x27 if header.raw() == 0xc004_2700 => {
+                0x27 | 0x35 if matches!(header.raw(), 0xc004_2700 | 0xc003_3500) => {
                     let maximum = word(at + 1);
-                    let high = word(at + 3);
-                    let count = word(at + 4);
-                    if high >= 0x8000 || count > maximum || word(at + 5) != 0 {
+                    let offset = header.opcode() == 0x35;
+                    let count = word(at + if offset { 3 } else { 4 });
+                    if count > maximum
+                        || word(at + if offset { 4 } else { 5 }) != 0
+                        || (!offset && word(at + 3) >= 0x8000)
+                    {
                         return Err(fail("indexed draw profile"));
                     }
-                    let address = u64::from(word(at + 2)) | (u64::from(high) << 32);
                     let instances = state
                         .instances
                         .ok_or(Error::Unsupported("unknown NUM_INSTANCES"))?;
@@ -371,6 +477,19 @@ pub fn plan_commands(
                         let index_type = state
                             .index_type
                             .ok_or(Error::Unsupported("unknown INDEX_TYPE"))?;
+                        let address = if offset {
+                            // The pinned direct OFFSET path uses the exact
+                            // count, not INDEX_BUFFER_SIZE (an indirect bound).
+                            state
+                                .index_base
+                                .ok_or(Error::Unsupported("unknown INDEX_BASE"))?
+                                .checked_add(
+                                    u64::from(word(at + 2)) * index_type.byte_width() as u64,
+                                )
+                                .ok_or(fail("index offset extent"))?
+                        } else {
+                            u64::from(word(at + 2)) | (u64::from(word(at + 3)) << 32)
+                        };
                         let size = u64::from(count)
                             .checked_mul(index_type.byte_width() as u64)
                             .ok_or(Error::Limit("index bytes"))?;
@@ -413,7 +532,18 @@ pub fn plan_commands(
     Ok(CommandPlan {
         draws,
         actions,
+        memory,
         final_state: state,
         usage,
     })
+}
+
+fn memory_error(error: crate::compute::Error) -> Error {
+    match error {
+        crate::compute::Error::Limit(reason) => Error::Limit(reason),
+        crate::compute::Error::Allocation => Error::Allocation,
+        crate::compute::Error::Unsupported(reason) => Error::Unsupported(reason),
+        crate::compute::Error::Packet { reason, .. } => Error::Unsupported(reason),
+        _ => Error::Unsupported("graphics memory packet profile"),
+    }
 }

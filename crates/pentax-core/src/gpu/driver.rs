@@ -13,8 +13,13 @@ use pentax_platform::{
     vulkan::GpuLimits,
 };
 
+#[path = "driver/command_builder.rs"]
+mod command_builder;
 #[path = "driver/flip_encoder.rs"]
 mod flip_encoder;
+pub(crate) use command_builder::EXPORTS as COMMAND_BUILDER_EXPORTS;
+pub(crate) use command_builder::supports as is_command_builder;
+pub(crate) use command_builder::{CommandBuilderAction, PendingCommandBuilder};
 #[path = "driver/function_profile.rs"]
 mod function_profile;
 pub use function_profile::FunctionProfile;
@@ -75,6 +80,36 @@ pub enum Function {
     VideoGetEventId,
     VideoGetEventData,
     VideoGetEventCount,
+    AgcCbNop,
+    AgcCbNopGetSize,
+    AgcCbDispatch,
+    AgcCbDispatchGetSize,
+    AgcDcbSetIndexSize,
+    AgcDcbSetIndexBuffer,
+    AgcDcbSetIndexCount,
+    AgcDcbSetNumInstances,
+    AgcDcbSetNumInstancesGetSize,
+    AgcDcbDrawIndex,
+    AgcDcbDrawIndexGetSize,
+    AgcDcbDrawIndexAuto,
+    AgcDcbDrawIndexAutoGetSize,
+    AgcDcbDrawIndexOffset,
+    AgcDcbDrawIndexOffsetGetSize,
+    AgcDcbWriteData,
+    AgcDcbWriteDataGetSize,
+    AgcAcbWriteData,
+    AgcCbReleaseMem,
+    AgcCbQueueEndOfPipeActionGetSize,
+    AgcDcbWaitRegMem,
+    AgcDcbWaitOnAddressGetSize,
+    AgcAcbWaitRegMem,
+    AgcAcbWaitOnAddressGetSize,
+    AgcWriteDataPatchSetAddressOrOffset,
+    AgcWaitRegMemPatchAddress,
+    AgcWaitRegMemPatchReference,
+    AgcQueueEndOfPipeActionPatchAddress,
+    AgcQueueEndOfPipeActionPatchData,
+    AgcDcbStallCommandBufferParser,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -623,6 +658,10 @@ impl Driver {
                 .saturating_add(plan.usage().indirect_buffers);
             for command in plan.commands() {
                 let dispatch = match command {
+                    compute::Command::Drain => {
+                        self.drain_commands()?;
+                        continue;
+                    }
                     compute::Command::Release(release) => {
                         self.retire_release(
                             memory,
@@ -758,6 +797,12 @@ impl Driver {
         if payload.len() != write.bytes().len() {
             return Err(Failure::Memory);
         }
+        if payload.is_empty() {
+            // The source DCB encoder can emit a zero-payload WRITE_DATA. It is
+            // an admitted command, with no address access or invented write.
+            self.drain_commands()?;
+            return Ok(());
+        }
         let address = write.address();
         let size = write.bytes().len() as u64;
         let bytes = add(
@@ -811,6 +856,18 @@ impl Driver {
             )
             .map_err(|_| Failure::Memory)?;
         self.usage.written_bytes = self.usage.written_bytes.saturating_add(size);
+        Ok(())
+    }
+
+    fn drain_commands(&mut self) -> Result<(), Failure> {
+        // Every prior draw/dispatch already completed its real fence and owned
+        // writeback. Accept the serialized parser barrier without a fake job.
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            1,
+            self.limits.max_preparation_work,
+        )?;
+        self.usage.memory_commands = self.usage.memory_commands.saturating_add(1);
         Ok(())
     }
 

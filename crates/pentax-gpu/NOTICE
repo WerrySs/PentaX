@@ -115,3 +115,25 @@ above continue to apply. PentaX additions2026: explicit known register masks,
 fallible actual-capacity input profiles, sparse/alias cross-stage checking and
 bounded manifests. Custom/default/F16 and unsupported barycentric modes remain
 refused. Shader programs, PM4 and data in tests are original PentaX fixtures.
+
+The bounded source-builder packet composition additionally follows PUBLIC
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp, bloba29801fdf992948c594f62ec9045853e6158fd6e
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp,
+    blob19034daafbd6da20d11f634debbf666c1054eed7
+  src/graphics/guest_gpu/graphicsRun.cpp,
+    blob41aeee369b497769e0d62f27ad7df94e7d069bdd,
+    DrawIndexOffset and DispatchDirect
+Copyright(c)2021 InoriRus; GPL-2.0-only and the original Kyty MIT grant
+retained above continue to apply. PentaX modifications2026: exact indexed
+register/base/count state, checked offset draws, source lowbyte-zero dispatch,
+complete tagged32/64-bit waits, shared bounded ordered memory decoding and
+explicit drain actions. Pure plans retain no live pointer or execution authority.
+Source cache fields do not waive current permissions, ownership or physical
+command-source separation. Every preceding actual draw/dispatch completes its
+fence and writeback before ordered effects; unknown profiles remain refused.
+AMD's public CIK_3D_registers_v2.pdf COMPUTE_DISPATCH_INITIATOR table identifies
+ORDER_MODE bit6=1 as permitting out-of-order wave launch, and the pinned public
+pm4.h retains CS_W32_EN bit15. This supports the exact0x8041 wave32 profile,
+not a general dispatch-mode or wave64 implementation. All proof command words,
+shader programs, index arrays and data remain original PentaX fixtures.

@@ -9,6 +9,7 @@
 
 use crate::RegisterSpace;
 use crate::compute::CommandRange;
+pub use crate::compute::MemoryAction;
 use crate::compute::{Memory, MemoryError};
 use pentax_shader_compiler::CompiledShader;
 use std::fmt;

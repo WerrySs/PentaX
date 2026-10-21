@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 use super::*;
 use std::cell::Cell;
+mod builders;
 
 #[test]
 fn release_packets_preserve_exact_data_and_interrupt_context_without_early_effects() {
@@ -34,8 +35,8 @@ fn release_packets_preserve_exact_data_and_interrupt_context_without_early_effec
                     release.interrupt_context(),
                     matches!(interrupt, 1 | 2 | 4).then_some(0x0123_4567)
                 );
-                assert_eq!(release.reference_clock(), data == 3);
-                if data == 0 {
+                assert_eq!(release.reference_clock(), data == 3 && interrupt != 4);
+                if data == 0 || interrupt == 4 {
                     assert!(release.write().is_none());
                 } else {
                     let write = release.write().unwrap();

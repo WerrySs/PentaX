@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 118] = {
+const ENTRIES: [(&str, Function, usize, usize); 178] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 118] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 118];
+    let mut entries = [BASE_ENTRIES[0]; 178];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -150,10 +150,20 @@ const ENTRIES: [(&str, Function, usize, usize); 118] = {
         entries[108 + i] = (nid, function, 3, 3);
         i += 1;
     }
+    let builders = crate::gpu::driver::COMMAND_BUILDER_EXPORTS;
+    let mut builder = 0;
+    while builder < builders.len() {
+        let (nid, function) = builders[builder];
+        entries[118 + builder * 2] = (nid, function, 1, 1);
+        entries[119 + builder * 2] = (nid, function, 2, 2);
+        builder += 1;
+    }
     entries
 };
 const BASE: u32 = 0x5058_4700;
-const IMAGE_BYTES: usize = 0x2000;
+// Appended immutable metadata stays inside the existing one-page mapping and
+// its unchanged16KiB budget. No earlier marker ID/RVA is moved.
+const IMAGE_BYTES: usize = PAGE_SIZE as usize;
 const NAMES: [&str; 7] = [
     "Graphics5Driver",
     "Graphics5",
@@ -350,9 +360,9 @@ mod flip_tests {
     use super::*;
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
-        let provider = build_graphics_provider(8192).unwrap();
-        assert_eq!(provider.function_count(), 118);
-        assert_eq!(provider.image().len(), 8192);
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 178);
+        assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
         assert_eq!(old_last.function, Function::AgcCreateInterpolantMapping2);
@@ -373,9 +383,54 @@ mod flip_tests {
             );
         }
         assert!(matches!(
-            build_graphics_provider(8191),
+            build_graphics_provider(PAGE_SIZE - 1),
             Err(KernelProviderError::Budget)
         ));
+    }
+
+    #[test]
+    fn builder_exports_append_only_two_exact_pairs_with_typed_live_markers() {
+        use pentax_linker::{Limits, SceLimits, SymbolBinding, SymbolType, inspect_sce};
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        let view = pentax_loader::open_executable(provider.image()).unwrap();
+        let metadata = inspect_sce(&view, &Limits::DEFAULT, &SceLimits::DEFAULT)
+            .unwrap()
+            .into_metadata()
+            .unwrap();
+        let descriptors = metadata.descriptors().decoded().unwrap();
+        for (index, name) in [(1, b"Graphics5".as_slice()), (2, b"libSceAgc".as_slice())] {
+            let module = &descriptors.module_info()[index];
+            let library = &descriptors.export_libraries()[index];
+            assert_eq!(module.name().as_bytes(), name);
+            assert_eq!((module.version_major(), module.version_minor()), (1, 1));
+            assert_eq!(library.name().as_bytes(), name);
+            assert_eq!(library.version(), 1);
+        }
+        let previous = provider.markers().nth(117).unwrap();
+        assert_eq!((previous.rva(), previous.id()), (0x850, 0x5058_4776));
+        for (index, (nid, function)) in crate::gpu::driver::COMMAND_BUILDER_EXPORTS
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(ENTRIES.iter().filter(|entry| entry.0 == nid).count(), 2);
+            for (pair, suffix) in [(1, "#C#C"), (2, "#D#D")] {
+                let ordinal = 118 + index * 2 + pair - 1;
+                assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
+                let symbol = &metadata.link().symbols()[ordinal + 1];
+                assert_eq!(
+                    symbol.name.as_ref().unwrap().as_bytes(),
+                    format!("{nid}{suffix}").as_bytes()
+                );
+                assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);
+                assert_eq!(symbol.symbol_type(), SymbolType::FUNC);
+                let marker = provider.markers().nth(ordinal).unwrap();
+                assert_eq!(symbol.value, marker.rva());
+                assert_eq!(
+                    &provider.image()[marker.rva() as usize..marker.rva() as usize + 8],
+                    &marker.bytes()
+                );
+            }
+        }
     }
 }
 

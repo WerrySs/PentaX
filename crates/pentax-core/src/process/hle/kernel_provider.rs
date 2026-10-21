@@ -24,7 +24,7 @@ const STUB_START: usize = 0x100;
 const STUB_STRIDE: usize = 8;
 const STUB_SIZE: usize = 8;
 // Pinned namespaces/spellings and the two explicit SSL lifecycle v2 bindings.
-const MODULES: [(&str, (u16, u16)); 68] = [
+const MODULES: [(&str, (u16, u16)); 69] = [
     ("libkernel", (1, 1)),
     ("SystemService", (1, 1)),
     ("libSceSystemService", (1, 1)),
@@ -93,8 +93,9 @@ const MODULES: [(&str, (u16, u16)); 68] = [
     ("libSceAcm", (1, 1)),
     ("AudioOut", (1, 1)),
     ("libSceAudioOut", (1, 1)),
+    ("libSceConvertKeycode", (1, 0)),
 ];
-const LIBRARIES: [(&str, u16); 70] = [
+const LIBRARIES: [(&str, u16); 71] = [
     ("libkernel", 1),
     ("Posix", 1),
     ("libScePosix", 1),
@@ -165,6 +166,7 @@ const LIBRARIES: [(&str, u16); 70] = [
     ("AudioOut2", 1),
     ("libSceAudioOut2", 1),
     ("libSceUserServicePlatformPrivacyWs1", 1),
+    ("libSceConvertKeycode", 1),
 ];
 // Canonical selectors use one to three radix64 digits for their actual u16 ID.
 // Namespace count, marker count and source-image bytes remain separate limits.

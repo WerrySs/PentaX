@@ -28,6 +28,8 @@ mod netctl_callback;
 pub use netctl_callback::PreparedNetCtlCallback;
 mod font_callback;
 pub use font_callback::PreparedFontParserCallback;
+mod agc_callback;
+pub use agc_callback::PreparedAgcCommandBufferCallback;
 mod ime_callback;
 pub use ime_callback::PreparedImeCallback;
 mod graphics_runtime;
@@ -703,6 +705,7 @@ pub struct PreparedNativeKernelStartup<'plan, 'image> {
     once: pthread_once::OnceState,
     netctl_callbacks: netctl_callback::NetCtlCallbackState,
     font_parsers: font_callback::FontParserCallbackState,
+    agc_callbacks: agc_callback::AgcCallbackState,
     ime_callbacks: ime_callback::ImeCallbackState,
     json: json_strings::JsonStrings,
     graphics: Option<crate::gpu::driver::Driver>,
@@ -809,6 +812,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
             | NativeServiceAction::FontParser(_)
+            | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)
             | NativeServiceAction::CreateThread(_)
             | NativeServiceAction::WaitThread(_) => {
@@ -1179,6 +1183,7 @@ fn prepare_in<'plan, 'image>(
         once: pthread_once::OnceState::new()?,
         netctl_callbacks: netctl_callback::NetCtlCallbackState::new(),
         font_parsers: font_callback::FontParserCallbackState::new()?,
+        agc_callbacks: agc_callback::AgcCallbackState::new()?,
         ime_callbacks: ime_callback::ImeCallbackState::new()?,
         json: json_strings::JsonStrings::new(),
         graphics: plan

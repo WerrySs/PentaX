@@ -53,11 +53,11 @@ pub use kernel_startup::{
     NativeEntryLimits, NativeEntryPolicy, NativeEntryRequest, NativeModuleStartError,
     NativeServiceAction, NativeServiceRequest, OriginalPreparedError, OriginalPreparedLayout,
     OriginalPreparedReport, PendingModuleLoad, PendingThreadCreate, PendingThreadWait,
-    PreparedFontParserCallback, PreparedImeCallback, PreparedLibcBuiltins, PreparedNativeEntry,
-    PreparedNativeKernelStartup, PreparedNativeModuleStart, PreparedNativeSource,
-    PreparedNativeThread, PreparedNetCtlCallback, PreparedPthreadOnce, PreparedThreadStart,
-    ThreadEntryLayout, plan_kernel_startup, prepare_native_kernel_startup,
-    prepare_native_kernel_startup_in, run_original_prepared_fixture,
+    PreparedAgcCommandBufferCallback, PreparedFontParserCallback, PreparedImeCallback,
+    PreparedLibcBuiltins, PreparedNativeEntry, PreparedNativeKernelStartup,
+    PreparedNativeModuleStart, PreparedNativeSource, PreparedNativeThread, PreparedNetCtlCallback,
+    PreparedPthreadOnce, PreparedThreadStart, ThreadEntryLayout, plan_kernel_startup,
+    prepare_native_kernel_startup, prepare_native_kernel_startup_in, run_original_prepared_fixture,
 };
 pub use kernel_startup::{GraphicsStartupOptions, plan_kernel_startup_with_graphics};
 pub use kernel_startup::{

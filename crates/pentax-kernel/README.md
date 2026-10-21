@@ -1358,3 +1358,11 @@ legacy copy queue. Failed guest delivery leaves the pending event unchanged.
 Closed queues and retired port generations cannot receive stale notifications.
 The source lineage and explicit presentation boundaries are documented in
 `docs/worker-frame-bridge.md` at the repository root and in NOTICE.
+
+
+The local ConvertKeycode keyboard-type query preserves the public source
+contract: null output returns 0x80bc0031 before a negative signed int32 user
+returns 0x80bc0010. Nonnegative IDs write exactly four zero bytes through
+checked guest backing. This stateless local type does not enumerate a host
+keyboard, initialize IME or claim text conversion. Only the explicit
+libSceConvertKeycode module1.0/library1 pair is registered.

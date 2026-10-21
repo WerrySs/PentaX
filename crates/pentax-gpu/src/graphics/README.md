@@ -8,7 +8,8 @@ packets described below. Each draw retains its
 own known register snapshot and real vertex/instance counts. State-only streams
 are supported. Zero-count draws consume their command position without shader
 reads or a render product. Predicates, use-opaque counts, indirect buffers,
-indirect draws, barriers, completion writes and unknown registers are refused.
+indirect draws, unported barriers and unknown registers are refused. Selected
+ordered memory operations are described below.
 No reset register value is invented. Final state is published by a queue owner
 only after execution; a failed plan returns no executable prefix.
 
@@ -55,6 +56,12 @@ The first profile is deliberately finite:
   max_count bounds the element count, never the values stored in the index
   buffer. VertexIndex values greater than or equal to count remain valid.
   An admitted zero-count packet needs no index type or payload access.
+- The source indexed-register packet0xc0017a00 has exact selector0x20000243
+  and value0x400 plus U16/U32 and the two cache-policy bits. INDEX_BASE and
+  INDEX_BUFFER_SIZE retain explicit state. DRAW_INDEX_OFFSET_2 computes the
+  checked base+offset*index-width address and captures the exact element count.
+  The pinned direct path does not truncate this count to INDEX_BUFFER_SIZE;
+  packet maximum count and actual current memory/resource bounds remain active.
 - Unmerged ES-to-vertex stage, GS program disabled, no geometry/tessellation,
   scratch or LDS. GS resource/user registers supply the source vertex profile.
   Source `VGT_SHADER_STAGES_EN` selects VS wave32/64; the explicitly known
@@ -234,3 +241,20 @@ fresh capture with different literal pixels, preserving tiled LOAD/padding.
 An original indexed Draw/R_FLIP fixture exercises the existing owned GPU-ready
 capture route without manufacturing display acknowledgement. These source
 fixtures do not establish a commercial frame or compatibility result.
+
+Graphics memory commands retain their position among draws and flips as typed
+Write/Wait/Release/Drain actions. They use the compute planner's same closed
+memory profiles and privately owned payloads; no caller can attach a detached
+numeric action to native execution. Full temporary parser capacities and work
+are conservatively charged inside the unchanged graphics limits; no quota is
+credited when that temporary storage is dropped. The total action count stays
+bounded by twice max_draws. A memory action invalidates the preceding draw's
+flip eligibility. A subsequent flip needs a newly completed draw and current
+owner-bound receipt. Core execution reuses actual write permissions, physical
+command-source disjointness, completed GPU fences, checked label writes and
+post-write notifications. Unsatisfied waits stop explicitly; prior effects
+cannot be replayed. GDS, unknown wait/dispatch modes, indirect draws, opaque
+counts and unported destinations remain explicit execution refusals.
+Graphics release INT_SEL1 and INT_SEL4 have no label or reference-clock write,
+even if raw packet bytes retain a nonzero address. Their interrupt contexts
+remain ordered. ACB INT_SEL1 retains its distinct write-before-interrupt path.

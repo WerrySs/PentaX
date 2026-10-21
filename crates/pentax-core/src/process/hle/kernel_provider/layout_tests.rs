@@ -28,10 +28,10 @@ fn original_consumer() -> Vec<u8> {
 
 #[test]
 fn metadata_layout_admits_declared_count_and_worst_names_but_refuses_every_bound() {
-    // Independent worst case: 138 distinct 255-byte namespaces (68 modules
-    // and 70 libraries), 2048 functions plus two objects, each with an
+    // Independent worst case: 140 distinct 255-byte namespaces (69 modules
+    // and 71 libraries), 2048 functions plus two objects, each with an
     // 11-byte NID and two three-digit selectors.
-    let worst_strings = 1 + 138 * 256 + 2050 * 20;
+    let worst_strings = 1 + 140 * 256 + 2050 * 20;
     assert_eq!(MAX_REGISTRATIONS, 2048);
     assert_eq!(
         (MAX_IMAGE_BYTES, MAX_METADATA_BYTES),
@@ -44,7 +44,7 @@ fn metadata_layout_admits_declared_count_and_worst_names_but_refuses_every_bound
             layout.image_size,
             MAX_IMAGE_BYTES - layout.image_size as u64
         ),
-        (144_816, 2912)
+        (145_360, 2368)
     );
     assert_eq!(layout.code_bytes, 0x4100);
     assert_eq!(layout.data_offset, layout.code_bytes);

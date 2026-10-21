@@ -16,6 +16,7 @@ mod budget;
 mod calendar;
 mod catalog;
 mod content_init;
+mod convert_keycode;
 mod dialog;
 mod entitlement;
 mod event_queue;
@@ -1177,6 +1178,9 @@ impl Kernel {
             | NpPollAsync
             | NpCheckPremium => self.np.invoke(service, args, guest, &mut self.budget),
             UserGetPlatformPrivacyWs1 => user_privacy::invoke(args, guest, &mut self.budget),
+            ConvertKeycodeGetImeKeyboardType => {
+                convert_keycode::invoke(args, guest, &mut self.budget)
+            }
             UserInitialize
             | UserInitialize2
             | UserGetInitial

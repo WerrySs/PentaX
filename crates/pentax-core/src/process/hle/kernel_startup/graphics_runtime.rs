@@ -2,8 +2,8 @@
 
 //! Exact factory/source binding and live PRE-SYSCALL graphics admission.
 use super::{
-    KernelStartupError, KernelStartupLimits, NativeServiceRequest, PreparedNativeKernelStartup,
-    UnavailableProviderPlacement, charge, require,
+    KernelStartupError, KernelStartupLimits, NativeServiceAction, NativeServiceRequest,
+    PreparedNativeKernelStartup, UnavailableProviderPlacement, charge, require,
 };
 use crate::{
     gpu::driver,
@@ -156,8 +156,10 @@ pub(super) fn attest_all(
 }
 pub(super) fn stop(
     session: &mut PreparedNativeKernelStartup<'_, '_>,
+    source: &SymbolicLinkPlan<'_>,
     request: NativeServiceRequest,
-) -> Result<u64, KernelStartupError> {
+    actions: bool,
+) -> Result<NativeServiceAction, KernelStartupError> {
     let binding = session
         .plan
         .graphics
@@ -182,6 +184,11 @@ pub(super) fn stop(
             actual: request.service_id,
         });
     }
+    let thread_pointer = session
+        .tls()
+        .instances()
+        .get(session.active_tls)
+        .map(|tls| tls.thread_pointer);
     let mut paused = session.hle.pause().map_err(KernelStartupError::Hle)?;
     attest_marker(&paused, &binding, marker)?;
     let driver = session
@@ -190,6 +197,32 @@ pub(super) fn stop(
         .ok_or(KernelStartupError::InvalidProvider(
             "missing graphics state",
         ))?;
+    if driver::is_command_builder(marker.function) {
+        let action = driver
+            .begin_command_builder(
+                &mut paused,
+                marker.function,
+                request.args,
+                request.stack_pointer,
+            )
+            .map_err(KernelStartupError::Graphics)?;
+        if !actions && matches!(action, driver::CommandBuilderAction::Grow(_)) {
+            return Err(KernelStartupError::InvalidProvider(
+                "AGC callback needs native continuation",
+            ));
+        }
+        return session.agc_callbacks.prepare(
+            &mut paused,
+            source,
+            action,
+            request,
+            (thread_pointer, session.active_tls),
+            (
+                &mut session.provider_work,
+                session.plan.limits.max_provider_work,
+            ),
+        );
+    }
     if marker.function == driver::Function::VideoSubmitFlip {
         driver.submit_video_flip_with_clock(&mut paused, request.args, |paused| {
             let guest = super::super::kernel_adapter::KernelMemory {
@@ -265,6 +298,7 @@ pub(super) fn stop(
         )
     }
     .map_err(KernelStartupError::Graphics)
+    .map(NativeServiceAction::Returned)
 }
 impl PreparedNativeKernelStartup<'_, '_> {
     /// Final diagnostics: open ports, committed buffer registrations and retained
@@ -580,6 +614,11 @@ mod tests {
             ("Graphics5", "Graphics5", 2, "YUeqkyT7mEQ", 0),
             ("Graphics5", "libSceAgc", 1, "YUeqkyT7mEQ", 1),
             ("Graphics5Driver", "Graphics5Driver", 1, "YUeqkyT7mEQ", 1),
+            ("Graphics5", "Graphics5", 1, "k3GhuSNmBLU", 0),
+            ("libSceAgc", "libSceAgc", 1, "k3GhuSNmBLU", 0),
+            ("Graphics5", "libSceAgc", 1, "k3GhuSNmBLU", 1),
+            ("libSceAgc", "Graphics5", 1, "k3GhuSNmBLU", 1),
+            ("Graphics5", "Graphics5", 2, "k3GhuSNmBLU", 0),
         ] {
             let mut input = original_input(1);
             let strings = u64::from_le_bytes(input[0x208..0x210].try_into().unwrap()) as usize;
@@ -618,7 +657,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 118);
+            assert_eq!(binding.factory.function_count(), 178);
             let open = binding
                 .factory
                 .markers()

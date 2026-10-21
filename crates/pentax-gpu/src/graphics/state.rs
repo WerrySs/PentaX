@@ -16,6 +16,8 @@ pub struct GraphicsState {
     primitive_restart: Option<u32>,
     pub(super) instances: Option<u32>,
     pub(super) index_type: Option<IndexType>,
+    pub(super) index_base: Option<u64>,
+    pub(super) index_count: Option<u32>,
 }
 impl Default for GraphicsState {
     fn default() -> Self {
@@ -32,6 +34,8 @@ impl fmt::Debug for GraphicsState {
             .field("known_primitive_restart", &self.primitive_restart.is_some())
             .field("known_instances", &self.instances.is_some())
             .field("index_type", &self.index_type)
+            .field("known_index_base", &self.index_base.is_some())
+            .field("known_index_count", &self.index_count.is_some())
             .finish()
     }
 }
@@ -45,6 +49,8 @@ impl GraphicsState {
             primitive_restart: None,
             instances: None,
             index_type: None,
+            index_base: None,
+            index_count: None,
         }
     }
     pub(super) fn get(&self, space: RegisterSpace, register: u32) -> Result<u32, Error> {

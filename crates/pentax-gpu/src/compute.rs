@@ -15,9 +15,10 @@ use std::fmt;
 
 mod commands;
 pub use commands::{
-    Command, CommandLimits, CommandPlan, CommandRange, CommandUsage, Dispatch, MemoryWait,
-    MemoryWrite, Release, plan_commands,
+    Command, CommandLimits, CommandPlan, CommandRange, CommandUsage, Dispatch, MemoryAction,
+    MemoryWait, MemoryWrite, Release, plan_commands,
 };
+pub(crate) use commands::{memory_packet, tagged_wait_dwords};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryError {
@@ -257,7 +258,7 @@ fn packets(bytes: &[u8], budget: &mut Budget<'_>) -> Result<(ComputeState, [u32;
                 regs.write(first + index as u32, word(at + 2 + index))?;
             }
         } else if header.opcode() == 0x15
-            && header.shader_type()
+            && matches!(header.low_byte(), 0 | 2)
             && length == 5
             && dispatch.is_none()
         {
@@ -355,7 +356,7 @@ pub fn prepare_dispatch(
         limits,
         usage: Usage::default(),
     };
-    if !matches!(dispatch.mode, 0x8001 | 0x8005) {
+    if !matches!(dispatch.mode, 0x8001 | 0x8005 | 0x8041) {
         return Err(Error::Unsupported("wave32 dispatch initiator"));
     }
     let mut groups = dispatch.groups;
@@ -400,7 +401,7 @@ fn prepare_state(
     mut budget: Budget<'_>,
 ) -> Result<PreparedCompute, Error> {
     let limits = budget.limits;
-    if !matches!(mode, 0x8001 | 0x8005) {
+    if !matches!(mode, 0x8001 | 0x8005 | 0x8041) {
         return Err(Error::Unsupported("wave32 direct dispatch initiator"));
     }
     if mode & 4 == 0 {
