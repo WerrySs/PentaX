@@ -4,12 +4,15 @@
 // `FoldInstruction` for the operations this port produces (integer, bit,
 // composite, select, phi, logical and bit-cast folds; GetAttributeWithBary
 // interpolation-mode resolution). Like the source, float arithmetic is never
-// folded. PentaX modifications: the pass repeats to a fixed point under the
+// folded. PentaX modifications: P1/P2 interpolation requires matching genuine
+// builtin-coordinate and partial-result provenance; unknown values are never
+// replaced by implicit interpolation. The pass repeats to a fixed point under the
 // work budget (it re-simplifies phi users that the source reaches through use
 // lists); value-set, known-zero and lane-mask projections are not ported.
 
 use crate::CompileError;
 use crate::budget::Budget;
+use crate::error::UnsupportedReason;
 use crate::ir::{Builtin, InstId, Ir, Op, Value};
 use crate::passes::ssa::collect_block;
 
@@ -238,21 +241,46 @@ impl Folder<'_> {
                 self.fold_select(id)?;
             }
             Op::GetAttributeWithBary => {
-                let mut mode = 0u32;
-                if let Some((_, j)) = self.ir.producer(self.budget, self.ir.arg(id, 0))?
-                    && j.op == Op::GetBuiltin
-                    && j.aux & 0xff == 1
-                {
-                    mode = match Builtin::from_code(j.aux >> 8) {
-                        Some(Builtin::BaryCoordSmooth) => 1,
-                        Some(Builtin::BaryCoordSmoothCentroid) => 2,
-                        Some(Builtin::BaryCoordSmoothSample) => 3,
-                        Some(Builtin::BaryCoordNoPerspective) => 4,
-                        Some(Builtin::BaryCoordNoPerspectiveCentroid) => 5,
-                        Some(Builtin::BaryCoordNoPerspectiveSample) => 6,
-                        _ => 0,
+                let provenance = (|| -> Result<Option<u32>, CompileError> {
+                    let partial = self.arg(id, 0)?;
+                    let Some((p1_id, p1)) = self.ir.producer(self.budget, partial)? else {
+                        return Ok(None);
                     };
-                }
+                    if p1.op != Op::InterpolationP1 || p1.aux != self.ir.inst(id).aux {
+                        return Ok(None);
+                    }
+                    let i = self.arg(p1_id, 0)?;
+                    let j = self.arg(id, 1)?;
+                    let Some((_, i)) = self.ir.producer(self.budget, i)? else {
+                        return Ok(None);
+                    };
+                    let Some((_, j)) = self.ir.producer(self.budget, j)? else {
+                        return Ok(None);
+                    };
+                    if i.op != Op::GetBuiltin
+                        || j.op != Op::GetBuiltin
+                        || i.aux & 0xff != 0
+                        || j.aux != i.aux + 1
+                    {
+                        return Ok(None);
+                    }
+                    Ok(match Builtin::from_code(i.aux >> 8) {
+                        Some(Builtin::BaryCoordSmooth) => Some(1),
+                        Some(Builtin::BaryCoordSmoothCentroid) => Some(2),
+                        Some(Builtin::BaryCoordSmoothSample) => Some(3),
+                        Some(Builtin::BaryCoordNoPerspective) => Some(4),
+                        Some(Builtin::BaryCoordNoPerspectiveCentroid) => Some(5),
+                        Some(Builtin::BaryCoordNoPerspectiveSample) => Some(6),
+                        _ => None,
+                    })
+                })()?;
+                let mode = provenance.ok_or_else(|| {
+                    CompileError::unsupported(
+                        self.ir.inst(id).pc,
+                        None,
+                        UnsupportedReason::PerVertexInterpolation,
+                    )
+                })?;
                 let aux = self.ir.inst(id).aux & 0xffff | mode << 16;
                 let read = self.insert(id, Op::GetAttribute, aux, &[])?;
                 self.replace(id, read)?;

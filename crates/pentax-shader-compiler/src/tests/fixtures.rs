@@ -45,8 +45,8 @@ pub fn vertex() -> Vec<u32> {
 // Host input parameter0.x=.25 => MRT0=(.25,.5,1,1).
 pub fn fragment() -> Vec<u32> {
     let mut w = vec![
-        0xc800_0000,
-        0xc800_0000 | (1 << 16),
+        0xc800_0000 | 6,
+        0xc800_0000 | (1 << 16) | 7,
         vector_binary(8, 1, 244, 0),
         vector_binary(3, 2, 240, 1),
         vector_unary(1, 4, 242),

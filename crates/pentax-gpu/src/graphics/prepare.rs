@@ -2,15 +2,15 @@
 // Copyright (c) 2021 InoriRus
 // Modified 2026 for PentaX: explicit register/profile admission and owned resources.
 
+use super::linkage::{PixelRegisters, validate_shader_interfaces};
 use super::{
     Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw,
     PreparedIndices, RegisterSpace, TargetDecodeLimits, TargetGeometry, TargetLayout, Usage,
 };
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
-    CommonDescription, CompiledShader, InputInterface, Limits as CompilerLimits, OutputInterface,
-    PixelDescription, Profile, ShaderProgram, StageDescription, VertexDescription, WaveSize,
-    compile,
+    CommonDescription, CompiledShader, Limits as CompilerLimits, Profile, ShaderProgram,
+    StageDescription, VertexDescription, WaveSize, compile,
 };
 
 fn context(state: &GraphicsState, register: u32) -> Result<u32, Error> {
@@ -37,6 +37,7 @@ struct Configuration {
     vertex_users: u8,
     pixel_users: u8,
     vertex_wave: WaveSize,
+    pixel: PixelRegisters,
 }
 
 fn shader_address(state: &GraphicsState, low: u32) -> Result<u64, Error> {
@@ -73,15 +74,14 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
     // No DCC/CMASK/FMASK, layered views, depth, blending, logic operations,
     // clipping overrides, raster discard, extra viewports or sample shading.
     for register in [
-        0x80, 0x1b1, 0x1b3, 0x1b4, 0x1b8, 0x1c4, 0x1e0, 0x200, 0x203, 0x205, 0x207, 0x293, 0x2f8,
-        0x31b, 0x31d, 0x31e, 0x31f, 0x321, 0x325, 0x398, 0x3a0, 0x3a8,
+        0x80, 0x1c4, 0x1e0, 0x200, 0x203, 0x205, 0x207, 0x293, 0x2f8, 0x31b, 0x31d, 0x31e, 0x31f,
+        0x321, 0x325, 0x398, 0x3a0, 0x3a8,
     ] {
         expected(state, register, 0)?;
     }
     for (register, value) in [
         (0x8e, 0xf),
         (0x8f, 0xf),
-        (0x1b6, 0x8000),
         (0x1c3, 4),
         (0x1c5, 9),
         (0x202, 0x00cc_0010),
@@ -183,6 +183,7 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
         return Err(Error::Unsupported("graphics user SGPR count"));
     }
     Ok(Configuration {
+        pixel: PixelRegisters::read(state, budget)?,
         address,
         width,
         height,
@@ -284,7 +285,7 @@ fn read_program(
     Err(Error::Limit("terminated shader words"))
 }
 
-fn validate_manifest(compiled: &CompiledShader, vertex: bool) -> Result<(), Error> {
+fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
     let manifest = compiled.manifest();
     let features = manifest.required_features();
     if !manifest.buffers().is_empty()
@@ -297,27 +298,6 @@ fn validate_manifest(compiled: &CompiledShader, vertex: bool) -> Result<(), Erro
         || features.draw_parameters()
     {
         return Err(Error::Unsupported("graphics resource/subgroup manifest"));
-    }
-    if vertex {
-        if manifest.outputs() != [OutputInterface::Position]
-            || manifest.inputs().iter().any(|i| {
-                !matches!(
-                    i,
-                    InputInterface::VertexIndex | InputInterface::InstanceIndex
-                )
-            })
-        {
-            return Err(Error::Unsupported("vertex interface manifest"));
-        }
-    } else if manifest.outputs()
-        != [OutputInterface::Color {
-            export: 0,
-            location: 0,
-            uint: false,
-        }]
-        || !manifest.inputs().is_empty()
-    {
-        return Err(Error::Unsupported("pixel interface manifest"));
     }
     Ok(())
 }
@@ -480,11 +460,10 @@ pub fn prepare_draw_with_target(
         start_instance_sgpr: None,
     }))
     .map_err(|_| Error::Compile)?;
-    let mut pixel_common = CommonDescription::new(WaveSize::Wave32);
-    pixel_common.user_sgpr_count = config.pixel_users;
-    pixel_common.push_data_start_dword = 16;
-    let pixel_profile = Profile::new(StageDescription::Pixel(PixelDescription::new(pixel_common)))
-        .map_err(|_| Error::Compile)?;
+    let (pixel_description, pixel_profile_bytes) =
+        config.pixel.profile(config.pixel_users, &mut budget)?;
+    let pixel_profile =
+        Profile::new(StageDescription::Pixel(pixel_description)).map_err(|_| Error::Compile)?;
     budget.peak(compiler.max_bytes)?;
     let vertex =
         compile(&vertex_program, &vertex_profile, &compiler).map_err(|_| Error::Compile)?;
@@ -492,8 +471,18 @@ pub fn prepare_draw_with_target(
     budget.peak(compiler.max_bytes)?;
     let pixel = compile(&pixel_program, &pixel_profile, &compiler).map_err(|_| Error::Compile)?;
     budget.host(pixel.retained_host_bytes())?;
-    validate_manifest(&vertex, true)?;
-    validate_manifest(&pixel, false)?;
+    budget.work(256)?;
+    validate_manifest(&vertex)?;
+    validate_manifest(&pixel)?;
+    let interfaces = validate_shader_interfaces(&vertex, &pixel)?;
+    if (config.pixel.export_span < 32
+        && interfaces.vertex_locations >> config.pixel.export_span != 0)
+        || !config.pixel.matches(&pixel)
+    {
+        return Err(Error::Unsupported(
+            "graphics parameter declaration mismatch",
+        ));
+    }
     let vertex_push = push_data(&draw.state, &vertex, true)?;
     let pixel_push = push_data(&draw.state, &pixel, false)?;
     let program_bytes = vertex_program
@@ -505,6 +494,9 @@ pub fn prepare_draw_with_target(
     drop(vertex_program);
     drop(pixel_program);
     budget.release(program_bytes)?;
+    drop(pixel_profile);
+    drop(vertex_profile);
+    budget.release(pixel_profile_bytes)?;
     let indices = if let Some(source) = draw.indices {
         let size = usize::try_from(draw.vertex_count)
             .ok()

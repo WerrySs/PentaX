@@ -294,6 +294,7 @@ fn read_bounded(file: &mut File, declared: u64, remaining: u64) -> Result<Vec<u8
 
 struct Intake {
     private_samples: Option<File>,
+    private_thread_states: Option<File>,
     private_console: Option<File>,
     save_directory: Option<File>,
     backing_directory: Option<backing::BackingDirectory>,
@@ -313,7 +314,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(9)
+                .saturating_add(10)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -327,6 +328,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--present-window"
                     && pair[0] != "--libc-memory-builtins"
                     && pair[0] != "--private-samples"
+                    && pair[0] != "--private-thread-states"
                     && pair[0] != "--private-console"
             })
             .count()
@@ -352,6 +354,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--present-window"
                 && pair[0] != "--libc-memory-builtins"
                 && pair[0] != "--private-samples"
+                && pair[0] != "--private-thread-states"
                 && pair[0] != "--private-console"
         })
         || args
@@ -401,6 +404,11 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         || args
             .chunks_exact(2)
             .filter(|pair| pair[0] == "--private-console")
+            .count()
+            > 1
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--private-thread-states")
             .count()
             > 1
         || args.chunks_exact(2).any(|pair| {
@@ -520,6 +528,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             || pair[0] == "--present-window"
             || pair[0] == "--libc-memory-builtins"
             || pair[0] == "--private-samples"
+            || pair[0] == "--private-thread-states"
             || pair[0] == "--private-console"
         {
             continue;
@@ -634,6 +643,23 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             Ok(file)
         })
         .transpose()?;
+    let private_thread_states = args
+        .chunks_exact(2)
+        .find(|pair| pair[0] == "--private-thread-states")
+        .map(|pair| {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .share_mode(0)
+                .custom_flags(0x0020_0000) // FILE_FLAG_OPEN_REPARSE_POINT.
+                .open(&pair[1])
+                .map_err(|_| ProbeError::Input("private-thread-states-open"))?;
+            if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+                return Err(ProbeError::Input("private-thread-states-file"));
+            }
+            Ok(file)
+        })
+        .transpose()?;
     let private_console = args
         .chunks_exact(2)
         .find(|pair| pair[0] == "--private-console")
@@ -641,6 +667,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         .transpose()?;
     Ok(Intake {
         private_samples,
+        private_thread_states,
         private_console,
         save_directory,
         backing_directory,
@@ -660,10 +687,12 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
     let mut progress = NativeSessionProgress::default();
     let mut unavailable_functions = None;
     let mut private_samples_file = None;
+    let mut private_thread_states_file = None;
     let mut private_console_file = None;
     let result = (|| {
         let mut intake = intake(args, &limits)?;
         private_samples_file = intake.private_samples.take();
+        private_thread_states_file = intake.private_thread_states.take();
         private_console_file = intake.private_console.take();
         let present_window = args
             .chunks_exact(2)
@@ -771,6 +800,7 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 let mut execution = NativeSessionLimits {
                     interactive,
                     private_samples: private_samples_file.is_some(),
+                    private_thread_states: private_thread_states_file.is_some(),
                     ..Default::default()
                 };
                 if args
@@ -878,6 +908,18 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
             None => "unavailable",
         };
         progress.private_samples_status = Some(status);
+    }
+    if let Some(mut file) = private_thread_states_file {
+        // The exact file capability was opened before execution. Only bounded
+        // private bytes leave here; output failure never replaces the stop.
+        let status = match progress.private_thread_states_bytes() {
+            Some(bytes) => match file.write_all(bytes) {
+                Ok(()) => "written",
+                Err(_) => "write-failed",
+            },
+            None => "unavailable",
+        };
+        progress.private_thread_states_status = Some(status);
     }
     ProbeOutcome {
         result,

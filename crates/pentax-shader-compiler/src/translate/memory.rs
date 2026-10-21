@@ -287,17 +287,31 @@ impl Translator<'_> {
         let attribute = inst.src(1).value;
         let channel = inst.src(2).value;
         match inst.opcode {
-            // Source V_INTERP_P1_F32: the host interpolates in P2.
-            O::VInterpP1F32 => Ok(()),
+            // Retain provenance of the real P1 partial until P2. Replacing
+            // arbitrary modified coordinates with host interpolation is not
+            // an implementation of the source arithmetic.
+            O::VInterpP1F32 => {
+                let i = self
+                    .e
+                    .get(Op::GetVectorRegister, u32::from(inst.src(0).reg))?;
+                let value = self.e.emit_aux(
+                    Op::InterpolationP1,
+                    attribute_aux(attribute, channel, 0),
+                    &[i],
+                )?;
+                self.write(inst.dst, value)
+            }
             O::VInterpP2F32 => {
                 let aux = attribute_aux(attribute, channel, 0);
                 let value = if inst.src(0).kind == OperandKind::Vgpr {
                     let j = self
                         .e
                         .get(Op::GetVectorRegister, u32::from(inst.src(0).reg))?;
-                    self.e.emit_aux(Op::GetAttributeWithBary, aux, &[j])?
+                    let partial = self.e.get(Op::GetVectorRegister, u32::from(inst.dst.reg))?;
+                    self.e
+                        .emit_aux(Op::GetAttributeWithBary, aux, &[partial, j])?
                 } else {
-                    self.e.get(Op::GetAttribute, aux)?
+                    return Err(self.unsupported(UnsupportedReason::PerVertexInterpolation));
                 };
                 self.write(inst.dst, value)
             }

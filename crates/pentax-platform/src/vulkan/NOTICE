@@ -68,6 +68,15 @@ https://docs.vulkan.org/spec/latest/chapters/renderpass.html
 https://docs.vulkan.org/spec/latest/chapters/synchronization.html
 https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPushConstants.html
 
+The subsequent parameter-linkage extension uses the actual prepared compiler
+interfaces rather than rejecting all PARAMs. It reuses the GPU planner's pure
+cross-stage validator and checks actual sparse locations and unique component
+counts, including builtins, against the physical device before image/buffer/
+pipeline creation. Interpolation decorations remain actual compiler output;
+no replacement shader, larger resource cap or guest-memory authority is added.
+Vulkan interface limits follow the primary specification:
+https://docs.vulkan.org/spec/latest/chapters/interfaces.html
+
 Vulkan binding dependency:
 ash 0.38.0+1.3.281, source revision
 b724b78dac8d83879ed7a1aad2b91bb9f2beb5cf (ash-rs/ash tag 0.38.0).

@@ -30,6 +30,7 @@ mod dispatch_context;
 // every guest entry and memory pause. Ordinary probes retain no consumer.
 pub(crate) mod frame_bridge;
 mod plan_cache;
+mod private_thread_states;
 mod scheduling;
 mod startup_profile;
 mod stop_diagnostics;
@@ -56,6 +57,8 @@ pub(super) struct NativeSessionLimits {
     pub libc_memory_builtins: Option<usize>,
     /// Explicit host-only diagnostic output, never enabled by guest input.
     pub private_samples: bool,
+    /// Separate explicit private terminal CPU-state file capability.
+    pub private_thread_states: bool,
     /// Explicit host lifetime policy; per-operation and resident bounds remain.
     pub interactive: bool,
 }
@@ -74,6 +77,7 @@ impl Default for NativeSessionLimits {
             progress_interval_blocks: 2048,
             libc_memory_builtins: None,
             private_samples: false,
+            private_thread_states: false,
             interactive: false,
         }
     }
@@ -195,6 +199,8 @@ pub(super) struct NativeSessionProgress {
     pub libc_builtin_bound_entries: u64,
     pub private_samples_status: Option<&'static str>,
     pub private_console_status: Option<&'static str>,
+    pub private_thread_states_status: Option<&'static str>,
+    private_thread_states: private_thread_states::PrivateThreadStates,
     window: frame_bridge::Observations,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
@@ -217,6 +223,10 @@ impl NativeSessionProgress {
         self.profile.private_samples_bytes()
     }
 
+    pub fn private_thread_states_bytes(&self) -> Option<&[u8]> {
+        self.private_thread_states.bytes()
+    }
+
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
         let private = self
@@ -229,13 +239,18 @@ impl NativeSessionProgress {
             .map_or_else(String::new, |status| {
                 format!("\tprivate_console_status={status}")
             });
+        let contexts = self
+            .private_thread_states_status
+            .map_or_else(String::new, |status| {
+                format!("\tprivate_thread_states_status={status}")
+            });
         let causality = causality::fields(
             &self.dispatch,
             &self.plan_cache_observations,
             self.kernel_handles,
         );
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}{private}{console}{causality}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}{private}{console}{contexts}{causality}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
@@ -570,6 +585,9 @@ fn run_prepared_consumer_inner<'plan, 'image>(
     if limits.private_samples {
         progress.profile.enable_private_samples();
     }
+    if limits.private_thread_states {
+        progress.private_thread_states.enable();
+    }
     let mut initial = initial;
     let mut main_thread = None;
     let source = proof.materialized_source();
@@ -846,728 +864,759 @@ fn execute_epoch<'plan, 'image>(
             }
         }
     };
-    progress.dispatch = engine.usage();
-    let native_ymm_features = engine.native_ymm_features();
-    progress.native_scalar_fma =
-        Some(native_ymm_features.is_some_and(|features| features.contains(CpuidFeature::FMA)));
-    progress.native_ymm_mode = Some(match native_ymm_features {
-        None => NativeYmmMode::Sse2,
-        Some(features) if features.contains(CpuidFeature::AVX2) => NativeYmmMode::Avx2,
-        Some(_) => NativeYmmMode::Avx,
-    });
-    if let Some((start, token)) = starting {
-        let call =
-            engine.begin_syscall_call(&mut session.pause()?, token, start.entry(), start.args());
+    if limits.private_thread_states {
+        progress
+            .private_thread_states
+            .begin_epoch(source.source_plan().identity());
+    }
+    // Keep the actual selected CPU alive through every terminal Result path.
+    // This closure changes no guest error ordering. A dynamic source transition
+    // still moves the same machine out only after the closure has returned.
+    let outcome = (|| {
         progress.dispatch = engine.usage();
-        let call = call?;
-        session.observe_dynamic_module_call(start, &call)?;
-        if state.frames.len() >= 32 {
-            return Err(NativeSessionError::Budget("initializer frames"));
+        let native_ymm_features = engine.native_ymm_features();
+        progress.native_scalar_fma =
+            Some(native_ymm_features.is_some_and(|features| features.contains(CpuidFeature::FMA)));
+        progress.native_ymm_mode = Some(match native_ymm_features {
+            None => NativeYmmMode::Sse2,
+            Some(features) if features.contains(CpuidFeature::AVX2) => NativeYmmMode::Avx2,
+            Some(_) => NativeYmmMode::Avx,
+        });
+        if let Some((start, token)) = starting {
+            let call = engine.begin_syscall_call(
+                &mut session.pause()?,
+                token,
+                start.entry(),
+                start.args(),
+            );
+            progress.dispatch = engine.usage();
+            let call = call?;
+            session.observe_dynamic_module_call(start, &call)?;
+            if state.frames.len() >= 32 {
+                return Err(NativeSessionError::Budget("initializer frames"));
+            }
+            state
+                .frames
+                .push((SuspendedInitializer::Module(start), call, progress.phase));
+            progress.phase = NativeSessionPhase::Initializer;
         }
-        state
-            .frames
-            .push((SuspendedInitializer::Module(start), call, progress.phase));
-        progress.phase = NativeSessionPhase::Initializer;
-    }
-    // This cache borrows only this exact source view; module publication returns
-    // from the epoch and drops every retained plan before another view is bound.
-    // Native feature admission describes actual host support. Count operations
-    // without it remain modeled exits; other unported instructions stay typed.
-    let mut native_features = CpuFeatures::x64_sse2();
-    for (feature, available) in [
-        (CpuidFeature::BMI1, std::is_x86_feature_detected!("bmi1")),
-        (CpuidFeature::BMI2, std::is_x86_feature_detected!("bmi2")),
-        (
-            CpuidFeature::POPCNT,
-            std::is_x86_feature_detected!("popcnt"),
-        ),
-    ] {
-        if available {
-            native_features = native_features.with(feature);
-        }
-    }
-    // AVX/FMA declarations come only from this exact engine's admitted full-YMM
-    // bridge mode. Raw host flags alone never enable native vector plans.
-    if let Some(features) = native_ymm_features {
-        for feature in [CpuidFeature::AVX, CpuidFeature::AVX2, CpuidFeature::FMA] {
-            if features.contains(feature) {
+        // This cache borrows only this exact source view; module publication returns
+        // from the epoch and drops every retained plan before another view is bound.
+        // Native feature admission describes actual host support. Count operations
+        // without it remain modeled exits; other unported instructions stay typed.
+        let mut native_features = CpuFeatures::x64_sse2();
+        for (feature, available) in [
+            (CpuidFeature::BMI1, std::is_x86_feature_detected!("bmi1")),
+            (CpuidFeature::BMI2, std::is_x86_feature_detected!("bmi2")),
+            (
+                CpuidFeature::POPCNT,
+                std::is_x86_feature_detected!("popcnt"),
+            ),
+        ] {
+            if available {
                 native_features = native_features.with(feature);
             }
         }
-    }
-    let mut policy = TranslationPolicy::new(native_features);
-    if let Some(features) = native_ymm_features {
-        policy = policy
-            .with_native_ymm_registers()
-            .with_native_packed_float_memory()
-            .with_native_streaming_stores()
-            .with_native_vector_moves()
-            .with_native_scalar_float();
-        if features.contains(CpuidFeature::AVX) {
-            policy = policy
-                .with_native_float_min_max()
-                .with_native_vector_broadcasts();
-        }
-        if features.contains(CpuidFeature::FMA) {
-            policy = policy.with_native_scalar_fma().with_native_fma_registers();
-        }
-    }
-    progress.plan_cache_observations.begin_epoch();
-    let plans = plan_cache::PlanCache::new(
-        source,
-        policy
-            .with_independent_memory()
-            .with_partial_window_splits()
-            .with_affine_loop_trace(),
-        limits.block,
-        &mut state.admission_work,
-        limits.max_admission_work,
-    );
-    progress.admission_work = state.admission_work;
-    let mut plans = plans?;
-    let mut previous_plan_observations = plan_cache::PlanCacheObservations::default();
-    // Reuse only allocation storage within this source epoch. Every attempt
-    // still fetches its complete live executable window before cache lookup.
-    let mut window_storage = Vec::new();
-    loop {
-        let mut external = None;
-        if let Some(consumer) = consumer.as_deref_mut() {
-            let blocked = state.scheduling.active_blocked();
-            if blocked
-                || state
-                    .frame_pump_blocks
-                    .is_none_or(|old| engine.usage().blocks.saturating_sub(old) >= 1024)
-            {
-                let pumped = consumer.pump(session);
-                progress.window = consumer.observations();
-                match pumped.map_err(NativeSessionError::Frame)? {
-                    frame_bridge::Pump::RetryEventDelivery => {
-                        let wake = consumer
-                            .external_wake()
-                            .map_err(NativeSessionError::Frame)?
-                            .ok_or(NativeSessionError::Frame(frame_bridge::Error::Protocol))?;
-                        state.scheduling.wait_consumer_retry(wake)?;
-                        state.frame_pump_blocks = None;
-                        continue;
-                    }
-                    frame_bridge::Pump::NeedsEventDelivery => {
-                        return Err(NativeSessionError::Frame(
-                            frame_bridge::Error::NeedsEventDelivery,
-                        ));
-                    }
-                    frame_bridge::Pump::Idle | frame_bridge::Pump::Progress => {}
+        // AVX/FMA declarations come only from this exact engine's admitted full-YMM
+        // bridge mode. Raw host flags alone never enable native vector plans.
+        if let Some(features) = native_ymm_features {
+            for feature in [CpuidFeature::AVX, CpuidFeature::AVX2, CpuidFeature::FMA] {
+                if features.contains(feature) {
+                    native_features = native_features.with(feature);
                 }
-                state.frame_pump_blocks = Some(engine.usage().blocks);
-            }
-            if blocked {
-                external = consumer
-                    .external_wake()
-                    .map_err(NativeSessionError::Frame)?;
             }
         }
-        let runnable = state.scheduling.rotate(
-            session,
-            proof,
-            &mut engine,
-            &mut state.frames,
-            &mut progress.phase,
-            external,
-            limits.interactive,
-        )?;
-        progress.dispatch = engine.usage();
-        if !runnable {
-            continue;
-        }
-        // Profiles retain at most 48 progress records. Publication is outside
-        // native entry and follows completed service observations.
-        if limits.report_progress
-            && progress
-                .dispatch
-                .blocks
-                .saturating_sub(state.reported_blocks)
-                >= limits.progress_interval_blocks.max(1)
-        {
-            crate::protocol(&format!(
-                "PROGRESS\tmode=entry-probe\t{}",
-                progress.progress_fields()
-            ))
-            .map_err(|_| NativeSessionError::OutputUnavailable)?;
-            state.reported_blocks = progress.dispatch.blocks;
-        }
-        let sampled = StartupProfile::sampled(limits.report_progress, progress.dispatch.blocks);
-        if sampled {
-            charge(
-                &mut state.admission_work,
-                32,
-                limits.max_admission_work,
-                "admission work",
-            )?;
-            progress.admission_work = state.admission_work;
-            progress.profile.samples = progress.profile.samples.saturating_add(1);
-        }
-        let mut stamp = sampled.then(Instant::now);
-        let block = {
-            let paused = session.pause()?;
-            if paused.owner_id() != proof.owner_id() {
-                return Err(NativeSessionError::WrongPreparedSource);
+        let mut policy = TranslationPolicy::new(native_features);
+        if let Some(features) = native_ymm_features {
+            policy = policy
+                .with_native_ymm_registers()
+                .with_native_packed_float_memory()
+                .with_native_streaming_stores()
+                .with_native_vector_moves()
+                .with_native_scalar_float();
+            if features.contains(CpuidFeature::AVX) {
+                policy = policy
+                    .with_native_float_min_max()
+                    .with_native_vector_broadcasts();
             }
-            charge(
-                &mut state.admission_work,
-                metadata_visits,
-                limits.max_admission_work,
-                "admission work",
-            )?;
-            progress.admission_work = state.admission_work;
-            let (module, length) = plans.initialized_window(
-                engine.state().guest_pc,
-                limits
-                    .block
-                    .max_source_bytes
-                    .min(limits.max_window_allocation_bytes),
-            )?;
-            charge(
-                &mut state.fetched_source_bytes,
-                length,
-                limits.max_total_window_bytes,
-                "source windows",
-            )?;
-            progress.fetched_source_bytes = state.fetched_source_bytes;
-            let copy_work = length
-                .checked_mul(2)
-                .ok_or(NativeSessionError::Budget("admission work"))?;
-            charge(
-                &mut state.admission_work,
-                copy_work,
-                limits.max_admission_work,
-                "admission work",
-            )?;
-            progress.admission_work = state.admission_work;
-            let window = fetch_window_into(
-                &paused,
-                engine.state().guest_pc,
-                length,
-                limits.max_window_allocation_bytes,
-                &mut window_storage,
-            )?;
-            StartupProfile::checkpoint(&mut stamp, &mut progress.profile.window_ns);
-            let prepared = plans.prepare(
-                module,
-                engine.state().guest_pc,
-                window,
-                engine.placement_for(engine.state().guest_pc),
-                engine.usage().blocks,
-                &mut state.admission_work,
-                limits.max_admission_work,
-            );
-            progress.admission_work = state.admission_work;
-            let (block, hit, observations) = prepared?;
-            if !hit {
-                progress
-                    .plan_cache_observations
-                    .observe(observations, &mut previous_plan_observations);
+            if features.contains(CpuidFeature::FMA) {
+                policy = policy.with_native_scalar_fma().with_native_fma_registers();
             }
-            charge(
-                if hit {
-                    &mut progress.plan_cache_hits
-                } else {
-                    &mut progress.plan_cache_misses
-                },
-                1,
-                u64::MAX,
-                "plan cache observations",
+        }
+        progress.plan_cache_observations.begin_epoch();
+        let plans = plan_cache::PlanCache::new(
+            source,
+            policy
+                .with_independent_memory()
+                .with_partial_window_splits()
+                .with_affine_loop_trace(),
+            limits.block,
+            &mut state.admission_work,
+            limits.max_admission_work,
+        );
+        progress.admission_work = state.admission_work;
+        let mut plans = plans?;
+        let mut previous_plan_observations = plan_cache::PlanCacheObservations::default();
+        // Reuse only allocation storage within this source epoch. Every attempt
+        // still fetches its complete live executable window before cache lookup.
+        let mut window_storage = Vec::new();
+        loop {
+            let mut external = None;
+            if let Some(consumer) = consumer.as_deref_mut() {
+                let blocked = state.scheduling.active_blocked();
+                if blocked
+                    || state
+                        .frame_pump_blocks
+                        .is_none_or(|old| engine.usage().blocks.saturating_sub(old) >= 1024)
+                {
+                    let pumped = consumer.pump(session);
+                    progress.window = consumer.observations();
+                    match pumped.map_err(NativeSessionError::Frame)? {
+                        frame_bridge::Pump::RetryEventDelivery => {
+                            let wake = consumer
+                                .external_wake()
+                                .map_err(NativeSessionError::Frame)?
+                                .ok_or(NativeSessionError::Frame(frame_bridge::Error::Protocol))?;
+                            state.scheduling.wait_consumer_retry(wake)?;
+                            state.frame_pump_blocks = None;
+                            continue;
+                        }
+                        frame_bridge::Pump::NeedsEventDelivery => {
+                            return Err(NativeSessionError::Frame(
+                                frame_bridge::Error::NeedsEventDelivery,
+                            ));
+                        }
+                        frame_bridge::Pump::Idle | frame_bridge::Pump::Progress => {}
+                    }
+                    state.frame_pump_blocks = Some(engine.usage().blocks);
+                }
+                if blocked {
+                    external = consumer
+                        .external_wake()
+                        .map_err(NativeSessionError::Frame)?;
+                }
+            }
+            let runnable = state.scheduling.rotate(
+                session,
+                proof,
+                &mut engine,
+                &mut state.frames,
+                &mut progress.phase,
+                external,
+                limits.interactive,
             )?;
-            StartupProfile::checkpoint(&mut stamp, &mut progress.profile.plan_ns);
-            block
-        };
-        // Exact supplied-library API entries are an explicit opt-in. A normal
-        // pre-effect fallback still runs the original native block below.
-        let builtin = if let Some(manifest) = libc_builtins
-            .as_ref()
-            .filter(|manifest| manifest.contains_pc(engine.state().guest_pc))
-        {
-            let next_stops = state
-                .service_stops
-                .checked_add(1)
-                .ok_or(NativeSessionError::Budget("service observations"))?;
-            let service_start = limits.report_progress.then(Instant::now);
-            let result = session.try_libc_builtin(manifest, proof, &mut engine, block);
-            progress.profile.service_finished(service_start);
             progress.dispatch = engine.usage();
-            if !matches!(&result, Ok(None)) {
-                state.service_stops = next_stops;
-                progress.service_stops = next_stops;
+            if !runnable {
+                continue;
             }
-            let stop = result?;
-            if stop.is_some() && limits.report_progress {
-                // Standard libc is not a kernel catalogue label. This updates
-                // only the existing other-provider aggregate, without a scan.
-                progress.profile.services.record(
-                    None,
-                    false,
+            // Profiles retain at most 48 progress records. Publication is outside
+            // native entry and follows completed service observations.
+            if limits.report_progress
+                && progress
+                    .dispatch
+                    .blocks
+                    .saturating_sub(state.reported_blocks)
+                    >= limits.progress_interval_blocks.max(1)
+            {
+                crate::protocol(&format!(
+                    "PROGRESS\tmode=entry-probe\t{}",
+                    progress.progress_fields()
+                ))
+                .map_err(|_| NativeSessionError::OutputUnavailable)?;
+                state.reported_blocks = progress.dispatch.blocks;
+            }
+            let sampled = StartupProfile::sampled(limits.report_progress, progress.dispatch.blocks);
+            if sampled {
+                charge(
+                    &mut state.admission_work,
+                    32,
+                    limits.max_admission_work,
+                    "admission work",
+                )?;
+                progress.admission_work = state.admission_work;
+                progress.profile.samples = progress.profile.samples.saturating_add(1);
+            }
+            let mut stamp = sampled.then(Instant::now);
+            let block = {
+                let paused = session.pause()?;
+                if paused.owner_id() != proof.owner_id() {
+                    return Err(NativeSessionError::WrongPreparedSource);
+                }
+                charge(
+                    &mut state.admission_work,
+                    metadata_visits,
+                    limits.max_admission_work,
+                    "admission work",
+                )?;
+                progress.admission_work = state.admission_work;
+                let (module, length) = plans.initialized_window(
+                    engine.state().guest_pc,
+                    limits
+                        .block
+                        .max_source_bytes
+                        .min(limits.max_window_allocation_bytes),
+                )?;
+                charge(
+                    &mut state.fetched_source_bytes,
+                    length,
+                    limits.max_total_window_bytes,
+                    "source windows",
+                )?;
+                progress.fetched_source_bytes = state.fetched_source_bytes;
+                let copy_work = length
+                    .checked_mul(2)
+                    .ok_or(NativeSessionError::Budget("admission work"))?;
+                charge(
+                    &mut state.admission_work,
+                    copy_work,
+                    limits.max_admission_work,
+                    "admission work",
+                )?;
+                progress.admission_work = state.admission_work;
+                let window = fetch_window_into(
+                    &paused,
+                    engine.state().guest_pc,
+                    length,
+                    limits.max_window_allocation_bytes,
+                    &mut window_storage,
+                )?;
+                StartupProfile::checkpoint(&mut stamp, &mut progress.profile.window_ns);
+                let prepared = plans.prepare(
+                    module,
+                    engine.state().guest_pc,
+                    window,
+                    engine.placement_for(engine.state().guest_pc),
+                    engine.usage().blocks,
                     &mut state.admission_work,
                     limits.max_admission_work,
-                )?;
-            }
-            stop
-        } else {
-            None
-        };
-        let stop = if let Some(stop) = builtin {
-            stop
-        } else {
-            let trace = block.affine_loop_trace();
-            let maximum_span = if trace.is_some() {
-                affine_trace::Boundaries {
-                    blocks: engine.usage().blocks,
-                    turn_remaining: state.scheduling.trace_turn_remaining(
-                        engine.usage().blocks,
-                        session.active_thread_priority_class(),
-                    ),
-                    report_progress: limits.report_progress,
-                    progress_interval: limits.progress_interval_blocks,
-                    reported_blocks: state.reported_blocks,
-                    has_consumer: consumer.is_some(),
-                    frame_pump_blocks: state.frame_pump_blocks,
+                );
+                progress.admission_work = state.admission_work;
+                let (block, hit, observations) = prepared?;
+                if !hit {
+                    progress
+                        .plan_cache_observations
+                        .observe(observations, &mut previous_plan_observations);
                 }
-                .maximum_span()
-            } else {
-                1
+                charge(
+                    if hit {
+                        &mut progress.plan_cache_hits
+                    } else {
+                        &mut progress.plan_cache_misses
+                    },
+                    1,
+                    u64::MAX,
+                    "plan cache observations",
+                )?;
+                StartupProfile::checkpoint(&mut stamp, &mut progress.profile.plan_ns);
+                block
             };
-            let plan = session.plan();
-            let mut paused = session.pause()?;
-            let previous_native = engine.usage().native_instructions;
-            let previous_entries = engine.usage().native_entries;
-            let previous_blocks = engine.usage().blocks;
-            // Optional telemetry owns an independent bounded work allowance.
-            // It preadmits every record/ring visit before guest dispatch and
-            // never changes guest limits or makes an observer refusal fatal.
-            let observation = if sampled {
-                progress.profile.prepare_block_sample(
-                    source.source_plan().identity(),
-                    block,
-                    limits.block.max_instructions,
-                    state.scheduling.is_main(),
-                )
+            // Exact supplied-library API entries are an explicit opt-in. A normal
+            // pre-effect fallback still runs the original native block below.
+            let builtin = if let Some(manifest) = libc_builtins
+                .as_ref()
+                .filter(|manifest| manifest.contains_pc(engine.state().guest_pc))
+            {
+                let next_stops = state
+                    .service_stops
+                    .checked_add(1)
+                    .ok_or(NativeSessionError::Budget("service observations"))?;
+                let service_start = limits.report_progress.then(Instant::now);
+                let result = session.try_libc_builtin(manifest, proof, &mut engine, block);
+                progress.profile.service_finished(service_start);
+                progress.dispatch = engine.usage();
+                if !matches!(&result, Ok(None)) {
+                    state.service_stops = next_stops;
+                    progress.service_stops = next_stops;
+                }
+                let stop = result?;
+                if stop.is_some() && limits.report_progress {
+                    // Standard libc is not a kernel catalogue label. This updates
+                    // only the existing other-provider aggregate, without a scan.
+                    progress.profile.services.record(
+                        None,
+                        false,
+                        &mut state.admission_work,
+                        limits.max_admission_work,
+                    )?;
+                }
+                stop
             } else {
                 None
             };
-            // SAFETY: The opaque core proof, exact owner and active published
-            // source epoch were
-            // checked above. This exclusive pause owns the actual backing and
-            // ends before service work; the process-wide bridge guard excludes
-            // concurrent entry. The checked engine derives ordinary accesses
-            // from current state and validates their live bounds/permissions.
-            // A source-bound forward trace additionally admits both iterations
-            // and excludes writes aliasing consumed source. Its caller span
-            // leaves scheduling, frame, progress and sample positions intact.
-            let result = unsafe {
-                if maximum_span == 2 {
-                    if let Some(trace) = trace {
-                        match engine.try_step_affine_loop_checked(&mut paused, &trace, maximum_span)
-                        {
-                            Ok(Some(stop)) => Ok(stop),
-                            Ok(None) => engine.step_checked(&mut paused, block),
-                            Err(error) => Err(error),
+            let stop = if let Some(stop) = builtin {
+                stop
+            } else {
+                let trace = block.affine_loop_trace();
+                let maximum_span = if trace.is_some() {
+                    affine_trace::Boundaries {
+                        blocks: engine.usage().blocks,
+                        turn_remaining: state.scheduling.trace_turn_remaining(
+                            engine.usage().blocks,
+                            session.active_thread_priority_class(),
+                        ),
+                        report_progress: limits.report_progress,
+                        progress_interval: limits.progress_interval_blocks,
+                        reported_blocks: state.reported_blocks,
+                        has_consumer: consumer.is_some(),
+                        frame_pump_blocks: state.frame_pump_blocks,
+                    }
+                    .maximum_span()
+                } else {
+                    1
+                };
+                let plan = session.plan();
+                let mut paused = session.pause()?;
+                let previous_native = engine.usage().native_instructions;
+                let previous_entries = engine.usage().native_entries;
+                let previous_blocks = engine.usage().blocks;
+                // Optional telemetry owns an independent bounded work allowance.
+                // It preadmits every record/ring visit before guest dispatch and
+                // never changes guest limits or makes an observer refusal fatal.
+                let observation = if sampled {
+                    progress.profile.prepare_block_sample(
+                        source.source_plan().identity(),
+                        block,
+                        limits.block.max_instructions,
+                        state.scheduling.is_main(),
+                    )
+                } else {
+                    None
+                };
+                // SAFETY: The opaque core proof, exact owner and active published
+                // source epoch were
+                // checked above. This exclusive pause owns the actual backing and
+                // ends before service work; the process-wide bridge guard excludes
+                // concurrent entry. The checked engine derives ordinary accesses
+                // from current state and validates their live bounds/permissions.
+                // A source-bound forward trace additionally admits both iterations
+                // and excludes writes aliasing consumed source. Its caller span
+                // leaves scheduling, frame, progress and sample positions intact.
+                let result = unsafe {
+                    if maximum_span == 2 {
+                        if let Some(trace) = trace {
+                            match engine.try_step_affine_loop_checked(
+                                &mut paused,
+                                &trace,
+                                maximum_span,
+                            ) {
+                                Ok(Some(stop)) => Ok(stop),
+                                Ok(None) => engine.step_checked(&mut paused, block),
+                                Err(error) => Err(error),
+                            }
+                        } else {
+                            engine.step_checked(&mut paused, block)
                         }
                     } else {
                         engine.step_checked(&mut paused, block)
                     }
-                } else {
-                    engine.step_checked(&mut paused, block)
-                }
-            };
-            StartupProfile::checkpoint(&mut stamp, &mut progress.profile.dispatch_ns);
-            progress.dispatch = engine.usage();
-            if result.is_ok() {
-                if let Some(observation) = observation {
-                    progress.profile.complete_block_sample(observation);
-                }
-                let count = if progress.dispatch.native_instructions > previous_native {
-                    &mut progress.profile.native_body_blocks
-                } else {
-                    &mut progress.profile.exit_only_blocks
                 };
-                let completed = progress
-                    .dispatch
-                    .blocks
-                    .checked_sub(previous_blocks)
-                    .ok_or(NativeSessionError::Budget("logical block observations"))?;
-                *count = count.saturating_add(completed);
-            } else {
-                // This is the planned exit mnemonic, not a faulting body PC.
-                progress.dispatch_exit = block.exit().instruction().map(|i| i.mnemonic());
-                if let Err(error) = &result {
-                    progress.dispatch_context.capture(
-                        error,
-                        block,
-                        &paused,
-                        plan,
-                        source,
-                        progress.dispatch.native_instructions > previous_native
-                            || progress.dispatch.native_entries > previous_entries,
-                    );
-                }
-            }
-            if block.module().index() == 0 {
-                let completed = progress
-                    .dispatch
-                    .native_instructions
-                    .checked_sub(previous_native)
-                    .ok_or(NativeSessionError::Budget("native observations"))?;
-                progress.primary_native_instructions = progress
-                    .primary_native_instructions
-                    .checked_add(completed)
-                    .ok_or(NativeSessionError::Budget("primary native observations"))?;
-            }
-            result?
-        };
-        match stop {
-            NativeBlockStop::Resume { .. } => {}
-            NativeBlockStop::Returned { value } => {
-                if let Some((start, nested, phase)) = state.frames.last().copied() {
-                    let returned =
-                        engine
-                            .observed_return()
-                            .ok_or(NativeSessionError::FixtureInvariant(
-                                "missing initializer return",
-                            ))?;
-                    let action = match start {
-                        SuspendedInitializer::Module(start) => NativeServiceAction::Returned(
-                            session.complete_dynamic_module(proof, start, &returned)?,
-                        ),
-                        SuspendedInitializer::Once(start) => NativeServiceAction::Returned(
-                            session.complete_pthread_once_call(proof, start, &returned)?,
-                        ),
-                        SuspendedInitializer::NetCtl(start) => {
-                            session.complete_netctl_callback_call(proof, start, &returned)?
-                        }
-                        SuspendedInitializer::FontParser(start) => session
-                            .complete_font_parser_call(proof, start, &returned, nested, &engine)?,
-                        SuspendedInitializer::ImeCallback(start) => session
-                            .complete_ime_callback_call(proof, start, &returned, nested, &engine)?,
+                StartupProfile::checkpoint(&mut stamp, &mut progress.profile.dispatch_ns);
+                progress.dispatch = engine.usage();
+                if result.is_ok() {
+                    if let Some(observation) = observation {
+                        progress.profile.complete_block_sample(observation);
+                    }
+                    let count = if progress.dispatch.native_instructions > previous_native {
+                        &mut progress.profile.native_body_blocks
+                    } else {
+                        &mut progress.profile.exit_only_blocks
                     };
-                    match action {
-                        NativeServiceAction::Returned(value) => {
-                            let completed =
-                                engine.complete_syscall_call(&mut session.pause()?, nested, value);
-                            progress.dispatch = engine.usage();
-                            completed?;
-                            state.frames.pop();
-                            if !matches!(
-                                start,
-                                SuspendedInitializer::NetCtl(_)
-                                    | SuspendedInitializer::FontParser(_)
-                                    | SuspendedInitializer::ImeCallback(_)
-                            ) {
-                                progress.initializer_calls =
-                                    progress.initializer_calls.checked_add(1).ok_or(
-                                        NativeSessionError::Budget("initializer observations"),
-                                    )?;
+                    let completed = progress
+                        .dispatch
+                        .blocks
+                        .checked_sub(previous_blocks)
+                        .ok_or(NativeSessionError::Budget("logical block observations"))?;
+                    *count = count.saturating_add(completed);
+                } else {
+                    // This is the planned exit mnemonic, not a faulting body PC.
+                    progress.dispatch_exit = block.exit().instruction().map(|i| i.mnemonic());
+                    if let Err(error) = &result {
+                        progress.dispatch_context.capture(
+                            error,
+                            block,
+                            &paused,
+                            plan,
+                            source,
+                            progress.dispatch.native_instructions > previous_native
+                                || progress.dispatch.native_entries > previous_entries,
+                        );
+                    }
+                }
+                if block.module().index() == 0 {
+                    let completed = progress
+                        .dispatch
+                        .native_instructions
+                        .checked_sub(previous_native)
+                        .ok_or(NativeSessionError::Budget("native observations"))?;
+                    progress.primary_native_instructions = progress
+                        .primary_native_instructions
+                        .checked_add(completed)
+                        .ok_or(NativeSessionError::Budget("primary native observations"))?;
+                }
+                result?
+            };
+            match stop {
+                NativeBlockStop::Resume { .. } => {}
+                NativeBlockStop::Returned { value } => {
+                    if let Some((start, nested, phase)) = state.frames.last().copied() {
+                        let returned = engine.observed_return().ok_or(
+                            NativeSessionError::FixtureInvariant("missing initializer return"),
+                        )?;
+                        let action = match start {
+                            SuspendedInitializer::Module(start) => NativeServiceAction::Returned(
+                                session.complete_dynamic_module(proof, start, &returned)?,
+                            ),
+                            SuspendedInitializer::Once(start) => NativeServiceAction::Returned(
+                                session.complete_pthread_once_call(proof, start, &returned)?,
+                            ),
+                            SuspendedInitializer::NetCtl(start) => {
+                                session.complete_netctl_callback_call(proof, start, &returned)?
                             }
-                            progress.phase = phase;
+                            SuspendedInitializer::FontParser(start) => session
+                                .complete_font_parser_call(
+                                    proof, start, &returned, nested, &engine,
+                                )?,
+                            SuspendedInitializer::ImeCallback(start) => session
+                                .complete_ime_callback_call(
+                                    proof, start, &returned, nested, &engine,
+                                )?,
+                        };
+                        match action {
+                            NativeServiceAction::Returned(value) => {
+                                let completed = engine.complete_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    value,
+                                );
+                                progress.dispatch = engine.usage();
+                                completed?;
+                                state.frames.pop();
+                                if !matches!(
+                                    start,
+                                    SuspendedInitializer::NetCtl(_)
+                                        | SuspendedInitializer::FontParser(_)
+                                        | SuspendedInitializer::ImeCallback(_)
+                                ) {
+                                    progress.initializer_calls =
+                                        progress.initializer_calls.checked_add(1).ok_or(
+                                            NativeSessionError::Budget("initializer observations"),
+                                        )?;
+                                }
+                                progress.phase = phase;
+                            }
+                            NativeServiceAction::NetCtl(next) => {
+                                let call = engine.continue_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    next.entry(),
+                                    next.args(),
+                                );
+                                progress.dispatch = engine.usage();
+                                let call = call?;
+                                session.observe_netctl_callback_call(proof, next, &call)?;
+                                let frame = state.frames.last_mut().ok_or(
+                                    NativeSessionError::FixtureInvariant(
+                                        "missing NetCtl callback frame",
+                                    ),
+                                )?;
+                                *frame = (SuspendedInitializer::NetCtl(next), call, phase);
+                            }
+                            NativeServiceAction::FontParser(next) => {
+                                let call = engine.continue_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    next.entry(),
+                                    next.args(),
+                                );
+                                progress.dispatch = engine.usage();
+                                let call = call?;
+                                session.observe_font_parser_call(proof, next, &call)?;
+                                let frame = state.frames.last_mut().ok_or(
+                                    NativeSessionError::FixtureInvariant(
+                                        "missing font parser frame",
+                                    ),
+                                )?;
+                                *frame = (SuspendedInitializer::FontParser(next), call, phase);
+                            }
+                            NativeServiceAction::ImeCallback(next) => {
+                                let call = engine.continue_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    next.entry(),
+                                    next.args(),
+                                );
+                                progress.dispatch = engine.usage();
+                                let call = call?;
+                                session.observe_ime_callback_call(proof, next, &call)?;
+                                let frame = state.frames.last_mut().ok_or(
+                                    NativeSessionError::FixtureInvariant(
+                                        "missing IME callback frame",
+                                    ),
+                                )?;
+                                *frame = (SuspendedInitializer::ImeCallback(next), call, phase);
+                            }
+                            _ => {
+                                return Err(NativeSessionError::FixtureInvariant(
+                                    "unexpected nested callback continuation",
+                                ));
+                            }
                         }
-                        NativeServiceAction::NetCtl(next) => {
-                            let call = engine.continue_syscall_call(
+                        continue;
+                    }
+                    if state.pending_main && state.scheduling.is_main() {
+                        state.pending_main = false;
+                        let returned = engine.observed_return().ok_or(
+                            NativeSessionError::FixtureInvariant("missing actual call return"),
+                        )?;
+                        session.observe_module_initializer(
+                            initializer.ok_or(NativeSessionError::FixtureInvariant(
+                                "missing initializer",
+                            ))?,
+                            &returned,
+                        )?;
+                        progress.initializer_calls = progress
+                            .initializer_calls
+                            .checked_add(1)
+                            .ok_or(NativeSessionError::Budget("initializer observations"))?;
+                        // Preserve observed guest control/vector/segment state and
+                        // its actual TLS contents. Establish only the main call's
+                        // defined argument, frame and return-slot registers.
+                        let mut next = *engine.state();
+                        next.guest_pc = state.main.guest_pc;
+                        for register in [4, 5, 6, 7] {
+                            next.gpr[register] = state.main.gpr[register];
+                        }
+                        let transitioned = engine.begin_call(&mut session.pause()?, next);
+                        progress.dispatch = engine.usage();
+                        transitioned?;
+                        progress.phase = NativeSessionPhase::MainEntry;
+                        continue;
+                    }
+                    if !state.scheduling.is_main() {
+                        state.scheduling.returned(session, proof, &mut engine)?;
+                        progress.dispatch = engine.usage();
+                        continue;
+                    }
+                    state.report = Some(NativeSessionReport {
+                        return_value: value,
+                        primary_native_instructions: progress.primary_native_instructions,
+                        state: *engine.state(),
+                        dispatch: engine.usage(),
+                        service_stops: state.service_stops,
+                        fetched_source_bytes: state.fetched_source_bytes,
+                        admission_work: state.admission_work,
+                    });
+                    return Ok(None);
+                }
+                NativeBlockStop::PreSyscall(token) => {
+                    state.service_stops = state
+                        .service_stops
+                        .checked_add(1)
+                        .ok_or(NativeSessionError::Budget("service stops"))?;
+                    progress.service_stops = state.service_stops;
+                    if limits.report_progress {
+                        charge(
+                            &mut state.admission_work,
+                            16,
+                            limits.max_admission_work,
+                            "admission work",
+                        )?;
+                        progress.admission_work = state.admission_work;
+                    }
+                    let service_start = limits.report_progress.then(Instant::now);
+                    let action = session.service_action(
+                        proof,
+                        NativeServiceRequest {
+                            owner_id: token.owner_id(),
+                            syscall_pc: token.syscall_pc(),
+                            next_pc: token.next_pc(),
+                            service_id: token.service_id(),
+                            args: token.args(),
+                            vector_args: Some(token.vector_args()),
+                            stack_pointer: Some(token.stack_pointer()),
+                        },
+                    );
+                    progress.profile.service_finished(service_start);
+                    progress.output_bytes = session.output_usage().accepted_bytes;
+                    if action.is_err() {
+                        progress.failed_kernel_service = session.last_admitted_kernel_service();
+                        if matches!(
+                            &action,
+                            Err(KernelStartupError::Kernel(pentax_kernel::Failure::Guest(_)))
+                        ) {
+                            progress.stop_diagnostics.observe_failure(
+                                progress.failed_kernel_service,
+                                token.args(),
+                                session.kernel_usage(),
+                                session.memory().statistics(),
+                            );
+                        }
+                    }
+                    let action = action?;
+                    progress.stop_diagnostics.observe_service(
+                        session.last_admitted_kernel_service(),
+                        token.args(),
+                        &action,
+                        session.memory_map_refusal(),
+                    );
+                    if limits.report_progress {
+                        let observed = progress.profile.services.record(
+                            session.last_admitted_kernel_service(),
+                            matches!(&action, NativeServiceAction::Returned(value) if *value != 0),
+                            &mut state.admission_work,
+                            limits.max_admission_work,
+                        );
+                        progress.admission_work = state.admission_work;
+                        observed?;
+                    }
+                    // A typed service error returns above and drops this engine.
+                    // Never invent a return-domain mapping or resume with zero.
+                    match action {
+                        NativeServiceAction::WaitThread(pending) => {
+                            state.scheduling.wait(session, pending, token)?;
+                        }
+                        NativeServiceAction::CreateThread(pending) => {
+                            state
+                                .scheduling
+                                .create(session, proof, &mut engine, pending, token)
+                                .inspect_err(|_| {
+                                    progress.failed_kernel_service =
+                                        session.last_admitted_kernel_service();
+                                })?;
+                        }
+                        NativeServiceAction::Returned(value) => {
+                            engine.complete_syscall(token, value)?
+                        }
+                        NativeServiceAction::Load(pending) => {
+                            return Ok(Some((pending, token)));
+                        }
+                        NativeServiceAction::Once(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("initializer frames"));
+                            }
+                            let call = engine.begin_syscall_call(
                                 &mut session.pause()?,
-                                nested,
-                                next.entry(),
-                                next.args(),
+                                token,
+                                start.entry(),
+                                [0; 3],
                             );
                             progress.dispatch = engine.usage();
                             let call = call?;
-                            session.observe_netctl_callback_call(proof, next, &call)?;
-                            let frame = state.frames.last_mut().ok_or(
-                                NativeSessionError::FixtureInvariant(
-                                    "missing NetCtl callback frame",
-                                ),
-                            )?;
-                            *frame = (SuspendedInitializer::NetCtl(next), call, phase);
+                            session.observe_pthread_once_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::Once(start),
+                                call,
+                                progress.phase,
+                            ));
+                            progress.phase = NativeSessionPhase::Initializer;
                         }
-                        NativeServiceAction::FontParser(next) => {
-                            let call = engine.continue_syscall_call(
+                        NativeServiceAction::NetCtl(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("callback frames"));
+                            }
+                            let call = engine.begin_syscall_call(
                                 &mut session.pause()?,
-                                nested,
-                                next.entry(),
-                                next.args(),
+                                token,
+                                start.entry(),
+                                start.args(),
                             );
                             progress.dispatch = engine.usage();
                             let call = call?;
-                            session.observe_font_parser_call(proof, next, &call)?;
-                            let frame = state.frames.last_mut().ok_or(
-                                NativeSessionError::FixtureInvariant("missing font parser frame"),
-                            )?;
-                            *frame = (SuspendedInitializer::FontParser(next), call, phase);
+                            session.observe_netctl_callback_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::NetCtl(start),
+                                call,
+                                progress.phase,
+                            ));
                         }
-                        NativeServiceAction::ImeCallback(next) => {
-                            let call = engine.continue_syscall_call(
+                        NativeServiceAction::FontParser(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("callback frames"));
+                            }
+                            let call = engine.begin_syscall_call(
                                 &mut session.pause()?,
-                                nested,
-                                next.entry(),
-                                next.args(),
+                                token,
+                                start.entry(),
+                                start.args(),
                             );
                             progress.dispatch = engine.usage();
                             let call = call?;
-                            session.observe_ime_callback_call(proof, next, &call)?;
-                            let frame = state.frames.last_mut().ok_or(
-                                NativeSessionError::FixtureInvariant("missing IME callback frame"),
-                            )?;
-                            *frame = (SuspendedInitializer::ImeCallback(next), call, phase);
+                            session.observe_font_parser_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::FontParser(start),
+                                call,
+                                progress.phase,
+                            ));
                         }
-                        _ => {
-                            return Err(NativeSessionError::FixtureInvariant(
-                                "unexpected nested callback continuation",
+                        NativeServiceAction::ImeCallback(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("callback frames"));
+                            }
+                            let call = engine.begin_syscall_call(
+                                &mut session.pause()?,
+                                token,
+                                start.entry(),
+                                start.args(),
+                            );
+                            progress.dispatch = engine.usage();
+                            let call = call?;
+                            session.observe_ime_callback_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::ImeCallback(start),
+                                call,
+                                progress.phase,
                             ));
                         }
                     }
-                    continue;
                 }
-                if state.pending_main && state.scheduling.is_main() {
-                    state.pending_main = false;
-                    let returned =
-                        engine
-                            .observed_return()
-                            .ok_or(NativeSessionError::FixtureInvariant(
-                                "missing actual call return",
-                            ))?;
-                    session.observe_module_initializer(
-                        initializer
-                            .ok_or(NativeSessionError::FixtureInvariant("missing initializer"))?,
-                        &returned,
-                    )?;
-                    progress.initializer_calls = progress
-                        .initializer_calls
-                        .checked_add(1)
-                        .ok_or(NativeSessionError::Budget("initializer observations"))?;
-                    // Preserve observed guest control/vector/segment state and
-                    // its actual TLS contents. Establish only the main call's
-                    // defined argument, frame and return-slot registers.
-                    let mut next = *engine.state();
-                    next.guest_pc = state.main.guest_pc;
-                    for register in [4, 5, 6, 7] {
-                        next.gpr[register] = state.main.gpr[register];
-                    }
-                    let transitioned = engine.begin_call(&mut session.pause()?, next);
-                    progress.dispatch = engine.usage();
-                    transitioned?;
-                    progress.phase = NativeSessionPhase::MainEntry;
-                    continue;
-                }
-                if !state.scheduling.is_main() {
-                    state.scheduling.returned(session, proof, &mut engine)?;
-                    progress.dispatch = engine.usage();
-                    continue;
-                }
-                state.report = Some(NativeSessionReport {
-                    return_value: value,
-                    primary_native_instructions: progress.primary_native_instructions,
-                    state: *engine.state(),
-                    dispatch: engine.usage(),
-                    service_stops: state.service_stops,
-                    fetched_source_bytes: state.fetched_source_bytes,
-                    admission_work: state.admission_work,
-                });
-                return Ok(None);
-            }
-            NativeBlockStop::PreSyscall(token) => {
-                state.service_stops = state
-                    .service_stops
-                    .checked_add(1)
-                    .ok_or(NativeSessionError::Budget("service stops"))?;
-                progress.service_stops = state.service_stops;
-                if limits.report_progress {
-                    charge(
-                        &mut state.admission_work,
-                        16,
-                        limits.max_admission_work,
-                        "admission work",
-                    )?;
-                    progress.admission_work = state.admission_work;
-                }
-                let service_start = limits.report_progress.then(Instant::now);
-                let action = session.service_action(
-                    proof,
-                    NativeServiceRequest {
-                        owner_id: token.owner_id(),
-                        syscall_pc: token.syscall_pc(),
-                        next_pc: token.next_pc(),
-                        service_id: token.service_id(),
-                        args: token.args(),
-                        vector_args: Some(token.vector_args()),
-                        stack_pointer: Some(token.stack_pointer()),
-                    },
-                );
-                progress.profile.service_finished(service_start);
-                progress.output_bytes = session.output_usage().accepted_bytes;
-                if action.is_err() {
-                    progress.failed_kernel_service = session.last_admitted_kernel_service();
-                    if matches!(
-                        &action,
-                        Err(KernelStartupError::Kernel(pentax_kernel::Failure::Guest(_)))
-                    ) {
-                        progress.stop_diagnostics.observe_failure(
-                            progress.failed_kernel_service,
-                            token.args(),
-                            session.kernel_usage(),
-                            session.memory().statistics(),
+                NativeBlockStop::Unsupported { guest_pc } => {
+                    if let Some(instruction) = block.exit().instruction() {
+                        progress.stop_diagnostics.capture(
+                            instruction,
+                            match block.exit().kind() {
+                                pentax_codegen::ExitKind::Mediated { reason } => Some(reason),
+                                _ => None,
+                            },
+                            block.module().index() == 0,
+                            session,
                         );
-                    }
-                }
-                let action = action?;
-                progress.stop_diagnostics.observe_service(
-                    session.last_admitted_kernel_service(),
-                    token.args(),
-                    &action,
-                    session.memory_map_refusal(),
-                );
-                if limits.report_progress {
-                    let observed = progress.profile.services.record(
-                        session.last_admitted_kernel_service(),
-                        matches!(&action, NativeServiceAction::Returned(value) if *value != 0),
-                        &mut state.admission_work,
-                        limits.max_admission_work,
-                    );
-                    progress.admission_work = state.admission_work;
-                    observed?;
-                }
-                // A typed service error returns above and drops this engine.
-                // Never invent a return-domain mapping or resume with zero.
-                match action {
-                    NativeServiceAction::WaitThread(pending) => {
-                        state.scheduling.wait(session, pending, token)?;
-                    }
-                    NativeServiceAction::CreateThread(pending) => {
-                        state
-                            .scheduling
-                            .create(session, proof, &mut engine, pending, token)
-                            .inspect_err(|_| {
-                                progress.failed_kernel_service =
-                                    session.last_admitted_kernel_service();
-                            })?;
-                    }
-                    NativeServiceAction::Returned(value) => {
-                        engine.complete_syscall(token, value)?
-                    }
-                    NativeServiceAction::Load(pending) => {
-                        *machine = Some(engine.into_machine());
-                        return Ok(Some((pending, token)));
-                    }
-                    NativeServiceAction::Once(start) => {
-                        if state.frames.len() >= 32 {
-                            return Err(NativeSessionError::Budget("initializer frames"));
+                        // The retained window was captured before this step. Its
+                        // unconsumed suffix may be stale: decode only static public
+                        // form candidates, never an execution/unsupported trace.
+                        // Invalid bounds omit this optional diagnostic and preserve
+                        // the original stop. No additional guest bytes are read.
+                        if let Some(snapshot) = block
+                            .exit()
+                            .guest_pc()
+                            .checked_sub(block.guest_pc())
+                            .and_then(|offset| usize::try_from(offset).ok())
+                            .and_then(|offset| block.relocated_source_bytes().get(offset..))
+                        {
+                            progress
+                                .stop_diagnostics
+                                .capture_snapshot_candidates(snapshot);
                         }
-                        let call = engine.begin_syscall_call(
-                            &mut session.pause()?,
-                            token,
-                            start.entry(),
-                            [0; 3],
-                        );
-                        progress.dispatch = engine.usage();
-                        let call = call?;
-                        session.observe_pthread_once_call(proof, start, &call)?;
-                        state.frames.push((
-                            SuspendedInitializer::Once(start),
-                            call,
-                            progress.phase,
-                        ));
-                        progress.phase = NativeSessionPhase::Initializer;
                     }
-                    NativeServiceAction::NetCtl(start) => {
-                        if state.frames.len() >= 32 {
-                            return Err(NativeSessionError::Budget("callback frames"));
-                        }
-                        let call = engine.begin_syscall_call(
-                            &mut session.pause()?,
-                            token,
-                            start.entry(),
-                            start.args(),
-                        );
-                        progress.dispatch = engine.usage();
-                        let call = call?;
-                        session.observe_netctl_callback_call(proof, start, &call)?;
-                        state.frames.push((
-                            SuspendedInitializer::NetCtl(start),
-                            call,
-                            progress.phase,
-                        ));
-                    }
-                    NativeServiceAction::FontParser(start) => {
-                        if state.frames.len() >= 32 {
-                            return Err(NativeSessionError::Budget("callback frames"));
-                        }
-                        let call = engine.begin_syscall_call(
-                            &mut session.pause()?,
-                            token,
-                            start.entry(),
-                            start.args(),
-                        );
-                        progress.dispatch = engine.usage();
-                        let call = call?;
-                        session.observe_font_parser_call(proof, start, &call)?;
-                        state.frames.push((
-                            SuspendedInitializer::FontParser(start),
-                            call,
-                            progress.phase,
-                        ));
-                    }
-                    NativeServiceAction::ImeCallback(start) => {
-                        if state.frames.len() >= 32 {
-                            return Err(NativeSessionError::Budget("callback frames"));
-                        }
-                        let call = engine.begin_syscall_call(
-                            &mut session.pause()?,
-                            token,
-                            start.entry(),
-                            start.args(),
-                        );
-                        progress.dispatch = engine.usage();
-                        let call = call?;
-                        session.observe_ime_callback_call(proof, start, &call)?;
-                        state.frames.push((
-                            SuspendedInitializer::ImeCallback(start),
-                            call,
-                            progress.phase,
-                        ));
-                    }
+                    return Err(NativeSessionError::UnsupportedExit {
+                        guest_pc,
+                        mnemonic: block
+                            .exit()
+                            .instruction()
+                            .map(|instruction| instruction.mnemonic()),
+                    });
                 }
-            }
-            NativeBlockStop::Unsupported { guest_pc } => {
-                if let Some(instruction) = block.exit().instruction() {
-                    progress.stop_diagnostics.capture(
-                        instruction,
-                        match block.exit().kind() {
-                            pentax_codegen::ExitKind::Mediated { reason } => Some(reason),
-                            _ => None,
-                        },
-                        block.module().index() == 0,
-                        session,
-                    );
-                    // The retained window was captured before this step. Its
-                    // unconsumed suffix may be stale: decode only static public
-                    // form candidates, never an execution/unsupported trace.
-                    // Invalid bounds omit this optional diagnostic and preserve
-                    // the original stop. No additional guest bytes are read.
-                    if let Some(snapshot) = block
-                        .exit()
-                        .guest_pc()
-                        .checked_sub(block.guest_pc())
-                        .and_then(|offset| usize::try_from(offset).ok())
-                        .and_then(|offset| block.relocated_source_bytes().get(offset..))
-                    {
-                        progress
-                            .stop_diagnostics
-                            .capture_snapshot_candidates(snapshot);
-                    }
-                }
-                return Err(NativeSessionError::UnsupportedExit {
-                    guest_pc,
-                    mnemonic: block
-                        .exit()
-                        .instruction()
-                        .map(|instruction| instruction.mnemonic()),
-                });
             }
         }
+    })();
+    if matches!(&outcome, Ok(Some(_))) {
+        *machine = Some(engine.into_machine());
+    } else if limits.private_thread_states {
+        progress.private_thread_states.capture(
+            source.source_plan(),
+            state.scheduling.private_thread_states(&engine),
+        );
     }
+    outcome
 }
 
 fn charge(

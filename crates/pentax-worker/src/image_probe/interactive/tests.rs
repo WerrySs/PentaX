@@ -112,7 +112,11 @@ fn interactive_lifetime_profile_preserves_live_and_individual_operation_policies
         oversized.graphics.max_shader_call_work,
         image.graphics.max_shader_call_work
     );
-    let original = NativeSessionLimits::default();
+    let original = NativeSessionLimits {
+        private_samples: true,
+        private_thread_states: true,
+        ..Default::default()
+    };
     let mut execution = original;
     configure_execution(&mut execution);
     assert_eq!(execution.block, original.block);
@@ -146,6 +150,10 @@ fn interactive_lifetime_profile_preserves_live_and_individual_operation_policies
     );
     assert_eq!(execution.report_progress, original.report_progress);
     assert_eq!(execution.private_samples, original.private_samples);
+    assert_eq!(
+        execution.private_thread_states,
+        original.private_thread_states
+    );
     assert_eq!(execution.interactive, original.interactive);
     assert_eq!(
         execution.libc_memory_builtins,

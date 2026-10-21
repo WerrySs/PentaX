@@ -25,6 +25,9 @@ mod eop_tests;
 #[path = "actual_draw_tests/indexed.rs"]
 mod indexed;
 
+#[path = "actual_draw_tests/parameters.rs"]
+mod parameters;
+
 fn unary(op: u32, dst: u32, src: u32) -> u32 {
     0x7e00_0000 | (dst << 17) | (op << 9) | src
 }

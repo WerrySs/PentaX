@@ -6,6 +6,7 @@ use std::cell::{Cell, RefCell};
 
 mod flips;
 mod indexed;
+mod linkage;
 mod staging;
 mod tiled;
 

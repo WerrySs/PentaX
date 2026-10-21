@@ -57,7 +57,8 @@ The first profile is deliberately finite:
   An admitted zero-count packet needs no index type or payload access.
 - Unmerged ES-to-vertex stage, GS program disabled, no geometry/tessellation,
   scratch or LDS. GS resource/user registers supply the source vertex profile.
-  Source `VGT_SHADER_STAGES_EN` selects wave32/64; PS is explicitly wave32.
+  Source `VGT_SHADER_STAGES_EN` selects VS wave32/64; the explicitly known
+  `SPI_PS_IN_CONTROL` wave bit selects PS wave32/64.
 - Actual `RSRC2` user SGPR counts up to16 per stage. The compiler manifest
   selects exactly the known SGPR values used; absent values are refused.
   VS and PS push placement is respectively dwords0 and16 of128 bytes,
@@ -81,11 +82,44 @@ The first profile is deliberately finite:
 - Known scale/offset viewport and screen/window/generic/viewport0 scissors
   must equal the complete target. DX clip space, enabled scale/offset transforms,
   depth0..1, normal clipping and no culling/discard are explicitly required.
-- VS must export only position; PS must export only floating MRT0 and have
-  no interpolated/system inputs. VertexIndex/InstanceIndex interfaces are
-  allowed only when their manifest needs no unsupported DrawParameters.
+- VS exports position and supported PARAM locations0..31; PS exports floating
+  MRT0 and may consume the linked parameters and supported system inputs.
+  VertexIndex/InstanceIndex interfaces are allowed only when their manifest
+  needs no unsupported DrawParameters.
   Descriptors, textures, vertex buffers, shader-data buffers, subgroups and
   undefined registers remain typed refusals.
+
+Parameter linkage requires explicit known `SPI_VS_OUT_CONFIG`,
+`SPI_PS_IN_CONTROL`, equal `SPI_PS_INPUT_ENA/ADDR`, `SPI_BARYC_CNTL=0` and all
+declared `SPI_PS_INPUT_CNTL_0..31` words. Export count is the span
+`1+((VS_OUT_CONFIG>>1)&31)`, permitting sparse exports; other config bits are
+refused. PS count is at most32, with only the wave bit additionally accepted.
+Each ordinary input-control word is exactly location bits0..4 plus flat bit10.
+Public AGC custom words set bit5 and are refused, as are F16/default fields.
+Same-location input aliases are valid only with the same interpolation class.
+Every actual consumed PARAM must have a unique matching VS location within
+the declared export span; unused VS outputs are valid. Neither absent control
+words nor missing producers receive a default value.
+
+The supported smooth profile is center perspective (`ENA=ADDR` bit1), whose
+genuine ABI i/j values occupy v0/v1. P1's ATTR/channel and partial-result
+provenance are retained through SSA and checked against the same builtin i/j
+pair in P2. Computed coordinates, mismatched partials and live unconsumed P1
+are typed refusals; ordinary register copies preserve provenance. Flat MOV
+mode2 follows the actual mapped flat input. Centroid/sample/linear/pull/stipple,
+custom interpolation and raw barycentric operations remain unsupported by this
+compiler path. No approximate interpolation or substituted shader is used.
+
+ENA position bits8..11 and front-face bit12 follow the source's compact VGPR
+order after the optional center pair. PositionW is reciprocal FragCoord.w;
+front-face is float+1/-1. The all-bits front-face mode remains refused. Fixed
+`PA_SU_SC_MODE_CNTL=0` retains first-vertex flat interpolation. The input-profile
+Vec's actual capacity is charged alongside temporary compiler envelopes and
+released before target capture. Native Vulkan admission independently checks
+actual unique emitted locations and components, including position/FragCoord/
+FrontFacing builtins, against the physical device limits before image/buffer/
+pipeline effects. Supporting32 source locations does not imply every device
+can execute a32-parameter interface.
 
 These constraints describe a real guest draw path toward rendering. They do
 not establish that a supplied commercial title fits this profile or that a

@@ -14,9 +14,11 @@ use pentax_shader_compiler::CompiledShader;
 use std::fmt;
 
 mod commands;
+mod linkage;
 mod prepare;
 mod state;
 pub use commands::{Action, CommandLimits, CommandPlan, CommandUsage, Draw, Flip, plan_commands};
+pub use linkage::{ShaderInterfaces, validate_shader_interfaces};
 pub use prepare::prepare_draw;
 pub use prepare::prepare_draw_with_target;
 pub use state::GraphicsState;

@@ -64,3 +64,10 @@ PentaX modifications, 2026-10-18:
 
 This modified port is distributed under GPL-2.0-only. Retained MIT notices
 continue to apply to their respective original portions. See README.md for scope.
+
+PentaX interpolation admission correction2026 retains an internal P1 partial
+with ATTR/channel and genuine i-coordinate provenance, and matches P2's actual
+previous destination and j-coordinate before implicit host interpolation.
+Unknown/computed provenance is refused; no numerical P1 approximation or raw
+barycentric support is claimed. All new positive/negative shader fixtures are
+original PentaX inputs. The existing port licenses and notices remain unchanged.

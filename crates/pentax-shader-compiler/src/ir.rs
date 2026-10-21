@@ -247,7 +247,8 @@ ops! {
     StoreBufferU32x3: Void(Resource, U32, U32, U32, U32x3, U1);
     StoreBufferU32x4: Void(Resource, U32, U32, U32, U32x4, U1);
     GetAttribute: U32();
-    GetAttributeWithBary: U32(U32);
+    InterpolationP1: U32(U32);
+    GetAttributeWithBary: U32(U32, U32);
     GetInterpolationParameter: U32();
     SetAttribute: Void(U32x4, U1);
     ControlNop: Void();

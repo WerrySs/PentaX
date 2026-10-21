@@ -75,6 +75,8 @@ mod posix_self;
 mod private_console;
 #[path = "private_samples.rs"]
 mod private_samples;
+#[path = "private_thread_states.rs"]
+mod private_thread_states;
 #[path = "usleep_wait.rs"]
 mod usleep_wait;
 

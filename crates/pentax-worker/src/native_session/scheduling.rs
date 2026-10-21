@@ -104,6 +104,31 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
     pub(super) fn is_main(&self) -> bool {
         self.active == 0
     }
+
+    /// Borrow only actual retained CPU states, without scanning or polling the
+    /// guest wait set. The active CPU belongs to the live engine, never its
+    /// parked slot. No child identifier is exposed by the private artifact.
+    pub(super) fn private_thread_states<'a>(
+        &'a self,
+        engine: &'a NativeBlockStepper<'_, '_, '_>,
+    ) -> [Option<&'a NativeCpuState>; 2] {
+        // A typed TLS-activation error can occur after the native context was
+        // exchanged but before scheduler selection commits. Omit such a
+        // partial transition instead of attaching the wrong role to a CPU.
+        if engine.thread_index() != self.active {
+            return [None, None];
+        }
+        if self.is_main() {
+            [Some(engine.state()), None]
+        } else {
+            let main = self.threads[0].parked.as_ref().filter(|parked| {
+                parked.index() == 0
+                    && parked.owner_id() == engine.owner_id()
+                    && parked.executor_id() == engine.executor_id()
+            });
+            [main.map(NativeThreadContext::state), Some(engine.state())]
+        }
+    }
     pub(super) fn active_blocked(&self) -> bool {
         self.threads[self.active].waiting.is_some() || self.threads[self.active].returned
     }

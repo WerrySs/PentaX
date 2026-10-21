@@ -25,6 +25,22 @@ const NIDS: [&str; 8] = [
     "QcteRwbsnV0", // KernelUsleep: real cooperative timed park
 ];
 
+#[derive(Clone, Copy)]
+struct ParameterInput {
+    location: u8,
+    flat: bool,
+}
+
+impl ParameterInput {
+    fn pixel(self) -> u64 {
+        match self.location {
+            1 => 0xff00_ff00,
+            7 => 0xffff_0000,
+            _ => panic!("original fixture exports only parameter locations one and seven"),
+        }
+    }
+}
+
 fn call(p: &mut Program, slot: i32) {
     rip(&mut p.code, 0x800, &[0xff, 0x15], 0x1f00 + slot * 8);
     p.calls += 1;
@@ -97,6 +113,40 @@ fn shaders() -> (Vec<u32>, Vec<u32>) {
     pixel.push(0xbf81_0000);
     (vertex, pixel)
 }
+
+fn parameter_shaders(input: ParameterInput) -> (Vec<u32>, Vec<u32>) {
+    let (mut vertex, _) = shaders();
+    // Keep the original position computation, but export two distinct values
+    // at nonidentity PARAM locations before the final position export.
+    let position = vertex.split_off(vertex.len() - 3);
+    vertex.extend([
+        unary(1, 6, 128),
+        unary(1, 7, 242),
+        unary(1, 8, 128),
+        unary(1, 9, 242),
+    ]);
+    let mut parameter = export(0x21, [6, 7, 8, 9]);
+    parameter[0] &= !(1 << 11);
+    vertex.extend(parameter); // PARAM1=(0,1,0,1).
+    vertex.extend([unary(1, 7, 128), unary(1, 8, 242)]);
+    parameter = export(0x27, [6, 7, 8, 9]);
+    parameter[0] &= !(1 << 11);
+    vertex.extend(parameter); // PARAM7=(0,0,1,1).
+    vertex.extend(position);
+    let mut pixel = Vec::new();
+    for channel in 0..4 {
+        let destination = 6 + channel;
+        if input.flat {
+            pixel.push(0xc800_0000 | (destination << 18) | (2 << 16) | (channel << 8) | 2);
+        } else {
+            pixel.push(0xc800_0000 | (destination << 18) | (channel << 8));
+            pixel.push(0xc800_0000 | (destination << 18) | (1 << 16) | (channel << 8) | 1);
+        }
+    }
+    pixel.extend(export(0, [6, 7, 8, 9]));
+    pixel.push(0xbf81_0000);
+    (vertex, pixel)
+}
 fn set(words: &mut Vec<u32>, opcode: u32, register: u32, values: &[u32]) -> usize {
     assert!(!values.is_empty() && values.len() < 16384);
     words.extend([
@@ -107,18 +157,29 @@ fn set(words: &mut Vec<u32>, opcode: u32, register: u32, values: &[u32]) -> usiz
     words.extend_from_slice(values);
     first
 }
-fn commands(indexed: bool) -> (Vec<u32>, Vec<(usize, i32, u8)>) {
+struct CommandSource {
+    words: Vec<u32>,
+    patches: Vec<(usize, i32, u8)>,
+    mapping: Option<usize>,
+}
+
+fn commands(indexed: bool, parameter: Option<ParameterInput>) -> CommandSource {
     let mut words = Vec::new();
     for register in [
         0x80, 0x1b1, 0x1b3, 0x1b4, 0x1b8, 0x1c4, 0x1e0, 0x200, 0x203, 0x205, 0x207, 0x293, 0x2f8,
         0x31b, 0x31d, 0x31e, 0x31f, 0x321, 0x325, 0x398, 0x3a0, 0x3a8,
     ] {
-        set(&mut words, 0x69, register, &[0]);
+        let value = match (register, parameter) {
+            (0x1b1, Some(_)) => 7 << 1, // Explicit span includes PARAM7.
+            (0x1b3 | 0x1b4, Some(input)) if !input.flat => 2,
+            _ => 0,
+        };
+        set(&mut words, 0x69, register, &[value]);
     }
     for (register, value) in [
         (0x8e, 15),
         (0x8f, 15),
-        (0x1b6, 0x8000),
+        (0x1b6, 0x8000 | u32::from(parameter.is_some())),
         (0x1c3, 4),
         (0x1c5, 9),
         (0x202, 0x00cc_0010),
@@ -164,6 +225,7 @@ fn commands(indexed: bool) -> (Vec<u32>, Vec<(usize, i32, u8)>) {
         0x08,
         &[0, 0, 0x002c_0000, 6, 1_f32.to_bits(), 0, 0],
     );
+    let mapping = parameter.map(|_| set(&mut words, 0x69, 0x191, &[0]));
     set(&mut words, 0x79, 0x242, &[4]);
     set(&mut words, 0x79, 0x24a, &[0]);
     words.extend([0xc000_2f00, 1]);
@@ -191,11 +253,26 @@ fn commands(indexed: bool) -> (Vec<u32>, Vec<(usize, i32, u8)>) {
     if let Some(low) = index_address {
         patches.extend([(low, INDICES, 0), (low + 1, INDICES, 32)]);
     }
-    (words, patches)
+    CommandSource {
+        words,
+        patches,
+        mapping,
+    }
 }
 
 fn original_gpu_window_image(indexed: bool) -> Input {
-    let (words, patches) = commands(indexed);
+    original_gpu_window_image_with_parameters(indexed, None)
+}
+
+fn original_gpu_window_image_with_parameters(
+    indexed: bool,
+    parameter: Option<ParameterInput>,
+) -> Input {
+    let CommandSource {
+        words,
+        patches,
+        mapping,
+    } = commands(indexed, parameter);
     let mut p = Program::new();
     p.set(16, 0);
     p.ptr(7, 16);
@@ -223,6 +300,35 @@ fn original_gpu_window_image(indexed: bool) -> Input {
         address(&mut p, 0, offset);
         p.code.extend([0x48, 0xc1, 0xe8, shift]);
         store(&mut p, COMMANDS + index as i32 * 4, false);
+    }
+    if let Some(input) = parameter {
+        const MAPPING: i32 = STAGING + 0x1100;
+        for (field, offset) in [(0xd00 + 56, 0xe00), (0xd80 + 48, 0xe10)] {
+            address(&mut p, 0, STAGING + offset);
+            store(&mut p, STAGING + field, true);
+        }
+        p.reg(0, GUARD);
+        store(&mut p, MAPPING - 8, true);
+        store(&mut p, MAPPING + 256, true);
+        address(&mut p, 7, MAPPING);
+        address(&mut p, 6, STAGING + 0xd00);
+        address(&mut p, 2, STAGING + 0xd80);
+        call(&mut p, 8); // Exact Graphics5 interpolant-mapping2 import.
+        p.expect(0);
+        read(&mut p, MAPPING, false, 0x191);
+        read(
+            &mut p,
+            MAPPING + 4,
+            false,
+            u64::from(input.location) | if input.flat { 0x400 } else { 0 },
+        );
+        read(&mut p, MAPPING + 31 * 8, false, 0x1b0);
+        read(&mut p, MAPPING + 31 * 8 + 4, false, 31);
+        read(&mut p, MAPPING - 8, true, GUARD);
+        read(&mut p, MAPPING + 256, true, GUARD);
+        address(&mut p, 11, MAPPING + 4);
+        p.code.extend([0x41, 0x8b, 0x03]);
+        store(&mut p, COMMANDS + mapping.unwrap() as i32 * 4, false);
     }
     p.reg(7, 255);
     p.reg(6, 0);
@@ -264,7 +370,12 @@ fn original_gpu_window_image(indexed: bool) -> Input {
     // Independent literal tiled offsets (pitch1920,128x128/64KiB blocks):
     // (1080,338)=block38+0x6120 is well inside; (1560,338)=block42+0x6920
     // is outside. No production detiler or expected host triangle supplies data.
-    read(&mut p, 2_515_232, false, 0xff00_00ff);
+    read(
+        &mut p,
+        2_515_232,
+        false,
+        parameter.map_or(0xff00_00ff, ParameterInput::pixel),
+    );
     read(&mut p, 2_779_424, false, BASELINE as u32 as u64);
     if indexed {
         // [0,1,3] covers the upper-right half of the shader's rectangle.
@@ -325,10 +436,28 @@ fn original_gpu_window_image(indexed: bool) -> Input {
     p.reg(0, 42);
     p.code.extend([0x48, 0x81, 0xc4, 0, 1, 0, 0, 0x5d, 0xc3]);
     finish_checks(&mut p.code, p.branches);
-    assert_eq!(p.calls, 10);
+    assert_eq!(p.calls, 10 + u64::from(parameter.is_some()));
     assert!(0x800 + p.code.len() < ATTRIBUTE as usize);
 
+    let mut nids = NIDS.to_vec();
+    if parameter.is_some() {
+        nids.push("dbOlWdppb4o");
+    }
+    // Keep the common eight-import builder's layout contract, then add the
+    // independent ninth helper import in the remaining owned table space.
     let mut input = scoped_system_image(&[], &NIDS, "VideoOut", "VideoOut", 1);
+    if parameter.is_some() {
+        assert!(0x600 + (nids.len() + 1) * 24 <= 0x700);
+        assert!(0x700 + nids.len() * 24 <= 0x800);
+        input.bytes[0x600 + 9 * 24 + 4] = 0x12;
+        put(
+            &mut input.bytes,
+            0x708 + 8 * 24,
+            &((9_u64 << 32) | 7).to_le_bytes(),
+        );
+        put(&mut input.bytes, 0x238, &(10_u64 * 24).to_le_bytes());
+        put(&mut input.bytes, 0x288, &(9_u64 * 24).to_le_bytes());
+    }
     input.bytes.resize(0x4000, 0);
     put(&mut input.bytes, 96, &0x4000_u64.to_le_bytes());
     put(&mut input.bytes, 0x800, &p.code);
@@ -337,13 +466,19 @@ fn original_gpu_window_image(indexed: bool) -> Input {
     names.extend_from_slice(b"libkernel\0");
     let graphics_name = names.len() as u64;
     names.extend_from_slice(b"Graphics5Driver\0");
-    for (index, nid) in NIDS.iter().enumerate() {
+    let helpers_name = names.len() as u64;
+    if parameter.is_some() {
+        names.extend_from_slice(b"Graphics5\0");
+    }
+    for (index, nid) in nids.iter().enumerate() {
         put(
             &mut input.bytes,
             0x600 + (index + 1) * 24,
             &(names.len() as u32).to_le_bytes(),
         );
-        let suffix = if index == 2 {
+        let suffix = if index == 8 {
+            "J#I"
+        } else if index == 2 {
             "H#G"
         } else if index >= 6 {
             "F#E"
@@ -383,18 +518,62 @@ fn original_gpu_window_image(indexed: bool) -> Input {
         put(&mut input.bytes, at, &tag.to_le_bytes());
         put(&mut input.bytes, at + 8, &value.to_le_bytes());
     }
+    if parameter.is_some() {
+        for (at, tag, value) in [
+            (
+                0x2e0,
+                0x6100_000f_i64,
+                helpers_name | (1 << 32) | (1 << 40) | (8 << 48),
+            ),
+            (0x2f0, 0x6100_0015_i64, helpers_name | (1 << 32) | (9 << 48)),
+            (0x300, 0, 0),
+        ] {
+            put(&mut input.bytes, at, &tag.to_le_bytes());
+            put(&mut input.bytes, at + 8, &value.to_le_bytes());
+        }
+    }
     for at in [152, 160] {
-        put(&mut input.bytes, at, &(15_u64 * 16).to_le_bytes());
+        let entries = if parameter.is_some() { 17_u64 } else { 15 };
+        put(&mut input.bytes, at, &(entries * 16).to_le_bytes());
     }
     let mut attribute = [0; 80];
     attribute[12..16].copy_from_slice(&WIDTH.to_le_bytes());
     attribute[16..20].copy_from_slice(&HEIGHT.to_le_bytes());
     attribute[32..40].copy_from_slice(&0x8000_0000_2200_0000_u64.to_le_bytes());
     put(&mut input.bytes, ATTRIBUTE as usize, &attribute);
-    let (vertex, pixel) = shaders();
+    let (vertex, pixel) = parameter.map_or_else(shaders, parameter_shaders);
     assert!(vertex.len() * 4 <= 0x100 && pixel.len() * 4 <= 0x100);
     if indexed {
         assert!(pixel.len() * 4 <= 0x80); // Keep the U16 source at +0x180 disjoint.
+    }
+    if let Some(input_parameter) = parameter {
+        put(
+            &mut input.bytes,
+            TEMPLATE as usize + 0xd00 + 86,
+            &2_u16.to_le_bytes(),
+        );
+        put(
+            &mut input.bytes,
+            TEMPLATE as usize + 0xd80 + 80,
+            &1_u32.to_le_bytes(),
+        );
+        for (at, semantic) in [(0xe00, 0x0131_u32), (0xe04, 0x0737)] {
+            put(
+                &mut input.bytes,
+                TEMPLATE as usize + at,
+                &semantic.to_le_bytes(),
+            );
+        }
+        let semantic = match input_parameter.location {
+            1 => 0x31_u32,
+            7 => 0x37,
+            _ => unreachable!(),
+        } | if input_parameter.flat { 1 << 22 } else { 0 };
+        put(
+            &mut input.bytes,
+            TEMPLATE as usize + 0xe10,
+            &semantic.to_le_bytes(),
+        );
     }
     assert!(0x200 + words.len() * 4 <= 0x1000);
     for (offset, stream) in [
@@ -425,6 +604,10 @@ fn original_gpu_window_image(indexed: bool) -> Input {
 
 fn check_gpu_window(indexed: bool) {
     let input = original_gpu_window_image(indexed);
+    check_gpu_window_input(input, false);
+}
+
+fn check_gpu_window_input(input: Input, parameter: bool) {
     let (status, fields, text) = probe_arguments(&[
         "--image".into(),
         input.path.as_os_str().to_owned(),
@@ -445,7 +628,11 @@ fn check_gpu_window(indexed: bool) {
         PADDED_BYTES + 2 * 0x1000
     );
     let calls = fields["service_stops"].parse::<u64>().unwrap();
-    assert!((9..=407).contains(&calls) && calls % 2 == 1, "{text}");
+    let minimum = 9 + u64::from(parameter);
+    assert!(
+        (minimum..=minimum + 398).contains(&calls) && calls % 2 == minimum % 2,
+        "{text}"
+    );
 }
 
 #[test]
@@ -462,4 +649,29 @@ fn original_native_indexed_gpu_draw_flip_is_presented_at_1080p_and_acknowledged_
     println!(
         "local_gpu_indexed_presenter_composed_available=true local_gpu_indexed_presenter_composed_frames=1"
     );
+}
+
+#[test]
+#[ignore = "requires an actual Vulkan device, visible primary monitor and real presentation completion"]
+fn original_native_shader_parameters_use_generated_mapping_and_present_gpu_pixels() {
+    for (indexed, parameter) in [
+        (
+            false,
+            ParameterInput {
+                location: 7,
+                flat: false,
+            },
+        ),
+        (
+            true,
+            ParameterInput {
+                location: 1,
+                flat: true,
+            },
+        ),
+    ] {
+        let input = original_gpu_window_image_with_parameters(indexed, Some(parameter));
+        check_gpu_window_input(input, true);
+    }
+    println!("local_gpu_parameter_presenter_available=true local_gpu_parameter_presenter_frames=2");
 }

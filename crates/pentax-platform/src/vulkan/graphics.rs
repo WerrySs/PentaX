@@ -14,9 +14,8 @@ use super::{
     resources::{Buffer, Image, color_range},
 };
 use ash::vk;
-use pentax_gpu::graphics::{IndexType, PreparedDraw};
+use pentax_gpu::graphics::{IndexType, PreparedDraw, ShaderInterfaces, validate_shader_interfaces};
 use pentax_shader::ShaderStage;
-use pentax_shader_compiler::{CompiledShader, InputInterface, OutputInterface};
 
 fn extent(width: u32, height: u32) -> Result<usize, VulkanError> {
     width
@@ -119,28 +118,24 @@ fn upload_bytes(target: usize, indices: usize, budget: &mut Budget) -> Result<()
     Ok(())
 }
 
-fn interfaces(vertex: &CompiledShader, pixel: &CompiledShader) -> Result<(), VulkanError> {
-    if vertex.manifest().outputs() != [OutputInterface::Position]
-        || vertex.manifest().inputs().iter().any(|input| {
-            !matches!(
-                input,
-                InputInterface::VertexIndex | InputInterface::InstanceIndex
-            )
-        })
-        || pixel.manifest().inputs().iter().any(|input| {
-            !matches!(
-                input,
-                InputInterface::FragCoord | InputInterface::FrontFacing
-            )
-        })
-        || pixel.manifest().outputs()
-            != [OutputInterface::Color {
-                export: 0,
-                location: 0,
-                uint: false,
-            }]
+fn interface_limits(
+    interfaces: ShaderInterfaces,
+    vertex: u32,
+    pixel: u32,
+) -> Result<(), VulkanError> {
+    // Actual vec4 declarations consume complete locations even for sparse or
+    // aliased ATTR mappings. Built-ins also count against component limits.
+    // Vulkan interfaces: shader input/output Location and Component rules.
+    let locations_fit =
+        |mask: u32, components: u32| mask == 0 || 32 - mask.leading_zeros() <= components / 4;
+    if interfaces.vertex_components > vertex
+        || interfaces.pixel_components > pixel
+        || !locations_fit(interfaces.vertex_locations, vertex)
+        || !locations_fit(interfaces.pixel_locations, pixel)
     {
-        return Err(VulkanError::InvalidCompilerContract("graphics interfaces"));
+        return Err(VulkanError::Unsupported(
+            "graphics interface component limits",
+        ));
     }
     Ok(())
 }
@@ -216,7 +211,9 @@ pub(super) fn run(
     }
     check_graphics_contract(prepared.vertex(), ShaderStage::Vertex)?;
     check_graphics_contract(prepared.pixel(), ShaderStage::Pixel)?;
-    interfaces(prepared.vertex(), prepared.pixel())?;
+    budget.work(256)?;
+    let interfaces = validate_shader_interfaces(prepared.vertex(), prepared.pixel())
+        .map_err(|_| VulkanError::InvalidCompilerContract("graphics interfaces"))?;
     let push = push_data(prepared)?;
     let indices = if let Some(indices) = prepared.indices() {
         let input = index_input(
@@ -253,6 +250,11 @@ pub(super) fn run(
         &mut budget,
     )?;
     let host = device.properties.limits;
+    interface_limits(
+        interfaces,
+        host.max_vertex_output_components,
+        host.max_fragment_input_components,
+    )?;
     if let Some((_, input)) = indices {
         device.check_index_value(input.maximum)?;
     }
@@ -474,6 +476,36 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parameter_interface_limits_count_sparse_locations_aliases_and_builtins() {
+        let sparse = ShaderInterfaces {
+            vertex_locations: 1 << 31,
+            pixel_locations: 1 << 31,
+            vertex_components: 8,
+            pixel_components: 4,
+        };
+        assert!(interface_limits(sparse, 128, 128).is_ok());
+        assert!(interface_limits(sparse, 64, 128).is_err());
+        assert!(interface_limits(sparse, 128, 64).is_err());
+        let full = ShaderInterfaces {
+            vertex_locations: u32::MAX,
+            pixel_locations: u32::MAX,
+            vertex_components: 132,
+            pixel_components: 133,
+        };
+        assert!(interface_limits(full, 132, 136).is_ok());
+        assert!(interface_limits(full, 128, 136).is_err());
+        assert!(interface_limits(full, 132, 132).is_err());
+        let aliases_and_system = ShaderInterfaces {
+            vertex_locations: 1 << 7,
+            pixel_locations: 1 << 7,
+            vertex_components: 8,
+            pixel_components: 9,
+        };
+        assert!(interface_limits(aliases_and_system, 32, 32).is_ok());
+        assert!(interface_limits(aliases_and_system, 32, 8).is_err());
+    }
 
     #[test]
     fn target_and_whole_draw_work_bounds_do_not_wrap_or_discount_overdraw() {

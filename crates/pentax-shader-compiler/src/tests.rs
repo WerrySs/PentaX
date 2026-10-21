@@ -2,6 +2,7 @@
 // Original end-to-end programs for the Rust port. No upstream or guest fixtures.
 mod capacities;
 mod fixtures;
+mod interpolation;
 mod matrix;
 use super::*;
 use pentax_shader::ShaderStage;
@@ -23,6 +24,7 @@ fn profile(stage: ShaderStage) -> Profile {
                 location: 0,
                 flat: false,
             });
+            pixel.perspective_center_vgpr = Some(6);
             StageDescription::Pixel(pixel)
         }
         ShaderStage::Compute => {

@@ -42,6 +42,16 @@ and compressed, depth, auxiliary-position, or pixel-valid-mask/discard exports.
 This port does not reproduce optional device workarounds or a renderer's
 resource caches and synchronization.
 
+Supported implicit interpolation retains real P1/P2 provenance through SSA:
+P2 must consume the matching ATTR/channel P1 partial and an unmodified i/j
+builtin pair from the same declared interpolation mode. Plain register copies
+preserve these identities. Computed coordinates, mismatched/overwritten
+partials and live unconsumed P1 results return typed errors instead of silently
+discarding their values. The supported nonflat interface remains center
+perspective; flat MOV mode2 is separate. Host location mapping and interpolation
+class come from the validated caller profile, never from a guessed register
+default. Original fragment fixtures explicitly initialize their center pair.
+
 The pinned compiler substitutes zero for ordinary uninitialized registers.
 This port deliberately requires either `UndefinedRegisterPolicy::Reject`
 (default) or explicit `OpUndef`, counted in the manifest. Neither choice is

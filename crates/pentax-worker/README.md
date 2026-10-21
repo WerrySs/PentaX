@@ -59,6 +59,43 @@ a u32 module slot, u32 role (0 main, 1 child), u64 module-relative code offset
 and u64 recent count. The complete file is at most 1,552 bytes. Module slots
 refer to the exact captured source epoch, not filenames or execution authority.
 
+`probe-entry --private-thread-states <fresh-file>` is a separate explicit
+private output capability. It creates a new, exclusively held file and never
+replaces an existing file. At a terminal epoch result, before the actual native
+executor is dropped, it captures the real main CPU and the active child CPU,
+if a child is selected. A parked main is read from its retained context; it is
+never replaced by a second copy of the child. There are no guest-memory reads,
+wait readiness polls or extra per-block observations. Dynamic module transitions
+do not publish an intermediate snapshot. The existing `PXSAMP01` format is
+unchanged and can be selected independently.
+
+The separate binary contains `PXCTX001`, a little-endian u32 row count and u32
+reserved-zero flags, followed by at most two 160-byte rows. Each row contains
+u32 module slot, u32 role (0 main, 1 active child), u64 module-relative PC,
+sixteen u64 general registers in the native CPU state's order, u64 RFLAGS and
+eight reserved-zero bytes. The complete file is at most 336 bytes. There is no
+absolute PC, thread identifier, code byte or host execution context. **Register
+values can contain guest pointers or title-specific data: keep the file private.**
+PCs must map unambiguously to initialized executable nonwritable bytes in the
+actual source epoch. Invalid geometry, an outer return marker or exhausted
+independent finite observer work omits the artifact; no approximate PC is used.
+Only an explicit request adds final `private_thread_states_status` with
+`written`, `unavailable` or `write-failed`. File output follows execution and
+cannot replace its result. The snapshot can support a bounded local analysis of
+the stopped branch and its registers. It does not by itself establish useful
+progress, polling, starvation, deadlock or a cause of missing rendering.
+
+The opt-in original graphics integration fixtures require a real Vulkan device
+and display. The parameter fixture exports different colors at vertex PARAM1
+and PARAM7, calls the exact interpolant-mapping import and consumes its generated
+register word in guest PM4. Smooth and flat pixel shaders select nonidentity
+locations through that mapping, with AUTO and indexed draws. Guest code checks
+literal tiled GPU pixels, untouched padding and guards, then requires a genuine
+tagged flip and one completed window acknowledgement per image. The pixel user
+arguments retain a different color, so bypassing linkage cannot pass. These
+original programs establish this path only; they do not establish commercial
+shader compatibility, a commercial frame or FPS.
+
 `probe-entry --libc-memory-builtins checked` explicitly selects the standard
 memory ABI of the module supplied with `--preload-libc` or `--preload-libc-as`.
 The default is `off`. Exact qualified memcpy, memmove and memset exports can use
