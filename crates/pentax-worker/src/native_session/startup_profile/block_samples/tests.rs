@@ -344,6 +344,12 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         "graphics_shader_create_ok",
         "graphics_shader_create_rejected",
         "graphics_shader_create_failed",
+        "graphics_shader_fuse_size_ok",
+        "graphics_shader_fuse_size_rejected",
+        "graphics_shader_fuse_size_failed",
+        "graphics_shader_fuse_ok",
+        "graphics_shader_fuse_rejected",
+        "graphics_shader_fuse_failed",
         "scheduling_pending_equeue_waits",
         "video_vblank_subscriptions",
         "video_registered_buffers",
@@ -361,6 +367,13 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
     ] {
         assert!(!progress.progress_fields().contains(name));
         assert!(progress.protocol_fields().contains(&format!("{name}=0")));
+        assert_eq!(
+            progress
+                .protocol_fields()
+                .matches(&format!("{name}="))
+                .count(),
+            1
+        );
     }
     assert!(
         progress

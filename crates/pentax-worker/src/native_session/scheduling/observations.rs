@@ -76,6 +76,16 @@ impl Observations {
             fields,
             "\tgraphics_shader_create_ok={ok}\tgraphics_shader_create_rejected={rejected}\tgraphics_shader_create_failed={failed}"
         );
+        let (ok, rejected, failed) = self.graphics_functions.shader_fuse_size_outcomes();
+        let _ = write!(
+            fields,
+            "\tgraphics_shader_fuse_size_ok={ok}\tgraphics_shader_fuse_size_rejected={rejected}\tgraphics_shader_fuse_size_failed={failed}"
+        );
+        let (ok, rejected, failed) = self.graphics_functions.shader_fuse_outcomes();
+        let _ = write!(
+            fields,
+            "\tgraphics_shader_fuse_ok={ok}\tgraphics_shader_fuse_rejected={rejected}\tgraphics_shader_fuse_failed={failed}"
+        );
         fields
     }
 }

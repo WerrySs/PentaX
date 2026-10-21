@@ -72,6 +72,8 @@ pub struct FunctionProfile {
     counts: [u64; FUNCTIONS.len()],
     last: Option<Function>,
     shader_create: [u64; 3],
+    shader_fuse_size: [u64; 3],
+    shader_fuse: [u64; 3],
 }
 impl Default for FunctionProfile {
     fn default() -> Self {
@@ -79,6 +81,8 @@ impl Default for FunctionProfile {
             counts: [0; FUNCTIONS.len()],
             last: None,
             shader_create: [0; 3],
+            shader_fuse_size: [0; 3],
+            shader_fuse: [0; 3],
         }
     }
 }
@@ -96,6 +100,36 @@ impl FunctionProfile {
     /// Calls refused before driver admission are absent from all three counts.
     pub fn shader_create_outcomes(&self) -> (u64, u64, u64) {
         let [ok, rejected, failed] = self.shader_create;
+        (ok, rejected, failed)
+    }
+    pub(super) fn record_shader_fuse_size(&mut self, result: &Result<u64, super::Failure>) {
+        let index = match result {
+            Ok(0) => 0,
+            Ok(_) => 1,
+            Err(_) => 2,
+        };
+        self.shader_fuse_size[index] = self.shader_fuse_size[index].saturating_add(1);
+    }
+    pub(super) fn record_shader_fuse(&mut self, result: &Result<u64, super::Failure>) {
+        let index = match result {
+            Ok(0) => 0,
+            Ok(_) => 1,
+            Err(_) => 2,
+        };
+        self.shader_fuse[index] = self.shader_fuse[index].saturating_add(1);
+    }
+    /// Completed FuseSize helper bodies: zero status, nonzero guest status and
+    /// typed refusal. Saturation never changes execution. Pre-body admission
+    /// refusals, including call-work ceiling overflow, are not recorded.
+    pub fn shader_fuse_size_outcomes(&self) -> (u64, u64, u64) {
+        let [ok, rejected, failed] = self.shader_fuse_size;
+        (ok, rejected, failed)
+    }
+    /// Completed modern Fuse helper bodies in the same order as FuseSize.
+    /// The legacy export is excluded. Zero status does not attest shader
+    /// execution, command submission or a rendered frame.
+    pub fn shader_fuse_outcomes(&self) -> (u64, u64, u64) {
+        let [ok, rejected, failed] = self.shader_fuse;
         (ok, rejected, failed)
     }
     pub(super) fn record(&mut self, function: Function) {

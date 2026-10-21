@@ -161,6 +161,19 @@ fn native_shader_half_query_and_both_fusion_exports_retain_real_header_and_regis
             assert_eq!(fields["value"], "42");
             assert_eq!(fields["service_stops"], calls.to_string());
             assert_eq!(fields["unavailable_functions"], "0");
+            assert_eq!(fields["graphics_calls"], calls.to_string());
+            // The two real query calls return success then a source rejection;
+            // only the modern fusion export contributes to the fusion triple.
+            for (name, expected) in [
+                ("graphics_shader_fuse_size_ok", "1"),
+                ("graphics_shader_fuse_size_rejected", "1"),
+                ("graphics_shader_fuse_size_failed", "0"),
+                ("graphics_shader_fuse_ok", "1"),
+                ("graphics_shader_fuse_rejected", "0"),
+                ("graphics_shader_fuse_failed", "0"),
+            ] {
+                assert_eq!(fields[name], expected, "{text}");
+            }
         }
     }
 }

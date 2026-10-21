@@ -848,6 +848,17 @@ Calls refused before driver admission do not count. A zero helper status is
 neither GPU compilation nor a rendered frame; other graphics APIs can return
 valid nonzero sizes or pointers and are not classified by this rule.
 
+`graphics_shader_fuse_size_ok`, `graphics_shader_fuse_size_rejected` and
+`graphics_shader_fuse_size_failed` apply the same zero-status, nonzero-status
+and typed-failure categories to completed fused-shader size helpers.
+`graphics_shader_fuse_ok`, `graphics_shader_fuse_rejected` and
+`graphics_shader_fuse_failed` cover the modern shader-half fusion helper;
+the separate legacy fusion export does not contribute to this triple. These
+six saturating counters are final-only and record completed helper bodies.
+Quota or preparation refusal before a body starts leaves them unchanged. They
+add no progress polling, guest reads or execution budget, and a zero status
+still proves neither GPU command submission nor a rendered frame.
+
 The periodic completed-block observer also reports
 `sample_self_target_branches`, `sample_self_target_native_register_blocks` and
 `sample_self_target_native_register_instructions`. These describe sampled plans

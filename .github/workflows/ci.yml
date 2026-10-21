@@ -161,6 +161,14 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_fma_registers:: -- --test-threads=1
+      - name: Test shader fusion body outcomes and guest error effects
+        run: >-
+          cargo test --locked -p pentax-core --lib gpu::shaders::fusion_tests:: -- --test-threads=1
+      - name: Test original native shader fusion outcome reporting
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::agc_fusion:: -- --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

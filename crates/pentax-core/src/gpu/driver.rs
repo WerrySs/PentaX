@@ -436,25 +436,31 @@ impl Driver {
         }
         if function == Function::AgcGetFusedShaderSize {
             let maximum = self.shader_call_maximum()?;
-            return super::shaders::fusion::size(
+            let result = super::shaders::fusion::size(
                 memory,
                 args,
                 &mut self.usage.preparation_work,
                 maximum,
             );
+            self.function_profile.record_shader_fuse_size(&result);
+            return result;
         }
         if matches!(
             function,
             Function::AgcFuseShaderHalves | Function::AgcFuseShaderHalvesLegacy
         ) {
             let maximum = self.shader_call_maximum()?;
-            return super::shaders::fusion::fuse(
+            let result = super::shaders::fusion::fuse(
                 memory,
                 args,
                 function == Function::AgcFuseShaderHalves,
                 &mut self.usage.preparation_work,
                 maximum,
             );
+            if function == Function::AgcFuseShaderHalves {
+                self.function_profile.record_shader_fuse(&result);
+            }
+            return result;
         }
         if function == Function::AgcCreateShader {
             let maximum = self.shader_call_maximum()?;

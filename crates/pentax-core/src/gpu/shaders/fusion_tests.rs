@@ -184,6 +184,11 @@ fn fused_size_uses_conditional_byte_fields_and_exact_atomic_size_align_output() 
         read(&memory, back + 88, 16),
         [104_u64.to_le_bytes(), 4_u64.to_le_bytes()].concat()
     );
+    assert_eq!(
+        driver.function_profile().shader_fuse_size_outcomes(),
+        (3, 2, 1)
+    );
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 0, 0));
 }
 
 #[test]
@@ -213,6 +218,14 @@ fn fused_halves_keep_source_gs_hs_register_profiles_scratch_and_header_bytes() {
                     Function::AgcFuseShaderHalvesLegacy
                 };
                 assert_eq!(driver.submit(&mut memory, function, args), Ok(0));
+                assert_eq!(
+                    driver.function_profile().shader_fuse_outcomes(),
+                    (u64::from(modern), 0, 0)
+                );
+                assert_eq!(
+                    driver.function_profile().shader_fuse_size_outcomes(),
+                    (0, 0, 0)
+                );
                 assert_eq!(read(&memory, base + OUTPUT, 96), expected_header);
                 assert_eq!(read(&memory, base + FRONT, 96), before_front);
                 let expected = [
@@ -263,6 +276,7 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
         Ok(0x8a6c_0008)
     );
     assert_eq!(read(&memory, base + OUTPUT, 96), [0x33; 96]);
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 1, 0));
     args = seed(&mut memory, base, true, 6);
     let mut expected = read(&memory, base + BACK, 96);
     expected[90] = 2;
@@ -275,6 +289,7 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
     );
     assert_eq!(read(&memory, base + OUTPUT, 96), expected);
     assert_eq!(read(&memory, base + SCRATCH, 48), [0x66; 48]);
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 2, 0));
     args = seed(&mut memory, base, true, 6);
     // Missing second checksum is a source-aborting path, not a successful fuse.
     memory
@@ -286,6 +301,7 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
         Err(Failure::Shader(ShaderFailure::Registers))
     );
     assert_eq!(read(&memory, base, PAGE as usize), before);
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 2, 1));
     args = seed(&mut memory, base, true, 6);
     args[3] = base + PAGE - 47;
     let before = read(&memory, base, PAGE as usize);
@@ -294,6 +310,7 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
         Err(Failure::Memory)
     );
     assert_eq!(read(&memory, base, PAGE as usize), before);
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 2, 2));
     let mut limited = Driver::new(Limits {
         max_preparation_work: 0,
         ..Default::default()
@@ -307,6 +324,10 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
         Err(Failure::Limit)
     );
     assert_eq!(read(&memory, base, PAGE as usize), before);
+    assert_eq!(
+        limited.function_profile().shader_fuse_size_outcomes(),
+        (0, 0, 1)
+    );
     for function in [
         Function::AgcGetFusedShaderSize,
         Function::AgcFuseShaderHalves,
@@ -317,6 +338,64 @@ fn fusion_retains_guest_error_prefix_but_hard_refusals_publish_nothing() {
             Err(Failure::Shader(ShaderFailure::NullArgument))
         );
     }
+    assert_eq!(
+        driver.function_profile().shader_fuse_size_outcomes(),
+        (0, 0, 1)
+    );
+    // The legacy null refusal above never enters the modern outcome buckets.
+    assert_eq!(driver.function_profile().shader_fuse_outcomes(), (0, 2, 3));
+
+    let before = read(&memory, base, PAGE as usize);
+    let mut unadmitted = Driver::new(Limits {
+        max_calls: 0,
+        ..Default::default()
+    });
+    let profile = unadmitted.function_profile();
+    for function in [
+        Function::AgcGetFusedShaderSize,
+        Function::AgcFuseShaderHalves,
+    ] {
+        assert_eq!(
+            unadmitted.submit(&mut memory, function, [0; 6]),
+            Err(Failure::Limit)
+        );
+        assert_eq!(unadmitted.function_profile(), profile);
+        assert_eq!(unadmitted.usage().calls, 0);
+        assert_eq!(read(&memory, base, PAGE as usize), before);
+    }
+
+    // A successful body makes the next absolute call-work ceiling overflow.
+    // Both subsequent calls are admitted, but neither helper body is entered.
+    let args = seed(&mut memory, base, true, 6);
+    let mut ceiling = Driver::new(Limits {
+        max_preparation_work: u64::MAX,
+        max_shader_call_work: Some(u64::MAX),
+        ..Default::default()
+    });
+    assert_eq!(
+        ceiling.submit(&mut memory, Function::AgcGetFusedShaderSize, args),
+        Ok(0)
+    );
+    let before = read(&memory, base, PAGE as usize);
+    let work = ceiling.usage().preparation_work;
+    assert!(work > 0);
+    for function in [
+        Function::AgcGetFusedShaderSize,
+        Function::AgcFuseShaderHalves,
+    ] {
+        assert_eq!(
+            ceiling.submit(&mut memory, function, [0; 6]),
+            Err(Failure::Limit)
+        );
+        assert_eq!(
+            ceiling.function_profile().shader_fuse_size_outcomes(),
+            (1, 0, 0)
+        );
+        assert_eq!(ceiling.function_profile().shader_fuse_outcomes(), (0, 0, 0));
+        assert_eq!(ceiling.usage().preparation_work, work);
+        assert_eq!(read(&memory, base, PAGE as usize), before);
+    }
+    assert_eq!(ceiling.usage().calls, 3);
 }
 
 #[test]
