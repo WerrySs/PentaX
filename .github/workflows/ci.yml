@@ -194,6 +194,17 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::affine_loop_trace:: -- --test-threads=1
+      - name: Test full VEX broadcast planning and exact memory metadata
+        run: >-
+          cargo test --locked -p pentax-codegen --lib tests::native_vector_broadcasts::
+      - name: Test actual native broadcast bits, ISA authority and live memory
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_vector_broadcasts_tests:: -- --test-threads=1
+      - name: Test all broadcast worker shapes across modeling and kernel boundaries
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_broadcasts:: -- --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

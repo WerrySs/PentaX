@@ -904,7 +904,9 @@ fn execute_epoch<'plan, 'image>(
             .with_native_vector_moves()
             .with_native_scalar_float();
         if features.contains(CpuidFeature::AVX) {
-            policy = policy.with_native_float_min_max();
+            policy = policy
+                .with_native_float_min_max()
+                .with_native_vector_broadcasts();
         }
         if features.contains(CpuidFeature::FMA) {
             policy = policy.with_native_scalar_fma().with_native_fma_registers();

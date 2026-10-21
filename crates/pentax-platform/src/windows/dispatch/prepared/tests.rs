@@ -93,6 +93,8 @@ mod native_scalar_fma_tests;
 mod native_streaming_stores_tests;
 #[path = "tests/native_string_index.rs"]
 mod native_string_index_tests;
+#[path = "tests/native_vector_broadcasts.rs"]
+mod native_vector_broadcasts_tests;
 #[path = "tests/native_vector_memory.rs"]
 mod native_vector_memory_tests;
 #[path = "tests/native_vector_register_bits.rs"]

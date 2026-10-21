@@ -304,6 +304,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) emits_vector_memory_move: bool,
     pub(crate) emits_scalar_float_memory: bool,
     pub(crate) emits_float_min_max_memory: bool,
+    pub(crate) emits_vector_broadcast_memory: bool,
     pub(crate) admission: NativeAdmissionSummary,
     pub(crate) usage: BlockUsage,
 }
@@ -370,6 +371,11 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     /// must independently check their full live spans and address dependencies.
     pub const fn emits_float_min_max_memory(&self) -> bool {
         self.emits_float_min_max_memory
+    }
+    /// True only for actually emitted closed VEX broadcast memory forms.
+    /// This is immutable classification, not live read or CPU authority.
+    pub const fn emits_vector_broadcast_memory(&self) -> bool {
+        self.emits_vector_broadcast_memory
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage

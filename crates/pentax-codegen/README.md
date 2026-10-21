@@ -289,6 +289,28 @@ proofs cover all twelve Codes and twenty-four shapes, high-register aliases,
 SIB/RIP addressing, source-bound re-encoding and unchanged finite limits. They
 make no numerical hardware-equivalence or title performance claim.
 
+`with_native_vector_broadcasts()` separately requests all sixteen supported VEX
+broadcast Codes and twenty-four operand shapes. VPBROADCASTB/W/D/Q each permit
+XMM or YMM destinations with one XMM source or an exact1/2/4/8-byte read.
+VBROADCASTSS permits XMM/YMM destinations and VBROADCASTSD a YMM destination,
+each with distinct register-source and memory-source Codes. VBROADCASTF128 and
+VBROADCASTI128 read exactly16 bytes into a YMM destination. All register sources
+are XMM0..15, including YMM outputs; aliases preserve the original low tuple.
+These operations replicate raw bits without changing RFLAGS or MXCSR, and
+XMM outputs clear their upper YMM halves.
+
+The request defaults off and independently requires the full-YMM request and
+declared AVX. Only the two SS memory shapes, SD memory and F128 memory require
+AVX alone; the remaining twenty shapes additionally require AVX2. FMA is
+independent. The actual runtime must prove CPU/OS vector support and current
+owned full-span reads, including manual/diagnostic entry through the immutable
+`emits_vector_broadcast_memory()` metadata. Memory sizes stay within the
+existing16-byte analyzer bound; no32-byte exception, new alignment restriction,
+fence, address32/VSIB/segment or EVEX admission is added. Original source-only
+planning proofs cover all shapes, high aliases, SIB/RIP targets, feature/profile
+refusals, dependency splits and finite output/instruction limits. Sampled exits
+motivate coverage but establish neither whole-run frequency nor a speedup.
+
 `with_native_scalar_fma()` is an independent, default-disabled request for
 exactly VEX VFMADD213SS and VFNMADD213SS with three XMM0..15 operands. It
 requires the full-YMM request and declared AVX plus FMA. Existing prefix,

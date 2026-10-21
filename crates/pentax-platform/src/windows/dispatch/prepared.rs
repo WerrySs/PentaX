@@ -1500,6 +1500,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             || block.emits_vector_memory_move()
             || block.emits_scalar_float_memory()
             || block.emits_float_min_max_memory()
+            || block.emits_vector_broadcast_memory()
             || block.native_admission().has_atomic_memory()
         {
             self.preflight_ordinary_memory(memory, block)?;
@@ -1831,6 +1832,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         if ((block.policy().requests_native_packed_float_memory()
             || block.policy().requests_native_streaming_stores()
             || block.policy().requests_native_vector_moves()
+            || block.policy().requests_native_vector_broadcasts()
             || block.policy().requests_native_scalar_float()
             || block.policy().requests_native_float_min_max()
             || block.policy().requests_native_scalar_fma()
@@ -1840,6 +1842,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 || block.policy().requests_native_packed_float_memory()
                 || block.policy().requests_native_streaming_stores()
                 || block.policy().requests_native_vector_moves()
+                || block.policy().requests_native_vector_broadcasts()
                 || block.policy().requests_native_scalar_float()
                 || block.policy().requests_native_float_min_max()
                 || block.policy().requests_native_scalar_fma()

@@ -61,6 +61,7 @@ pub struct TranslationPolicy {
     native_scalar_fma: bool,
     native_fma_registers: bool,
     native_float_min_max: bool,
+    native_vector_broadcasts: bool,
     affine_loop_trace: bool,
 }
 impl TranslationPolicy {
@@ -78,6 +79,7 @@ impl TranslationPolicy {
             native_scalar_fma: false,
             native_fma_registers: false,
             native_float_min_max: false,
+            native_vector_broadcasts: false,
             affine_loop_trace: false,
         }
     }
@@ -164,6 +166,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_float_min_max(self) -> bool {
         self.native_float_min_max
+    }
+    /// Separately request the sixteen supported VEX broadcast Codes. Exact
+    /// source shapes, full-YMM state and actual AVX/AVX2 remain independent
+    /// requirements; this grants no live memory or host execution authority.
+    pub const fn with_native_vector_broadcasts(mut self) -> Self {
+        self.native_vector_broadcasts = true;
+        self
+    }
+    pub const fn requests_native_vector_broadcasts(self) -> bool {
+        self.native_vector_broadcasts
     }
     /// Request optional cold preparation of a finite two-iteration trace.
     /// Ordinary block control-flow admission is unchanged. This grants no live
@@ -322,6 +334,10 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_float_min_max()
         && native_float_min_max_shape(instruction).is_some();
+    let vex_broadcast = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_vector_broadcasts()
+        && native_vector_broadcast_shape(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
         && (native_ymm_registers(instruction)
@@ -331,7 +347,8 @@ pub(crate) fn ordinary(
             || vex_scalar
             || vex_scalar_fma
             || vex_fma_registers
-            || vex_min_max);
+            || vex_min_max
+            || vex_broadcast);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -356,7 +373,7 @@ pub(crate) fn ordinary(
         // one exact requested temporal vector/scalar transfer, or the separate
         // scalar arithmetic register/exact4-or8-byte read shape, or one of
         // separately requested destructive FMA3 registers, or a closed MIN/MAX
-        // register/exact-read shape. No other
+        // register/exact-read shape, or a closed broadcast shape. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -517,6 +534,70 @@ pub(crate) fn native_float_min_max_shape(instruction: &Instruction) -> Option<(u
         }
     }
     Some(shape)
+}
+
+/// Closed broadcast shape: (destination vector bytes, source element bytes).
+/// Packed-integer register sources are XMM even for a YMM destination. Floating
+/// register and memory forms have distinct Codes and cannot exchange shapes.
+pub(crate) fn native_vector_broadcast_shape(instruction: &Instruction) -> Option<(usize, usize)> {
+    use Code::*;
+    let (destination, element, register, memory) = match instruction.code() {
+        VEX_Vpbroadcastb_xmm_xmmm8 => (16, 1, true, true),
+        VEX_Vpbroadcastb_ymm_xmmm8 => (32, 1, true, true),
+        VEX_Vpbroadcastw_xmm_xmmm16 => (16, 2, true, true),
+        VEX_Vpbroadcastw_ymm_xmmm16 => (32, 2, true, true),
+        VEX_Vpbroadcastd_xmm_xmmm32 => (16, 4, true, true),
+        VEX_Vpbroadcastd_ymm_xmmm32 => (32, 4, true, true),
+        VEX_Vpbroadcastq_xmm_xmmm64 => (16, 8, true, true),
+        VEX_Vpbroadcastq_ymm_xmmm64 => (32, 8, true, true),
+        VEX_Vbroadcastss_xmm_m32 => (16, 4, false, true),
+        VEX_Vbroadcastss_ymm_m32 => (32, 4, false, true),
+        VEX_Vbroadcastss_xmm_xmm => (16, 4, true, false),
+        VEX_Vbroadcastss_ymm_xmm => (32, 4, true, false),
+        VEX_Vbroadcastsd_ymm_m64 => (32, 8, false, true),
+        VEX_Vbroadcastsd_ymm_xmm => (32, 8, true, false),
+        VEX_Vbroadcastf128_ymm_m128 | VEX_Vbroadcasti128_ymm_m128 => (32, 16, false, true),
+        _ => return None,
+    };
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 2
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+        || instruction.op0_kind() != OpKind::Register
+        || if destination == 16 {
+            !instruction.op0_register().is_xmm() || instruction.op0_register() > Register::XMM15
+        } else {
+            !instruction.op0_register().is_ymm() || instruction.op0_register() > Register::YMM15
+        }
+    {
+        return None;
+    }
+    match instruction.op1_kind() {
+        OpKind::Register if register => {
+            if !instruction.op1_register().is_xmm() || instruction.op1_register() > Register::XMM15
+            {
+                return None;
+            }
+        }
+        OpKind::Memory if memory => {
+            let base = instruction.memory_base();
+            let index = instruction.memory_index();
+            if instruction.memory_size().size() != element
+                || instruction.is_vsib()
+                || !(base == Register::None || base == Register::RIP || base.is_gpr64())
+                || !(index == Register::None || index.is_gpr64())
+                || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+                || (base == Register::None
+                    && index == Register::None
+                    && instruction.memory_displ_size() != 8)
+            {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    Some((destination, element))
 }
 
 /// Exact temporal memory shape: (memory bytes, write). Scalar memory widths

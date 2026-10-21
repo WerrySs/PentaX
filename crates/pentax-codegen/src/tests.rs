@@ -22,6 +22,7 @@ mod native_scalar_float;
 mod native_scalar_fma;
 mod native_streaming_stores;
 mod native_string_index;
+mod native_vector_broadcasts;
 mod native_vector_moves;
 mod native_vector_register_bits;
 mod native_ymm;

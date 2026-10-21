@@ -96,6 +96,7 @@ pub(crate) fn plan_window<'plan, 'image>(
     let mut emits_vector_memory_move = false;
     let mut emits_scalar_float_memory = false;
     let mut emits_float_min_max_memory = false;
+    let mut emits_vector_broadcast_memory = false;
     let exit;
     loop {
         if records.len() as u64 == limits.max_instructions || position == window.relocated.len() {
@@ -294,6 +295,8 @@ pub(crate) fn plan_window<'plan, 'image>(
             && crate::policy::native_scalar_float_width(&instruction).is_some();
         emits_float_min_max_memory |= instruction.op2_kind() == iced_x86::OpKind::Memory
             && crate::policy::native_float_min_max_shape(&instruction).is_some();
+        emits_vector_broadcast_memory |= instruction.op1_kind() == iced_x86::OpKind::Memory
+            && crate::policy::native_vector_broadcast_shape(&instruction).is_some();
         encoded.clear();
         encoder.set_buffer(encoded);
         records.push(InstructionRecord {
@@ -338,6 +341,7 @@ pub(crate) fn plan_window<'plan, 'image>(
         emits_vector_memory_move,
         emits_scalar_float_memory,
         emits_float_min_max_memory,
+        emits_vector_broadcast_memory,
         admission,
         usage,
     })

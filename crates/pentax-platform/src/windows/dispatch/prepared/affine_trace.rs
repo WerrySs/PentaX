@@ -329,6 +329,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         let vector_request = policy.requests_native_packed_float_memory()
             || policy.requests_native_streaming_stores()
             || policy.requests_native_vector_moves()
+            || policy.requests_native_vector_broadcasts()
             || policy.requests_native_scalar_float()
             || policy.requests_native_float_min_max()
             || policy.requests_native_scalar_fma()

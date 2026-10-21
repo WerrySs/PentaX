@@ -199,7 +199,7 @@ segment, backing and permission checks.
 VEX packed PS/PD logical operations run through bounded Rust bitwise semantics,
 including full memory reads, aliased sources and upper-half zeroing for 128-bit
 destinations. They do not evaluate floating-point values or change MXCSR/flags.
-The same checked Rust route supports VEX scalar/128-bit tuple broadcasts and
+The same checked Rust route remains the fallback for VEX scalar/128-bit tuple broadcasts and
 packed wrapping integer add/subtract. Broadcast memory reads use the source tuple
 width; arithmetic wraps independently within each byte/word/dword/qword. Both
 preserve aliases, flags and MXCSR, and clear the upper half of 128-bit results.
@@ -789,6 +789,19 @@ entry path. Original worker callers exercise all twenty-four operand shapes,
 keep a genuinely modeled VMOVQ boundary, and verify exact native/modeled
 counters and all vector registers across a kernel service. Source presence or
 successful instruction execution does not establish a title speedup or boot.
+
+A separate native broadcast request covers all sixteen supported VEX Codes and
+twenty-four register or exact-width memory shapes. The worker selects it only
+from its admitted full-YMM engine. Four floating-point memory forms require AVX;
+the remaining twenty shapes independently require AVX2. FMA is not required.
+Memory sources touch exactly 1/2/4/8/16 bytes, while register forms snapshot low
+XMM elements even for YMM output. Bits, flags and MXCSR retain the checked
+semantics, including raw signaling-NaN patterns and upper-half clearing for
+128-bit destinations. Every native memory entry path retains current complete
+span and dependency checks. Original complete-worker callers cover all shapes
+across a genuinely modeled VMOVQ store, a subsequent memory consumer and a real
+kernel service, checking exact native/modeled counters, memory and all vector
+registers. Those instruction proofs do not establish a commercial title speedup.
 
 Final-only cache observations distinguish successful executable replacements
 from `cache_evicted_key_revisits`: returns to a slot's immediately previous

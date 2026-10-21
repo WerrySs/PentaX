@@ -314,6 +314,8 @@ mod affine_loop_trace;
 mod align_right;
 #[path = "libc_memory_builtins.rs"]
 mod libc_memory_builtins;
+#[path = "native_vector_broadcasts.rs"]
+mod native_vector_broadcasts;
 
 struct Program {
     code: Vec<u8>,

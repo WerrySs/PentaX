@@ -914,6 +914,7 @@ fn publish_block_with_mode(
     if ((plan.policy().requests_native_packed_float_memory()
         || plan.policy().requests_native_streaming_stores()
         || plan.policy().requests_native_vector_moves()
+        || plan.policy().requests_native_vector_broadcasts()
         || plan.policy().requests_native_scalar_float()
         || plan.policy().requests_native_float_min_max()
         || plan.policy().requests_native_scalar_fma()
@@ -923,6 +924,7 @@ fn publish_block_with_mode(
             || plan.policy().requests_native_packed_float_memory()
             || plan.policy().requests_native_streaming_stores()
             || plan.policy().requests_native_vector_moves()
+            || plan.policy().requests_native_vector_broadcasts()
             || plan.policy().requests_native_scalar_float()
             || plan.policy().requests_native_float_min_max()
             || plan.policy().requests_native_scalar_fma()
@@ -1271,13 +1273,16 @@ fn preflight_diagnostic_vector_memory(
         && !plan.emits_vector_memory_move()
         && !plan.emits_scalar_float_memory()
         && !plan.emits_float_min_max_memory()
+        && !plan.emits_vector_broadcast_memory()
     {
         return Ok(());
     }
     // SAFETY: run_one_block's caller holds DispatchGuard. No bridge call is in
     // flight; only current guest address registers and flags are observed here.
     let (gpr, flags) = unsafe { ((*CONTEXT.0.get()).gpr, (*CONTEXT.0.get()).rflags) };
-    if plan.emits_float_min_max_memory() && flags & (1 << 18) != 0 {
+    if (plan.emits_float_min_max_memory() || plan.emits_vector_broadcast_memory())
+        && flags & (1 << 18) != 0
+    {
         return Err(PlatformError::NativeDispatchFailed {
             stage: "native-vector flags",
         });
