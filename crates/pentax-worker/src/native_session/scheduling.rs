@@ -108,6 +108,18 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         self.threads[self.active].waiting.is_some() || self.threads[self.active].returned
     }
 
+    /// Remaining logical blocks before the existing readiness/rotation scan.
+    /// This is observational: it never polls a wait or changes thread order.
+    pub(super) fn trace_turn_remaining(&self, blocks: u64, class: ThreadPriorityClass) -> u64 {
+        if self.force_switch || self.active_blocked() {
+            return 0;
+        }
+        blocks
+            .checked_sub(self.last_switch)
+            .and_then(|elapsed| quantum(class).checked_sub(elapsed))
+            .unwrap_or(0)
+    }
+
     /// A committed flip must publish its retained notification before any
     /// guest entry. This wait uses only the independently bounded host lane.
     pub(super) fn wait_consumer_retry(

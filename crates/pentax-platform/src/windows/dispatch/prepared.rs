@@ -143,6 +143,12 @@ pub struct NativeDispatchUsage {
     pub blocks: u64,
     /// Returned hardware bridge entries, excluding directly modeled exits.
     pub native_entries: u64,
+    /// Returned hardware entries through the separately admitted affine trace.
+    /// A malformed post-entry marker still counts the actual entry, not guessed
+    /// guest iterations or instructions.
+    pub affine_loop_entries: u64,
+    /// Logical iterations retired with a validated private one/two marker.
+    pub affine_loop_iterations: u64,
     /// Successfully attested and sealed native slot publications.
     pub cache_publications: u64,
     /// Exact byte/tail/cell matches in a previously published executable slot.
@@ -426,6 +432,8 @@ enum Phase {
 }
 static NEXT_EXECUTOR: AtomicU64 = AtomicU64::new(1);
 
+#[path = "prepared/affine_trace.rs"]
+mod affine_trace;
 #[path = "prepared/align_right.rs"]
 mod align_right;
 #[path = "prepared/bit_counts.rs"]

@@ -1,5 +1,24 @@
 # PentaX code generation
 
+An explicit, default-off `with_affine_loop_trace()` request permits a separate
+optional two-iteration template on a materialized self-target conditional loop.
+The ordinary block remains unchanged and contains no guest branch. The template
+requires ordinary memory and exactly one nonzero 32/64-bit INC or ADD-immediate
+of an address register after all accesses, excluding other address writes,
+stack use, atomic/streaming operations and division. Its sole internal branch
+is forward: an inverted first condition skips the second body. Both bodies keep
+their original instruction order and RIP-relative targets. A checked native
+runtime must independently bind the private exits, validate both iterations'
+live source/owner/operands and distinguish one versus two retired iterations.
+
+Template preparation is a separate, bounded cold attempt after an exclusive
+work reservation. Optional work and actual allocation capacities are accounted
+without changing ordinary-plan usage; instruction, output, allocation and cache
+ceilings remain finite. An ineligible shape, wrapping induction or insufficient
+optional allowance leaves ordinary execution available. Retained cache hits
+reuse the source/placement-specific template without encoding. This is neither
+an execution capability nor evidence of a title performance improvement.
+
 `pentax-codegen` builds immutable same-ISA x86-64 basic-block translation plans.
 It emits bytes; it does not allocate executable memory, run native code, expose
 host pointers, install exception handlers or authorize execution. The crate's

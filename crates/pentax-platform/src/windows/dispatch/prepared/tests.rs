@@ -37,6 +37,8 @@ mod rounding_tests;
 #[path = "tests/saturating_packs.rs"]
 mod saturating_packs_tests;
 
+#[path = "tests/affine_loop_trace.rs"]
+mod affine_loop_trace_tests;
 #[path = "tests/cache_causality.rs"]
 mod cache_causality_tests;
 #[path = "tests/cpu_identification.rs"]

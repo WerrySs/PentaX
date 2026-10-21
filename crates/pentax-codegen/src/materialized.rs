@@ -233,6 +233,7 @@ pub fn declare_materialized_source<'plan, 'image>(
 pub struct MaterializedBlockPlan<'view, 'plan, 'image> {
     declaration: &'view MaterializedSource<'plan, 'image>,
     inner: BlockPlan<'plan, 'image>,
+    pub(crate) affine: crate::affine_loop_trace::Preparation,
 }
 
 impl fmt::Debug for MaterializedBlockPlan<'_, '_, '_> {
@@ -304,6 +305,13 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
     pub const fn native_admission(&self) -> &NativeAdmissionSummary {
         self.inner.native_admission()
     }
+    /// Conservative retained products, including optional cold trace attempts.
+    /// Ordinary usage and its per-step admission summary remain unchanged.
+    pub fn retained_allocation_bytes(&self) -> u64 {
+        self.usage()
+            .allocation_bytes
+            .saturating_add(self.affine.allocated)
+    }
     /// Pure comparison only; the future unsafe consumer must independently
     /// establish the exact prepared owner, typed proof and live source bytes.
     pub fn attest_emission(&self, address: u64, bytes: &[u8]) -> bool {
@@ -349,5 +357,6 @@ pub fn plan_materialized_block<'view, 'plan, 'image>(
     Ok(MaterializedBlockPlan {
         declaration: source,
         inner,
+        affine: crate::affine_loop_trace::Preparation::default(),
     })
 }

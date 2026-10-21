@@ -412,7 +412,10 @@ fn summarize_admission(
     Ok(summary)
 }
 
-fn lea_constant(instruction: &Instruction, target: u64) -> Result<Instruction, CodegenError> {
+pub(crate) fn lea_constant(
+    instruction: &Instruction,
+    target: u64,
+) -> Result<Instruction, CodegenError> {
     let destination = instruction.op0_register();
     match destination.size() {
         2 => Instruction::with2(Code::Mov_r16_imm16, destination, u32::from(target as u16)),

@@ -61,6 +61,7 @@ pub struct TranslationPolicy {
     native_scalar_fma: bool,
     native_fma_registers: bool,
     native_float_min_max: bool,
+    affine_loop_trace: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -77,6 +78,7 @@ impl TranslationPolicy {
             native_scalar_fma: false,
             native_fma_registers: false,
             native_float_min_max: false,
+            affine_loop_trace: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -162,6 +164,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_float_min_max(self) -> bool {
         self.native_float_min_max
+    }
+    /// Request optional cold preparation of a finite two-iteration trace.
+    /// Ordinary block control-flow admission is unchanged. This grants no live
+    /// source, memory, CPU, scheduling or native execution authority.
+    pub const fn with_affine_loop_trace(mut self) -> Self {
+        self.affine_loop_trace = true;
+        self
+    }
+    pub const fn requests_affine_loop_trace(self) -> bool {
+        self.affine_loop_trace
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())

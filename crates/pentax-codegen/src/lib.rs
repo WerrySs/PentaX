@@ -13,6 +13,7 @@
 
 #![forbid(unsafe_code)]
 
+mod affine_loop_trace;
 mod materialized;
 mod memory;
 mod model;
@@ -22,6 +23,7 @@ mod source;
 #[cfg(test)]
 mod tests;
 
+pub use affine_loop_trace::AffineLoopTrace;
 pub use iced_x86::{
     Code, ConditionCode, CpuidFeature, Decoder, DecoderOptions, FlowControl, Instruction, Mnemonic,
     OpKind, Register,

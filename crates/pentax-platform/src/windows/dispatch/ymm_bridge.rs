@@ -140,6 +140,21 @@ impl VectorMode {
         }
     }
 
+    /// Fixed trusted trace exits. The wrapper records retired iterations in
+    /// private CONTEXT.rip before the unchanged flag-preserving state capture.
+    pub(super) fn affine_trailers(self) -> [u64; 2] {
+        match self {
+            Self::Sse2 => [
+                pentax_affine_exit_one as *const () as u64,
+                pentax_affine_exit_two as *const () as u64,
+            ],
+            Self::Avx { .. } => [
+                pentax_affine_exit_one_ymm as *const () as u64,
+                pentax_affine_exit_two_ymm as *const () as u64,
+            ],
+        }
+    }
+
     pub(super) fn entry(self) -> unsafe extern "C" fn() {
         match self {
             Self::Sse2 => pentax_block_enter,
@@ -334,7 +349,33 @@ pentax_block_trailer_ymm:
 unsafe extern "C" {
     fn pentax_block_enter_ymm();
     fn pentax_block_trailer_ymm();
+    fn pentax_affine_exit_one();
+    fn pentax_affine_exit_two();
+    fn pentax_affine_exit_one_ymm();
+    fn pentax_affine_exit_two_ymm();
 }
+
+// Only the separately attested trace publisher can install these fixed cells.
+// MOV/JMP change no guest register or flags; ordinary trailers remain unchanged.
+std::arch::global_asm!(r#"
+    .text
+    .globl pentax_affine_exit_one
+pentax_affine_exit_one:
+    mov qword ptr [rip + {ctx} + 128], 1
+    jmp {sse}
+    .globl pentax_affine_exit_two
+pentax_affine_exit_two:
+    mov qword ptr [rip + {ctx} + 128], 2
+    jmp {sse}
+    .globl pentax_affine_exit_one_ymm
+pentax_affine_exit_one_ymm:
+    mov qword ptr [rip + {ctx} + 128], 1
+    jmp {avx}
+    .globl pentax_affine_exit_two_ymm
+pentax_affine_exit_two_ymm:
+    mov qword ptr [rip + {ctx} + 128], 2
+    jmp {avx}
+"#, ctx = sym CONTEXT, sse = sym pentax_block_trailer, avx = sym pentax_block_trailer_ymm);
 
 #[cfg(test)]
 #[path = "ymm_bridge/tests.rs"]

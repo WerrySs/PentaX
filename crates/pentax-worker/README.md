@@ -923,6 +923,23 @@ not cache runtime addresses or permission checks. The existing per-step work
 charges are preserved separately from the added construction work; source,
 owner, stack, host mode and actual memory operands retain their live checks.
 
+Prepared image execution explicitly requests an optional two-iteration forward
+trace for fully native self-target conditional loops with ordinary memory and
+one nonzero address-register induction after all accesses. The pure API keeps
+this policy disabled by default. Cold construction retains a separate bounded
+template and re-encodes the second body at its actual cache address. Before
+either body runs, the executor checks both iterations' current operand spans,
+permissions and physical write/source separation under one exclusive pause.
+Stable polling, stack use, unsupported control and unsafe shapes keep ordinary
+single-block execution. No cached data can substitute for a guest access.
+Scheduling quanta, sample positions, progress reports and frame-pump boundaries
+can also require the ordinary path. Trusted forward exits preserve guest flags
+and distinguish one from two actually retired bodies; private branch and trailer
+instructions receive no guest credit. Final-only `affine_loop_entries` and
+`affine_loop_iterations` count actual trace bridge returns and validated logical
+iterations, respectively. These observations establish neither title eligibility
+frequency nor a commercial startup or performance gain.
+
 An attested plan containing only the exit sentinel resolves directly through
 the existing modeled control/vector/string/segment path without publishing code
 or entering the hardware bridge. It retains source/owner/state/stack/operand and

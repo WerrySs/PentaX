@@ -308,6 +308,8 @@ const NAME: i32 = 0xd00;
 const I32_INVALID: u64 = 0x8002_0016;
 const I32_BUSY: u64 = 0x8002_0010;
 
+#[path = "affine_loop_trace.rs"]
+mod affine_loop_trace;
 #[path = "align_right.rs"]
 mod align_right;
 #[path = "libc_memory_builtins.rs"]

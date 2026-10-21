@@ -3,6 +3,30 @@ use super::*;
 use std::time::Duration;
 
 #[test]
+fn affine_pairs_observe_each_priority_quantum_and_pending_switch_without_mutation() {
+    let mut scheduling = Scheduling::new(None, 1).unwrap();
+    scheduling.last_switch = 7;
+    for (class, span) in [
+        (ThreadPriorityClass::High, 4096),
+        (ThreadPriorityClass::Normal, 2048),
+        (ThreadPriorityClass::Low, 1024),
+    ] {
+        assert_eq!(scheduling.trace_turn_remaining(7 + span - 2, class), 2);
+        assert_eq!(scheduling.trace_turn_remaining(7 + span - 1, class), 1);
+        assert_eq!(scheduling.trace_turn_remaining(7 + span, class), 0);
+        assert_eq!(scheduling.trace_turn_remaining(6, class), 0);
+        assert_eq!(scheduling.last_switch, 7);
+        scheduling.force_switch = true;
+        assert_eq!(scheduling.trace_turn_remaining(7, class), 0);
+        assert!(scheduling.force_switch);
+        scheduling.force_switch = false;
+        scheduling.threads[0].returned = true;
+        assert_eq!(scheduling.trace_turn_remaining(7, class), 0);
+        scheduling.threads[0].returned = false;
+    }
+}
+
+#[test]
 fn finite_consumer_wake_precedes_deadlock_without_satisfying_or_charging_guest_waits() {
     // Without a consumer, an indefinite guest wait retains the original
     // no-deadline outcome. An actual consumer deadline allows only a bounded

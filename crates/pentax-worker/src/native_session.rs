@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 //! Dedicated-worker composition over the actual prepared kernel/TLS owner.
-//! One pause covers one block, and ends before the core service adapter runs.
+//! A pause covers one block or a bounded, fully checked forward loop pair, and
+//! ends before the core service adapter runs.
 //! Ordinary native operands are checked from the current observed guest state.
 
 use pentax_codegen::{
@@ -22,6 +23,7 @@ use pentax_platform::native_dispatch::{
 use pentax_platform::native_memory::{NativeMemoryError, PausedNativeMemory};
 use std::sync::OnceLock;
 
+mod affine_trace;
 mod causality;
 mod dispatch_context;
 // The optional local window runs on this supervised worker thread, outside
@@ -233,7 +235,7 @@ impl NativeSessionProgress {
             self.kernel_handles,
         );
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}{console}{causality}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}{private}{console}{causality}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
@@ -244,6 +246,8 @@ impl NativeSessionProgress {
             self.libc_builtins.completed[1],
             self.libc_builtins.completed[2],
             self.libc_builtin_bound_entries,
+            self.dispatch.affine_loop_entries,
+            self.dispatch.affine_loop_iterations,
         )
     }
 
@@ -911,7 +915,8 @@ fn execute_epoch<'plan, 'image>(
         source,
         policy
             .with_independent_memory()
-            .with_partial_window_splits(),
+            .with_partial_window_splits()
+            .with_affine_loop_trace(),
         limits.block,
         &mut state.admission_work,
         limits.max_admission_work,
@@ -1108,9 +1113,29 @@ fn execute_epoch<'plan, 'image>(
         let stop = if let Some(stop) = builtin {
             stop
         } else {
+            let trace = block.affine_loop_trace();
+            let maximum_span = if trace.is_some() {
+                affine_trace::Boundaries {
+                    blocks: engine.usage().blocks,
+                    turn_remaining: state.scheduling.trace_turn_remaining(
+                        engine.usage().blocks,
+                        session.active_thread_priority_class(),
+                    ),
+                    report_progress: limits.report_progress,
+                    progress_interval: limits.progress_interval_blocks,
+                    reported_blocks: state.reported_blocks,
+                    has_consumer: consumer.is_some(),
+                    frame_pump_blocks: state.frame_pump_blocks,
+                }
+                .maximum_span()
+            } else {
+                1
+            };
             let plan = session.plan();
             let mut paused = session.pause()?;
             let previous_native = engine.usage().native_instructions;
+            let previous_entries = engine.usage().native_entries;
+            let previous_blocks = engine.usage().blocks;
             // Optional telemetry owns an independent bounded work allowance.
             // It preadmits every record/ring visit before guest dispatch and
             // never changes guest limits or makes an observer refusal fatal.
@@ -1130,7 +1155,25 @@ fn execute_epoch<'plan, 'image>(
             // ends before service work; the process-wide bridge guard excludes
             // concurrent entry. The checked engine derives ordinary accesses
             // from current state and validates their live bounds/permissions.
-            let result = unsafe { engine.step_checked(&mut paused, block) };
+            // A source-bound forward trace additionally admits both iterations
+            // and excludes writes aliasing consumed source. Its caller span
+            // leaves scheduling, frame, progress and sample positions intact.
+            let result = unsafe {
+                if maximum_span == 2 {
+                    if let Some(trace) = trace {
+                        match engine.try_step_affine_loop_checked(&mut paused, &trace, maximum_span)
+                        {
+                            Ok(Some(stop)) => Ok(stop),
+                            Ok(None) => engine.step_checked(&mut paused, block),
+                            Err(error) => Err(error),
+                        }
+                    } else {
+                        engine.step_checked(&mut paused, block)
+                    }
+                } else {
+                    engine.step_checked(&mut paused, block)
+                }
+            };
             StartupProfile::checkpoint(&mut stamp, &mut progress.profile.dispatch_ns);
             progress.dispatch = engine.usage();
             if result.is_ok() {
@@ -1142,7 +1185,12 @@ fn execute_epoch<'plan, 'image>(
                 } else {
                     &mut progress.profile.exit_only_blocks
                 };
-                *count = count.saturating_add(1);
+                let completed = progress
+                    .dispatch
+                    .blocks
+                    .checked_sub(previous_blocks)
+                    .ok_or(NativeSessionError::Budget("logical block observations"))?;
+                *count = count.saturating_add(completed);
             } else {
                 // This is the planned exit mnemonic, not a faulting body PC.
                 progress.dispatch_exit = block.exit().instruction().map(|i| i.mnemonic());
@@ -1153,7 +1201,8 @@ fn execute_epoch<'plan, 'image>(
                         &paused,
                         plan,
                         source,
-                        progress.dispatch.native_instructions > previous_native,
+                        progress.dispatch.native_instructions > previous_native
+                            || progress.dispatch.native_entries > previous_entries,
                     );
                 }
             }

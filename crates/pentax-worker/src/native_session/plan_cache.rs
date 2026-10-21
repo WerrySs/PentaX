@@ -70,6 +70,9 @@ pub(super) struct PlanCache<'view, 'plan, 'image> {
 }
 
 #[cfg(test)]
+#[path = "plan_cache/affine_tests.rs"]
+mod affine_tests;
+#[cfg(test)]
 #[path = "plan_cache/observation_tests.rs"]
 mod observation_tests;
 #[cfg(test)]
@@ -183,7 +186,7 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
         if !hit {
             // Replanning changed bytes retains the canonical overlay check: a
             // modified executable image cannot replace its original declaration.
-            let plan = plan_materialized_block(
+            let mut plan = plan_materialized_block(
                 self.source,
                 module,
                 pc,
@@ -192,7 +195,28 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
                 &self.policy,
                 &self.limits,
             )?;
-            let bytes = plan.usage().allocation_bytes;
+            // The original plan exists before optional work is considered.
+            // Reserve the whole bounded attempt and a possible existing full
+            // purge before any extra scan, allocation or encode. No guest work
+            // runs while this exclusive allowance is held; unused reservation
+            // is never charged and actual attempted work is never refunded.
+            if plan.usage().allocation_bytes <= self.max_bytes
+                && let Some(reserved) = plan.affine_loop_trace_work_bound(&self.limits)
+                && work_limit
+                    .checked_sub(*work)
+                    .and_then(|left| left.checked_sub(SLOTS as u64))
+                    .is_some_and(|left| reserved <= left)
+            {
+                let spent = plan.prepare_affine_loop_trace(
+                    &self.limits,
+                    reserved,
+                    self.max_bytes.min(self.limits.max_allocation_bytes),
+                );
+                // The checked exclusive reservation above guarantees this
+                // original monotonic commit cannot refuse after preparation.
+                charge(work, spent, work_limit, "admission work")?;
+            }
+            let bytes = plan.retained_allocation_bytes();
             // Classify only a valid replacement plan. A later refusal must
             // leave every diagnostic counter/gauge unchanged as well.
             let replacement = self.slots[index]
@@ -200,7 +224,7 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
                 .map(|old| old.guest_pc() != pc || old.module().index() != module);
             let old = self.slots[index]
                 .as_ref()
-                .map_or(0, |plan| plan.usage().allocation_bytes);
+                .map_or(0, |plan| plan.retained_allocation_bytes());
             let remaining = self.retained_bytes - old;
             // The independent planner's prior allocation limit is unchanged.
             // Its temporary allocation can coexist with the same <=8MiB
