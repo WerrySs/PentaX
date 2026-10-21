@@ -1,9 +1,49 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //! Closed failure categories only; never reflect error payloads or Debug text.
 use pentax_codegen::MemoryAccessError;
+use pentax_core::{
+    memory::MemoryError,
+    process::hle::{MemoryServiceError, ServiceLimit},
+};
 use pentax_platform::{
     PlatformError, native_dispatch::NativeDispatchError as D, native_memory::NativeMemoryError as M,
 };
+
+/// Service failures retain a finite category, never argument values, addresses,
+/// allocator diagnostics or caller-provided reason strings.
+pub(super) fn classify_service(error: &MemoryServiceError) -> &'static str {
+    match error {
+        MemoryServiceError::LimitExceeded { kind, .. } => match kind {
+            ServiceLimit::SpanBytes => "service-span-limit",
+            ServiceLimit::ScratchBytes => "service-scratch-limit",
+            ServiceLimit::Attempts => "service-attempt-limit",
+            ServiceLimit::TotalBytes => "service-total-limit",
+            ServiceLimit::WorkUnits => "service-work-limit",
+            ServiceLimit::ExitCallbacks => "service-exit-callback-limit",
+        },
+        MemoryServiceError::CounterOverflow { .. } => "service-counter-overflow",
+        MemoryServiceError::Memory(error) => match error {
+            MemoryError::Unmapped(_) => "service-unmapped",
+            MemoryError::PermissionDenied(_) => "service-permission",
+            MemoryError::InvalidRange => "service-range",
+            MemoryError::Unaligned => "service-alignment",
+            MemoryError::Overlap => "service-overlap",
+            MemoryError::BudgetExceeded => "service-memory-budget",
+            MemoryError::Native(M::Unmapped(_)) => "service-unmapped",
+            MemoryError::Native(M::PermissionDenied(_)) => "service-permission",
+            MemoryError::Native(M::BudgetExceeded) => "service-memory-budget",
+            MemoryError::Native(_) => "service-native-memory",
+        },
+        MemoryServiceError::Allocation => "service-allocation",
+        MemoryServiceError::NullPointer { .. } => "service-null-pointer",
+        MemoryServiceError::AddressOverflow { .. } => "service-address-range",
+        MemoryServiceError::UnsupportedOverlap => "service-overlap",
+        MemoryServiceError::UnsupportedFormat(_) => "service-format",
+        MemoryServiceError::InvalidServiceState(_) => "service-state",
+        MemoryServiceError::UnterminatedString { .. } => "service-string-limit",
+        _ => "service-other",
+    }
+}
 
 pub(super) fn classify(error: &D) -> &'static str {
     match error {

@@ -93,6 +93,9 @@ impl ProbeOutcome {
         };
         use pentax_kernel::{Failure, GuestError};
         Some(match error {
+            KernelStartupError::Hle(pentax_core::process::hle::HleError::Service(error)) => {
+                dispatch_diagnostics::classify_service(error)
+            }
             KernelStartupError::Kernel(Failure::Guest(error)) => match error {
                 GuestError::Allocation => "guest-allocation",
                 GuestError::BudgetExceeded => "guest-memory-budget",
@@ -797,6 +800,68 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
 #[cfg(test)]
 mod budget_tests {
     use super::*;
+
+    #[test]
+    fn service_failures_keep_their_category_without_exposing_error_payloads() {
+        use pentax_core::process::hle::{HleError, MemoryServiceError as E, ServiceLimit};
+        for (error, expected) in [
+            (
+                E::LimitExceeded {
+                    kind: ServiceLimit::SpanBytes,
+                    requested: u64::MAX,
+                    maximum: 1,
+                },
+                "service-span-limit",
+            ),
+            (
+                E::LimitExceeded {
+                    kind: ServiceLimit::ScratchBytes,
+                    requested: u64::MAX,
+                    maximum: 1,
+                },
+                "service-scratch-limit",
+            ),
+            (
+                E::LimitExceeded {
+                    kind: ServiceLimit::Attempts,
+                    requested: u64::MAX,
+                    maximum: 1,
+                },
+                "service-attempt-limit",
+            ),
+            (
+                E::LimitExceeded {
+                    kind: ServiceLimit::TotalBytes,
+                    requested: u64::MAX,
+                    maximum: 1,
+                },
+                "service-total-limit",
+            ),
+            (
+                E::LimitExceeded {
+                    kind: ServiceLimit::WorkUnits,
+                    requested: u64::MAX,
+                    maximum: 1,
+                },
+                "service-work-limit",
+            ),
+            (
+                E::Memory(pentax_core::memory::MemoryError::Unmapped(u64::MAX)),
+                "service-unmapped",
+            ),
+            (E::UnsupportedFormat("private-reason"), "service-format"),
+            (E::Allocation, "service-allocation"),
+        ] {
+            let outcome = ProbeOutcome {
+                result: Err(ProbeError::Admission(NativeImageError::Callback(
+                    NativeSessionError::Core(KernelStartupError::Hle(HleError::Service(error))),
+                ))),
+                progress: NativeSessionProgress::default(),
+                unavailable_functions: None,
+            };
+            assert_eq!(outcome.error_runtime_failure(), Some(expected));
+        }
+    }
 
     #[test]
     fn budget_protocol_exposes_only_closed_categories() {
