@@ -172,6 +172,11 @@ fn software_fma_matches_hardware_for_rounding_denormals_special_values_and_expon
         triples.extend([
             [min_normal, one - 1, 0],
             [min_normal, one - 1, 1],
+            // This exact result is tiny, but precision/unbounded rounding
+            // makes it normal under RN/upward. Unlike the previous pair it
+            // must not set UE or flush that rounded normal value to zero.
+            [min_normal + 1, one - 2, 0],
+            [sign | (min_normal + 1), one - 2, 0],
             [infinity - 1, one, quarter_max_ulp],
             [infinity - 1, one, half_max_ulp],
             [infinity - 1, one, half_max_ulp + 1],
@@ -197,4 +202,52 @@ fn software_fma_matches_hardware_for_rounding_denormals_special_values_and_expon
     }
     assert_eq!(host_mxcsr(), host);
     eprintln!("Original FMA hardware-reference cases passed: {cases}");
+}
+
+#[test]
+fn fma_tininess_uses_precision_unbounded_rounding_before_subnormal_rounding() {
+    for double in [false, true] {
+        let (normal, one) = if double {
+            (0x0010_0000_0000_0000_u64, 0x3ff0_0000_0000_0000)
+        } else {
+            (0x0080_0000, 0x3f80_0000)
+        };
+        for round in 0..4 {
+            for ftz in [false, true] {
+                let control = 0x1f80 | (round << 13) | if ftz { 0x8000 } else { 0 };
+                // The exact product lies less than half an unbounded-precision
+                // ulp below min-normal: RN/upward round normal before the
+                // exponent bound is applied. PE alone is the literal oracle.
+                let normal_after_precision = round == 0 || round == 2;
+                let expected = if normal_after_precision {
+                    normal
+                } else if ftz {
+                    0
+                } else {
+                    normal - 1
+                };
+                assert_eq!(
+                    calculate(double, normal + 1, one - 2, 0, false, false, control).unwrap(),
+                    (
+                        expected,
+                        control | if normal_after_precision { 32 } else { 48 }
+                    )
+                );
+                // This product is exactly tiny at unbounded precision. The
+                // later subnormal rounding can produce min-normal under RN,
+                // but UE/FTZ still apply; checking only final exponent is wrong.
+                let expected = if ftz {
+                    0
+                } else if round == 0 || round == 2 {
+                    normal
+                } else {
+                    normal - 1
+                };
+                assert_eq!(
+                    calculate(double, normal, one - 1, 0, false, false, control).unwrap(),
+                    (expected, control | 48)
+                );
+            }
+        }
+    }
 }

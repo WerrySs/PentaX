@@ -269,7 +269,7 @@ fn native_packed_float_matches_ordered_literal_and_mediated_bits_under_every_con
             }
         }
     }
-    let label = if matches!(mode, VectorMode::Avx { avx2: true }) {
+    let label = if matches!(mode, VectorMode::Avx { avx2: true, .. }) {
         "avx2"
     } else {
         "avx"

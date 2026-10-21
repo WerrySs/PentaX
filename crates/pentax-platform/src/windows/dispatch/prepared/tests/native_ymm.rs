@@ -68,7 +68,10 @@ fn requested_native_vectors_refuse_legacy_bridge_and_unadmitted_avx2_before_publ
             if avx2 {
                 // Original test metadata only; never enter this synthetic mode.
                 // AVX1 cannot satisfy a decoded AVX2 requirement.
-                engine.machine.vector_mode = VectorMode::Avx { avx2: true };
+                engine.machine.vector_mode = VectorMode::Avx {
+                    avx2: true,
+                    fma: false,
+                };
                 assert!(
                     engine
                         .machine
@@ -78,7 +81,10 @@ fn requested_native_vectors_refuse_legacy_bridge_and_unadmitted_avx2_before_publ
                 assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
                 assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
                 let before = engine.usage();
-                engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+                engine.machine.vector_mode = VectorMode::Avx {
+                    avx2: false,
+                    fma: false,
+                };
                 assert!(
                     !engine
                         .machine
@@ -108,7 +114,10 @@ fn requested_native_vectors_refuse_legacy_bridge_and_unadmitted_avx2_before_publ
                         arena,
                         &diagnostic,
                         state.guest_pc,
-                        VectorMode::Avx { avx2: false },
+                        VectorMode::Avx {
+                            avx2: false,
+                            fma: false
+                        },
                     ),
                     Err(PlatformError::UnsupportedHostFeature {
                         feature: "unsupported-feature"
@@ -162,7 +171,10 @@ fn cache_tail_matches_retained_bridge_mode_and_reattachment_cannot_change_it() {
             engine.machine.cache.read(cell, &mut bytes).unwrap();
             assert_eq!(u64::from_le_bytes(bytes), mode.trailer());
             let other = if matches!(mode, VectorMode::Sse2) {
-                VectorMode::Avx { avx2: false }
+                VectorMode::Avx {
+                    avx2: false,
+                    fma: false,
+                }
             } else {
                 VectorMode::Sse2
             };

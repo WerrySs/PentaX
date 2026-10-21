@@ -209,7 +209,10 @@ fn scalar_register_and_exact_memory_forms_match_bits_merge_controls_and_all_alia
                     .unwrap();
                     // Actual host/OS admission above permits the AVX bridge;
                     // disable AVX2 authority for every actual case below.
-                    engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+                    engine.machine.vector_mode = VectorMode::Avx {
+                        avx2: false,
+                        fma: false,
+                    };
                     let mut entries = 0;
                     let mut memory_entries = 0;
                     for (alias, destination) in [9, 13, 14].into_iter().enumerate() {
@@ -567,7 +570,10 @@ fn both_publishers_require_separate_request_full_context_and_actual_mode() {
             ),
             (
                 TranslationPolicy::x64_sse2().with_native_scalar_float(),
-                VectorMode::Avx { avx2: false },
+                VectorMode::Avx {
+                    avx2: false,
+                    fma: false,
+                },
             ),
             (policy(), VectorMode::Sse2),
         ] {

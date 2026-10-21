@@ -211,9 +211,27 @@ pub(crate) fn calculate(
         return Ok((sign, mxcsr | flags));
     };
     let highest = last as u32 * 64 + 63 - product[last].leading_zeros();
-    // Intel detects FMA tininess before rounding, including a tiny inexact
-    // value which rounds up to the minimum normal encoding.
-    let tiny = highest as i32 + base < 1 - format.bias;
+    // Intel tests tininess after rounding to the destination precision with an
+    // unbounded exponent (SDM1 4.9.1.5). This is distinct from both the exact
+    // product's exponent and the later rounding to the bounded subnormal grid.
+    // In particular, a value may round normal here, or remain tiny here and
+    // only round up to minimum-normal on the coarser subnormal grid below.
+    let precision_shift = highest.saturating_sub(format.fraction);
+    let precision = high(&product, precision_shift);
+    let precision_inexact = low_nonzero(&product, precision_shift);
+    let precision_increment = match round {
+        0 => {
+            precision_shift != 0
+                && bit(&product, precision_shift - 1)
+                && (low_nonzero(&product, precision_shift - 1) || precision & 1 != 0)
+        }
+        1 => negative && precision_inexact,
+        2 => !negative && precision_inexact,
+        _ => false,
+    };
+    let rounded_highest = highest
+        + u32::from(precision + u64::from(precision_increment) == 1 << (format.fraction + 1));
+    let tiny = rounded_highest as i32 + base < 1 - format.bias;
     let mut shift = (highest as i32 - format.fraction as i32).max(format.quantum() - base) as u32;
     let mut significand = high(&product, shift);
     let inexact = low_nonzero(&product, shift);

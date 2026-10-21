@@ -198,6 +198,7 @@ pub(super) struct NativeSessionProgress {
     profile: StartupProfile,
     scheduling: scheduling::Observations,
     native_ymm_mode: Option<NativeYmmMode>,
+    native_scalar_fma: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -248,6 +249,11 @@ impl NativeSessionProgress {
             Some(NativeYmmMode::Sse2) => "\tnative_ymm_mode=sse2",
             Some(NativeYmmMode::Avx) => "\tnative_ymm_mode=avx",
             Some(NativeYmmMode::Avx2) => "\tnative_ymm_mode=avx2",
+        };
+        let native_fma = match self.native_scalar_fma {
+            None => "",
+            Some(false) => "\tnative_scalar_fma=false",
+            Some(true) => "\tnative_scalar_fma=true",
         };
         let counters = format!(
             "block_attempts={}\tnative_instructions={}\tprimary_native_instructions={}\tservice_stops={}\tsegment_ops={}\tstring_elements={}\tstring_bytes={}\tvector_ops={}\tvector_bytes={}\tphase={}\tinitializer_calls={}\tfetched_source_bytes={}\tadmission_work={}\tdispatch_work={}\tplan_cache_hits={}\tplan_cache_misses={}",
@@ -331,7 +337,7 @@ impl NativeSessionProgress {
             self.window.acknowledged,
         );
         format!(
-            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}{audio}{window}",
+            "{counters}\tnative_entries={}\tcache_publications={}\tcache_reuses={}\toutput_bytes={}\tinteger_ops={}\tinteger_bytes={}\t{}{}{exit}{handles}{}{native_ymm}{native_fma}{audio}{window}",
             self.dispatch.native_entries,
             self.dispatch.cache_publications,
             self.dispatch.cache_reuses,
@@ -831,6 +837,8 @@ fn execute_epoch<'plan, 'image>(
     };
     progress.dispatch = engine.usage();
     let native_ymm_features = engine.native_ymm_features();
+    progress.native_scalar_fma =
+        Some(native_ymm_features.is_some_and(|features| features.contains(CpuidFeature::FMA)));
     progress.native_ymm_mode = Some(match native_ymm_features {
         None => NativeYmmMode::Sse2,
         Some(features) if features.contains(CpuidFeature::AVX2) => NativeYmmMode::Avx2,
@@ -867,23 +875,26 @@ fn execute_epoch<'plan, 'image>(
             native_features = native_features.with(feature);
         }
     }
-    // AVX declarations come only from this exact engine's admitted full-YMM
-    // bridge mode. Raw host AVX flags alone never enable native vector plans.
+    // AVX/FMA declarations come only from this exact engine's admitted full-YMM
+    // bridge mode. Raw host flags alone never enable native vector plans.
     if let Some(features) = native_ymm_features {
-        for feature in [CpuidFeature::AVX, CpuidFeature::AVX2] {
+        for feature in [CpuidFeature::AVX, CpuidFeature::AVX2, CpuidFeature::FMA] {
             if features.contains(feature) {
                 native_features = native_features.with(feature);
             }
         }
     }
     let mut policy = TranslationPolicy::new(native_features);
-    if native_ymm_features.is_some() {
+    if let Some(features) = native_ymm_features {
         policy = policy
             .with_native_ymm_registers()
             .with_native_packed_float_memory()
             .with_native_streaming_stores()
             .with_native_vector_moves()
             .with_native_scalar_float();
+        if features.contains(CpuidFeature::FMA) {
+            policy = policy.with_native_scalar_fma();
+        }
     }
     let plans = plan_cache::PlanCache::new(
         source,

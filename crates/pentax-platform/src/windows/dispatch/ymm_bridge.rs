@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum VectorMode {
     Sse2,
-    Avx { avx2: bool },
+    Avx { avx2: bool, fma: bool },
 }
 
 impl VectorMode {
@@ -37,28 +37,44 @@ impl VectorMode {
         mut cpuid: impl FnMut(u32, u32) -> [u32; 4],
         xcr0: impl FnOnce() -> u64,
     ) -> Self {
-        let maximum = cpuid(0, 0)[0];
+        let identity = cpuid(0, 0);
+        let maximum = identity[0];
         const REQUIRED: u32 = (1 << 26) | (1 << 27) | (1 << 28);
-        if maximum < 1 || cpuid(1, 0)[2] & REQUIRED != REQUIRED {
+        if maximum < 1 {
+            return Self::Sse2;
+        }
+        let capabilities = cpuid(1, 0)[2];
+        if capabilities & REQUIRED != REQUIRED {
             return Self::Sse2;
         }
         if xcr0() & 6 != 6 {
             return Self::Sse2;
         }
         let avx2 = maximum >= 7 && cpuid(7, 0)[1] & (1 << 5) != 0;
-        Self::Avx { avx2 }
+        // The scalar FMA profile has Intel/AMD primary contracts plus original
+        // hardware differentials. Unknown vendors keep software mediation
+        // until their complete contract has independent equivalence evidence.
+        // These fixed host words never become a guest CPUID response.
+        let intel =
+            identity[1] == 0x756e_6547 && identity[3] == 0x4965_6e69 && identity[2] == 0x6c65_746e;
+        let amd =
+            identity[1] == 0x6874_7541 && identity[3] == 0x6974_6e65 && identity[2] == 0x444d_4163;
+        let fma = (intel || amd) && capabilities & (1 << 12) != 0;
+        Self::Avx { avx2, fma }
     }
 
     pub(super) fn features(self) -> Option<CpuFeatures> {
         match self {
             Self::Sse2 => None,
-            Self::Avx { avx2 } => {
-                let features = CpuFeatures::empty().with(CpuidFeature::AVX);
-                Some(if avx2 {
-                    features.with(CpuidFeature::AVX2)
-                } else {
-                    features
-                })
+            Self::Avx { avx2, fma } => {
+                let mut features = CpuFeatures::empty().with(CpuidFeature::AVX);
+                if avx2 {
+                    features = features.with(CpuidFeature::AVX2);
+                }
+                if fma {
+                    features = features.with(CpuidFeature::FMA);
+                }
+                Some(features)
             }
         }
     }
@@ -66,7 +82,8 @@ impl VectorMode {
     pub(super) fn supports(self, feature: CpuidFeature) -> bool {
         match feature {
             CpuidFeature::AVX => matches!(self, Self::Avx { .. }),
-            CpuidFeature::AVX2 => matches!(self, Self::Avx { avx2: true }),
+            CpuidFeature::AVX2 => matches!(self, Self::Avx { avx2: true, .. }),
+            CpuidFeature::FMA => matches!(self, Self::Avx { fma: true, .. }),
             _ => host_supports(feature),
         }
     }
@@ -79,11 +96,27 @@ impl VectorMode {
     ) -> bool {
         static SSE2: OnceLock<[u64; 4]> = OnceLock::new();
         static AVX: OnceLock<[u64; 4]> = OnceLock::new();
+        static AVX_FMA: OnceLock<[u64; 4]> = OnceLock::new();
         static AVX2: OnceLock<[u64; 4]> = OnceLock::new();
+        static AVX2_FMA: OnceLock<[u64; 4]> = OnceLock::new();
         let cache = match self {
             Self::Sse2 => &SSE2,
-            Self::Avx { avx2: false } => &AVX,
-            Self::Avx { avx2: true } => &AVX2,
+            Self::Avx {
+                avx2: false,
+                fma: false,
+            } => &AVX,
+            Self::Avx {
+                avx2: false,
+                fma: true,
+            } => &AVX_FMA,
+            Self::Avx {
+                avx2: true,
+                fma: false,
+            } => &AVX2,
+            Self::Avx {
+                avx2: true,
+                fma: true,
+            } => &AVX2_FMA,
         };
         let available = cache.get_or_init(|| {
             let mut words = [0; 4];

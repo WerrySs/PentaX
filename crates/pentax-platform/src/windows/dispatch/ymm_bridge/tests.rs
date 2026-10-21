@@ -57,7 +57,13 @@ fn vector_mode_requires_cpu_os_and_xcr0_and_marshals_every_guest_half() {
     }
     let low = std::array::from_fn(|index| (index as u8).wrapping_mul(17).wrapping_add(7));
     let upper = std::array::from_fn(|index| (index as u8).wrapping_mul(31).wrapping_add(0x81));
-    for mode in [VectorMode::Sse2, VectorMode::Avx { avx2: false }] {
+    for mode in [
+        VectorMode::Sse2,
+        VectorMode::Avx {
+            avx2: false,
+            fma: false,
+        },
+    ] {
         let mut context = GuestContext::zeroed();
         mode.load(&mut context, &low, &upper);
         let mut observed_low = [0; 256];
@@ -89,4 +95,67 @@ fn admitted_ymm_bridge_roundtrips_all_guest_halves_and_host_nonvolatile_control_
     }
     super::super::context_probe::verify_context_roundtrip_mode(mode).unwrap();
     println!("native_ymm_context_available=true native_ymm_context_cases=48");
+}
+
+#[test]
+fn fma_capability_is_independent_of_avx2_and_requires_its_verified_host_contract() {
+    const REQUIRED: u32 = (1 << 26) | (1 << 27) | (1 << 28);
+    for vendor in [0, 1, 2] {
+        for fma in [false, true] {
+            for avx2 in [false, true] {
+                for missing in [0, 1 << 26, 1 << 27, 1 << 28] {
+                    for xcr0 in [0, 2, 4, 6] {
+                        let mode = VectorMode::detect_with(
+                            |leaf, subleaf| {
+                                assert_eq!(subleaf, 0);
+                                match leaf {
+                                    0 if vendor == 1 => [7, 0x756e_6547, 0x6c65_746e, 0x4965_6e69],
+                                    0 if vendor == 2 => [7, 0x6874_7541, 0x444d_4163, 0x6974_6e65],
+                                    0 => [7, 0, 0, 0],
+                                    1 => [
+                                        0,
+                                        0,
+                                        (REQUIRED & !missing) | if fma { 1 << 12 } else { 0 },
+                                        0,
+                                    ],
+                                    7 => [0, if avx2 { 1 << 5 } else { 0 }, 0, 0],
+                                    _ => panic!("unexpected fixed feature query"),
+                                }
+                            },
+                            || xcr0,
+                        );
+                        let avx = missing == 0 && xcr0 & 6 == 6;
+                        let expected = avx && vendor != 0 && fma;
+                        assert_eq!(mode.supports(CpuidFeature::FMA), expected);
+                        assert_eq!(mode.supports(CpuidFeature::AVX2), avx && avx2);
+                        assert_eq!(
+                            mode.features()
+                                .is_some_and(|features| features.contains(CpuidFeature::FMA)),
+                            expected
+                        );
+                        if avx {
+                            // FMA changes checked capability only: entry and
+                            // trailer remain the same complete-YMM bridge.
+                            assert_eq!(
+                                mode.entry() as *const (),
+                                VectorMode::Avx {
+                                    avx2: false,
+                                    fma: false
+                                }
+                                .entry() as *const ()
+                            );
+                            assert_eq!(
+                                mode.trailer(),
+                                VectorMode::Avx {
+                                    avx2: false,
+                                    fma: false
+                                }
+                                .trailer()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

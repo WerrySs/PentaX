@@ -125,6 +125,14 @@ jobs:
       - name: Test indexed graphics host admission
         run: >-
           cargo test --locked -p pentax-platform --lib -- vulkan::graphics::tests:: vulkan::device::tests:: --test-threads=1
+      - name: Test scalar FMA admission and software rounding
+        run: >-
+          cargo test --locked -p pentax-platform --lib -- native_scalar_fma_tests:: fused_float::tests:: --test-threads=1
+      - name: Test original scalar FMA worker consumers
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_scalar_fma:: -- --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

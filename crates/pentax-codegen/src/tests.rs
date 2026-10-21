@@ -16,6 +16,7 @@ mod multiply_add_words;
 mod native_packed_float;
 mod native_packed_float_memory;
 mod native_scalar_float;
+mod native_scalar_fma;
 mod native_streaming_stores;
 mod native_string_index;
 mod native_vector_moves;

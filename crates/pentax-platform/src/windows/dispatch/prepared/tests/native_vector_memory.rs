@@ -159,7 +159,10 @@ fn native_vector_memory_all_28_forms_copy_raw_bits_and_preserve_complete_state()
                 .unwrap();
                 // Actual AVX was independently admitted above. AVX2 is never
                 // required for these moves, including integer YMM DQA/DQU.
-                engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+                engine.machine.vector_mode = VectorMode::Avx {
+                    avx2: false,
+                    fma: false,
+                };
                 let plan = plan_materialized_block(
                     source,
                     0,

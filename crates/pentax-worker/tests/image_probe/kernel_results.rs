@@ -102,6 +102,8 @@ mod native_packed_float;
 mod native_packed_float_memory;
 #[path = "native_scalar_float.rs"]
 mod native_scalar_float;
+#[path = "native_scalar_fma.rs"]
+mod native_scalar_fma;
 #[path = "native_streaming_stores.rs"]
 mod native_streaming_stores;
 #[path = "native_vector_memory.rs"]

@@ -58,6 +58,7 @@ pub struct TranslationPolicy {
     native_streaming_stores: bool,
     native_vector_moves: bool,
     native_scalar_float: bool,
+    native_scalar_fma: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -71,6 +72,7 @@ impl TranslationPolicy {
             native_streaming_stores: false,
             native_vector_moves: false,
             native_scalar_float: false,
+            native_scalar_fma: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -125,6 +127,17 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_scalar_float(self) -> bool {
         self.native_scalar_float
+    }
+    /// Separately request only register-source VFMADD213SS/VFNMADD213SS.
+    /// This does not imply a full-YMM request or host AVX/FMA/OS admission.
+    /// The runtime must independently preserve the checked masked MXCSR
+    /// profile and retain all destination bits used by destructive scalar FMA.
+    pub const fn with_native_scalar_fma(mut self) -> Self {
+        self.native_scalar_fma = true;
+        self
+    }
+    pub const fn requests_native_scalar_fma(self) -> bool {
+        self.native_scalar_fma
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -261,13 +274,18 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_scalar_float()
         && native_scalar_float_width(instruction).is_some();
+    let vex_scalar_fma = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_scalar_fma()
+        && native_scalar_fma(instruction);
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
         && (native_ymm_registers(instruction)
             || vex_memory
             || vex_streaming
             || vex_moves
-            || vex_scalar);
+            || vex_scalar
+            || vex_scalar_fma);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -276,6 +294,9 @@ pub(crate) fn ordinary(
     }
     if vex_vector && !policy.features.contains(CpuidFeature::AVX) {
         return Err(UnsupportedReason::MissingFeature(CpuidFeature::AVX));
+    }
+    if vex_scalar_fma && !policy.features.contains(CpuidFeature::FMA) {
+        return Err(UnsupportedReason::MissingFeature(CpuidFeature::FMA));
     }
     for feature in instruction.cpuid_features() {
         if !policy.features.contains(*feature) {
@@ -287,7 +308,8 @@ pub(crate) fn ordinary(
         // registers plus the separately requested ordinary64-bit read, or one
         // vector source plus a separately requested exact streaming write, or
         // one exact requested temporal vector/scalar transfer, or the separate
-        // scalar arithmetic register/exact4-or8-byte read shape. No other
+        // scalar arithmetic register/exact4-or8-byte read shape, or one of
+        // the two separately requested destructive scalar FMA register forms. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -605,6 +627,23 @@ pub(crate) fn native_packed_float_memory_width(instruction: &Instruction) -> Opt
         return None;
     }
     Some(width)
+}
+
+// Exact destructive scalar213SS forms, separately requested and feature-gated.
+// DEST supplies both the multiply input and the preserved bits32..127.
+// Scalar LIG is canonicalized by the encoder, never copied as raw source bytes.
+fn native_scalar_fma(instruction: &Instruction) -> bool {
+    matches!(
+        instruction.code(),
+        Code::VEX_Vfmadd213ss_xmm_xmm_xmmm32 | Code::VEX_Vfnmadd213ss_xmm_xmm_xmmm32
+    ) && instruction.code_size() == iced_x86::CodeSize::Code64
+        && instruction.op_count() == 3
+        && (0..3).all(|operand| {
+            let register = instruction.op_register(operand);
+            instruction.op_kind(operand) == OpKind::Register
+                && register.is_xmm()
+                && register <= Register::XMM15
+        })
 }
 
 /// Seventy-one exact decoded forms, all register-only. The twelve packed

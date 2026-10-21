@@ -99,7 +99,10 @@ fn native_streaming_stores_retire_exact_bytes_and_preserve_complete_source_conte
                 if features.is_some() {
                     // This profile needs AVX, not AVX2. Restrict the private
                     // test mode only after actual AVX+OS/XCR0 admission.
-                    engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+                    engine.machine.vector_mode = VectorMode::Avx {
+                        avx2: false,
+                        fma: false,
+                    };
                 }
                 let planned = plan_materialized_block(
                     source,

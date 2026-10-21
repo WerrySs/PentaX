@@ -252,6 +252,18 @@ literal results and counter assertions remain unchanged. New original native
 proofs must establish actual execution separately from planning/source review.
 Sampled planned exits alone do not establish retired frequency or a speedup.
 
+`with_native_scalar_fma()` is an independent, default-disabled request for
+exactly VEX VFMADD213SS and VFNMADD213SS with three XMM0..15 operands. It
+requires the full-YMM request and declared AVX plus FMA. Existing prefix,
+source and placement checks remain mandatory. Decoded LIG variants are
+canonicalized to L=0. The old destination remains an input; its inactive
+low128 bits are retained and its upper128 bits are cleared. Packed, memory,
+other operand orders, scalar double and EVEX forms gain no authority from
+this request. Both execution publishers independently require the actual
+engine's admitted FMA capability, including supported OS vector state.
+FMA and AVX2 admission are independent cache identities. Planning neither
+proves execution nor changes the guest CPU identification profile.
+
 `with_native_streaming_stores()` separately requests exactly VEX.128/256
 VMOVNTDQ memory destinations, with XMM0..15/YMM0..15 sources and ordinary 64-bit
 addresses. The full-YMM request and independently admitted actual AVX are also

@@ -217,7 +217,7 @@ fn native_vector_register_bits_match_literal_order_upper_and_complete_context() 
         .count() as u64;
     assert!(controls > 0);
     assert_eq!(cases, 32 * 3 * 4 * controls);
-    let label = if matches!(mode, VectorMode::Avx { avx2: true }) {
+    let label = if matches!(mode, VectorMode::Avx { avx2: true, .. }) {
         "avx2"
     } else {
         "avx"

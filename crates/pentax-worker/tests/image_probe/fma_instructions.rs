@@ -52,7 +52,7 @@ fn native_fma_continues_scalar_register_and_memory_operations_with_exact_fusion_
     }
 
     // A tiny exact result that rounds to minimum normal still flushes with
-    // source FTZ and sets underflow/precision; no host FMA execution is needed.
+    // source FTZ and sets underflow/precision in both execution paths.
     p.reg(0, 0x9f80);
     p.save(16);
     p.code.extend([0x0f, 0xae, 0x54, 0x24, 16]);

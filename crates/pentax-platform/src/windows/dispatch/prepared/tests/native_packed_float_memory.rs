@@ -295,7 +295,7 @@ fn all_native_memory_fp_forms_match_full_bits_controls_aliases_and_exact_page_ed
             }
         }
     }
-    let label = if matches!(mode, VectorMode::Avx { avx2: true }) {
+    let label = if matches!(mode, VectorMode::Avx { avx2: true, .. }) {
         "avx2"
     } else {
         "avx"

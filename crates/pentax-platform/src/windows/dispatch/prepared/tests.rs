@@ -79,6 +79,8 @@ mod native_packed_float_memory_tests;
 mod native_packed_float_tests;
 #[path = "tests/native_scalar_float.rs"]
 mod native_scalar_float_tests;
+#[path = "tests/native_scalar_fma.rs"]
+mod native_scalar_fma_tests;
 #[path = "tests/native_streaming_stores.rs"]
 mod native_streaming_stores_tests;
 #[path = "tests/native_string_index.rs"]

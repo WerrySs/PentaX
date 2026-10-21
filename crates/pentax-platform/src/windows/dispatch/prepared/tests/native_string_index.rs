@@ -115,7 +115,10 @@ fn register_string_index_all_controls_match_masked_flags_index_and_complete_stat
         )
         .unwrap();
         // Actual CPU/OS admission above is mandatory; AVX2 is never declared.
-        engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+        engine.machine.vector_mode = VectorMode::Avx {
+            avx2: false,
+            fma: false,
+        };
         for (alias, registers) in aliases.into_iter().enumerate() {
             for control in 0..=255_u8 {
                 let at = (alias * 256 + usize::from(control)) * 7;
@@ -197,7 +200,10 @@ fn string_index_native_and_fallback_branches_use_new_flags_and_rcx_addresses() {
             )
             .unwrap();
             engine.machine.vector_mode = if native {
-                VectorMode::Avx { avx2: false }
+                VectorMode::Avx {
+                    avx2: false,
+                    fma: false,
+                }
             } else {
                 VectorMode::Sse2
             };
@@ -286,7 +292,10 @@ fn string_index_native_and_fallback_branches_use_new_flags_and_rcx_addresses() {
                 &Default::default(),
             )
             .unwrap();
-            engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+            engine.machine.vector_mode = VectorMode::Avx {
+                avx2: false,
+                fma: false,
+            };
             let first = planned(source, &engine, current.guest_pc, &code, true);
             assert_eq!(first.instructions().len(), 1);
             assert_eq!(

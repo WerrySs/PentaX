@@ -754,6 +754,20 @@ signaling-NaN payloads without introducing spurious exceptions. A finite
 comparison selects its preceding release artifact explicitly; the observed
 native vector mode alone does not identify an artifact's scalar policy.
 
+A separate request admits only register VFMADD213SS and VFNMADD213SS with
+the actual full-YMM engine's AVX and FMA support. It preserves the old
+destination's inactive low128 bits, clears the upper128 bits, and retains
+masked MXCSR rounding, DAZ/FTZ, sticky status, ordered NaNs and integer flags.
+Other supported VEX fused forms and memory operands retain their checked
+software route; EVEX remains explicitly unsupported.
+`native_scalar_fma=true|false` reports this engine capability after
+admission; it does not count retired operations or establish a speedup.
+Original callers compare real native and mediated counter deltas while
+checking exact fused cancellation and state across a kernel service call.
+Software underflow uses precision rounding with an unbounded exponent to
+determine tininess before the final subnormal rounding; merely rounding a
+tiny value to the minimum normal value does not by itself suppress FTZ.
+
 Final-only graphics fields expose existing committed accounting:
 `graphics_calls` includes all implemented graphics-provider calls, including
 VideoOut and shader helpers; `graphics_command_buffers` counts nonempty admitted
