@@ -303,6 +303,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) emits_non_temporal_store: bool,
     pub(crate) emits_vector_memory_move: bool,
     pub(crate) emits_scalar_float_memory: bool,
+    pub(crate) emits_float_min_max_memory: bool,
     pub(crate) admission: NativeAdmissionSummary,
     pub(crate) usage: BlockUsage,
 }
@@ -364,6 +365,11 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     /// including manual execution without an independent-memory policy request.
     pub const fn emits_scalar_float_memory(&self) -> bool {
         self.emits_scalar_float_memory
+    }
+    /// Only actually emitted MIN/MAX memory reads set this flag. Manual entry
+    /// must independently check their full live spans and address dependencies.
+    pub const fn emits_float_min_max_memory(&self) -> bool {
+        self.emits_float_min_max_memory
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage

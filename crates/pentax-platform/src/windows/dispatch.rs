@@ -915,6 +915,7 @@ fn publish_block_with_mode(
         || plan.policy().requests_native_streaming_stores()
         || plan.policy().requests_native_vector_moves()
         || plan.policy().requests_native_scalar_float()
+        || plan.policy().requests_native_float_min_max()
         || plan.policy().requests_native_scalar_fma()
         || plan.policy().requests_native_fma_registers())
         && !plan.policy().requests_native_ymm_registers())
@@ -923,6 +924,7 @@ fn publish_block_with_mode(
             || plan.policy().requests_native_streaming_stores()
             || plan.policy().requests_native_vector_moves()
             || plan.policy().requests_native_scalar_float()
+            || plan.policy().requests_native_float_min_max()
             || plan.policy().requests_native_scalar_fma()
             || plan.policy().requests_native_fma_registers())
             && mode.features().is_none())
@@ -1268,12 +1270,18 @@ fn preflight_diagnostic_vector_memory(
     if !plan.emits_non_temporal_store()
         && !plan.emits_vector_memory_move()
         && !plan.emits_scalar_float_memory()
+        && !plan.emits_float_min_max_memory()
     {
         return Ok(());
     }
     // SAFETY: run_one_block's caller holds DispatchGuard. No bridge call is in
-    // flight; only current guest address registers are observed here.
-    let gpr = unsafe { (*CONTEXT.0.get()).gpr };
+    // flight; only current guest address registers and flags are observed here.
+    let (gpr, flags) = unsafe { ((*CONTEXT.0.get()).gpr, (*CONTEXT.0.get()).rflags) };
+    if plan.emits_float_min_max_memory() && flags & (1 << 18) != 0 {
+        return Err(PlatformError::NativeDispatchFailed {
+            stage: "native-vector flags",
+        });
+    }
     let memory = space.pause().map_err(native)?;
     let mut analyzer = MemoryAccessAnalyzer::default();
     let mut written = 0_u16;

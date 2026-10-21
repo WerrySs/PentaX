@@ -169,6 +169,17 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::agc_fusion:: -- --test-threads=1
+      - name: Test complete floating MIN/MAX planning and memory metadata
+        run: >-
+          cargo test --locked -p pentax-codegen --lib tests::native_float_min_max::
+      - name: Test native floating MIN/MAX state and live memory refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_float_min_max_tests:: -- --test-threads=1
+      - name: Test all floating MIN/MAX worker operand shapes
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_float_min_max:: -- --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

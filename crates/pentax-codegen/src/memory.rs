@@ -270,6 +270,10 @@ impl MemoryAccessAnalyzer {
                 && info.memory_count == 1
                 && used.access() == OpAccess::Read
                 && crate::policy::native_packed_float_memory_width(instruction) == Some(32);
+            let min_max_read = size == 32
+                && info.memory_count == 1
+                && used.access() == OpAccess::Read
+                && crate::policy::native_float_min_max_shape(instruction) == Some((32, 32));
             let streaming_write = size == 32
                 && info.memory_count == 1
                 && used.access() == OpAccess::Write
@@ -281,7 +285,9 @@ impl MemoryAccessAnalyzer {
                     Some((32, true)) => used.access() == OpAccess::Write,
                     _ => false,
                 };
-            if size == 0 || (size > 16 && !packed_read && !streaming_write && !vector_move) {
+            if size == 0
+                || (size > 16 && !packed_read && !min_max_read && !streaming_write && !vector_move)
+            {
                 return Err(MemoryAccessError::UnsupportedSize);
             }
             let kind = match used.access() {

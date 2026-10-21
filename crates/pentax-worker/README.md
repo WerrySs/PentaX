@@ -778,6 +778,18 @@ Software underflow uses precision rounding with an unbounded exponent to
 determine tininess before the final subnormal rounding; merely rounding a
 tiny value to the minimum normal value does not by itself suppress FTZ.
 
+An independent native MIN/MAX request covers all twelve supported VEX SS/SD
+and packed PS/PD Codes, with register or exact 4/8/16/32-byte read operands.
+The worker selects it only from its admitted full-YMM engine's actual AVX
+capability; FMA and AVX2 are not required. Right-source NaN and signed-zero
+priority, raw signaling-NaN results, masked guest status, scalar source1 merge
+and upper-vector clearing retain the existing checked semantics. Emitted
+memory forms require the complete live-span and dependency preflight in every
+entry path. Original worker callers exercise all twenty-four operand shapes,
+keep a genuinely modeled VMOVQ boundary, and verify exact native/modeled
+counters and all vector registers across a kernel service. Source presence or
+successful instruction execution does not establish a title speedup or boot.
+
 Final-only cache observations distinguish successful executable replacements
 from `cache_evicted_key_revisits`: returns to a slot's immediately previous
 evicted publication key, qualified by source epoch, guest PC and full native

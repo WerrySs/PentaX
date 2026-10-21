@@ -60,6 +60,7 @@ pub struct TranslationPolicy {
     native_scalar_float: bool,
     native_scalar_fma: bool,
     native_fma_registers: bool,
+    native_float_min_max: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -75,6 +76,7 @@ impl TranslationPolicy {
             native_scalar_float: false,
             native_scalar_fma: false,
             native_fma_registers: false,
+            native_float_min_max: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -150,6 +152,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_fma_registers(self) -> bool {
         self.native_fma_registers
+    }
+    /// Separately request twelve exact VEX MIN/MAX Codes, with register or
+    /// ordinary4/8/16/32-byte read sources. Full-YMM, actual AVX, masked MXCSR
+    /// and every live source span remain independent runtime requirements.
+    pub const fn with_native_float_min_max(mut self) -> Self {
+        self.native_float_min_max = true;
+        self
+    }
+    pub const fn requests_native_float_min_max(self) -> bool {
+        self.native_float_min_max
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -294,6 +306,10 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_fma_registers()
         && native_fma_registers(instruction);
+    let vex_min_max = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_float_min_max()
+        && native_float_min_max_shape(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
         && (native_ymm_registers(instruction)
@@ -302,7 +318,8 @@ pub(crate) fn ordinary(
             || vex_moves
             || vex_scalar
             || vex_scalar_fma
-            || vex_fma_registers);
+            || vex_fma_registers
+            || vex_min_max);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -326,7 +343,8 @@ pub(crate) fn ordinary(
         // vector source plus a separately requested exact streaming write, or
         // one exact requested temporal vector/scalar transfer, or the separate
         // scalar arithmetic register/exact4-or8-byte read shape, or one of
-        // separately requested destructive FMA3 register forms. No other
+        // separately requested destructive FMA3 registers, or a closed MIN/MAX
+        // register/exact-read shape. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -431,6 +449,62 @@ pub(crate) fn native_scalar_float_width(instruction: &Instruction) -> Option<usi
         _ => return None,
     }
     Some(width)
+}
+
+/// Closed MIN/MAX shape: (vector register bytes, ordinary read bytes).
+/// Scalar merge sources remain XMM. This retains no evaluated address or right.
+pub(crate) fn native_float_min_max_shape(instruction: &Instruction) -> Option<(usize, usize)> {
+    use Code::*;
+    let shape = match instruction.code() {
+        VEX_Vminss_xmm_xmm_xmmm32 | VEX_Vmaxss_xmm_xmm_xmmm32 => (16, 4),
+        VEX_Vminsd_xmm_xmm_xmmm64 | VEX_Vmaxsd_xmm_xmm_xmmm64 => (16, 8),
+        VEX_Vminps_xmm_xmm_xmmm128
+        | VEX_Vmaxps_xmm_xmm_xmmm128
+        | VEX_Vminpd_xmm_xmm_xmmm128
+        | VEX_Vmaxpd_xmm_xmm_xmmm128 => (16, 16),
+        VEX_Vminps_ymm_ymm_ymmm256
+        | VEX_Vmaxps_ymm_ymm_ymmm256
+        | VEX_Vminpd_ymm_ymm_ymmm256
+        | VEX_Vmaxpd_ymm_ymm_ymmm256 => (32, 32),
+        _ => return None,
+    };
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 3
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+    {
+        return None;
+    }
+    for operand in 0..3 {
+        if operand == 2 && instruction.op2_kind() == OpKind::Memory {
+            let base = instruction.memory_base();
+            let index = instruction.memory_index();
+            if instruction.memory_size().size() != shape.1
+                || instruction.is_vsib()
+                || !(base == Register::None || base == Register::RIP || base.is_gpr64())
+                || !(index == Register::None || index.is_gpr64())
+                || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+                || (base == Register::None
+                    && index == Register::None
+                    && instruction.memory_displ_size() != 8)
+            {
+                return None;
+            }
+        } else {
+            let register = instruction.op_register(operand);
+            if instruction.op_kind(operand) != OpKind::Register
+                || if shape.0 == 16 {
+                    !register.is_xmm() || register > Register::XMM15
+                } else {
+                    !register.is_ymm() || register > Register::YMM15
+                }
+            {
+                return None;
+            }
+        }
+    }
+    Some(shape)
 }
 
 /// Exact temporal memory shape: (memory bytes, write). Scalar memory widths

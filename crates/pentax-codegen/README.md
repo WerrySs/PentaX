@@ -252,6 +252,24 @@ literal results and counter assertions remain unchanged. New original native
 proofs must establish actual execution separately from planning/source review.
 Sampled planned exits alone do not establish retired frequency or a speedup.
 
+`with_native_float_min_max()` independently requests twelve exact VEX MIN/MAX
+Codes: packed PS/PD at 128/256 bits and scalar SS/SD. Each permits three correctly
+sized vector registers or two vector registers plus one exact ordinary read
+of 4/8/16/32 bytes. The request defaults off and does not imply full-YMM or host
+authority. Declared and independently admitted actual AVX are required; FMA and
+AVX2 are not. Existing legacy and other profile APIs retain their meanings.
+Address32, segments, VSIB, writes, EVEX and other arithmetic remain excluded.
+Scalar LIG source encodings are re-encoded with L=0 before native execution.
+
+The memory analyzer's 32-byte exception covers only the four exact packed-YMM
+MIN/MAX reads with one unconditional Read descriptor. An immutable flag records
+only actual emitted MIN/MAX memory operands, so manual and diagnostic consumers
+must perform the same full live-span and address-dependency preflight as checked
+execution. The flag grants no permission or fence authority. Original planning
+proofs cover all twelve Codes and twenty-four shapes, high-register aliases,
+SIB/RIP addressing, source-bound re-encoding and unchanged finite limits. They
+make no numerical hardware-equivalence or title performance claim.
+
 `with_native_scalar_fma()` is an independent, default-disabled request for
 exactly VEX VFMADD213SS and VFNMADD213SS with three XMM0..15 operands. It
 requires the full-YMM request and declared AVX plus FMA. Existing prefix,

@@ -295,6 +295,9 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
     pub const fn emits_scalar_float_memory(&self) -> bool {
         self.inner.emits_scalar_float_memory()
     }
+    pub const fn emits_float_min_max_memory(&self) -> bool {
+        self.inner.emits_float_min_max_memory()
+    }
     pub const fn usage(&self) -> BlockUsage {
         self.inner.usage()
     }

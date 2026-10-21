@@ -13,6 +13,7 @@ mod materialized;
 mod memory;
 mod minimum_position;
 mod multiply_add_words;
+mod native_float_min_max;
 mod native_fma_registers;
 mod native_packed_float;
 mod native_packed_float_memory;

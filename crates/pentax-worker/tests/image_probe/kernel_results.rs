@@ -98,6 +98,8 @@ mod mask_comparisons;
 mod minimum_position;
 #[path = "multiply_add_words.rs"]
 mod multiply_add_words;
+#[path = "native_float_min_max.rs"]
+mod native_float_min_max;
 #[path = "native_fma_registers.rs"]
 mod native_fma_registers;
 #[path = "native_packed_float.rs"]
