@@ -259,8 +259,9 @@ fn streaming_request_keeps_other_memory_features_addresses_and_reserved_forms_cl
             Err(CodegenError::InvalidInstruction { .. })
         ));
     }
-    // Fabricated metadata cannot turn the size exception into temporal write32.
-    for raw in [[0xc5, 0xfc, 0x11, 0x08], [0xc5, 0xfd, 0x7f, 0x08]] {
+    // Fabricated metadata cannot turn the size exception into unrelated NT
+    // floating writes. Temporal moves have a separate exact footprint profile.
+    for raw in [[0xc5, 0xfc, 0x2b, 0x08], [0xc5, 0xfd, 0x2b, 0x08]] {
         let instruction = Decoder::with_ip(64, &raw, BIAS, DecoderOptions::NONE).decode();
         let mut analyzer = MemoryAccessAnalyzer::default();
         let template = analyzer.prepare(&instruction);

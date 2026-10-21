@@ -249,8 +249,7 @@ fn native_canonical_and_posix_usleep_park_while_another_guest_runs_and_preserve_
         assert_eq!(fields["unavailable_functions"], "0", "{text}");
         assert_eq!(fields["phase"], "main-entry", "{text}");
         assert_eq!(fields["initializer_calls"], "0", "{text}");
-        assert_eq!(fields["vector_ops"], "8", "{text}");
-        assert_eq!(fields["vector_bytes"], "144", "{text}");
+        assert_modeled_vector_counters(&fields, [(8, 144), (4, 16), (4, 16)]);
         assert_eq!(
             fields["kernel_handles_live"], fields["kernel_handles_accounted"],
             "{text}"

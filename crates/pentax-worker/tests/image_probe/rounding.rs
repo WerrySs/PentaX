@@ -175,8 +175,9 @@ fn native_rounding_forms_preserve_signed_results_sticky_status_scalar_merges_and
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
-    assert_eq!(fields["vector_ops"], "90", "{text}");
-    assert_eq!(fields["vector_bytes"], transferred.to_string(), "{text}");
+    // The literal total below still describes every original transfer. Only
+    // the remaining mediated rounding/control bytes enter vector counters.
+    assert_modeled_vector_counters(&fields, [(90, transferred), (30, 176), (30, 176)]);
     assert_eq!(transferred, 2096);
     assert_eq!(fields["fp_status"], "36", "{text}");
 }

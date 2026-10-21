@@ -75,14 +75,14 @@ fn consumer(iterations: u64, all_registers: bool) -> Vec<u8> {
                 offset,
             ]);
         }
-        // This memory VMOVUPS remains modeled. It is the first Rust guest-data
+        // This memory VMOVNTDQA remains modeled. It is the first Rust guest-data
         // read after the native stores; the source is reloaded with identical
         // literal bits, without a guest fence or service in between.
         p.code.extend([
             0xc4,
-            if register >= 8 { 0x41 } else { 0xc1 },
-            0x7c,
-            0x10,
+            if register >= 8 { 0x42 } else { 0xc2 },
+            0x7d,
+            0x2a,
             0x45 | ((register & 7) << 3),
             32,
         ]);
@@ -147,17 +147,18 @@ fn admitted(fields: &HashMap<String, String>) -> bool {
 }
 
 fn check_counts(fields: &HashMap<String, String>, iterations: u64, profiles: u64, native: bool) {
+    let (base_ops, base_bytes) = if native { (2, 8) } else { (34, 1032) };
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], "1");
     assert_eq!(fields["fp_status"], "37");
     assert_eq!(count(fields, "integer_ops"), 0);
     assert_eq!(
         count(fields, "vector_ops"),
-        34 + profiles * iterations * if native { 1 } else { 3 }
+        base_ops + profiles * iterations * if native { 1 } else { 3 }
     );
     assert_eq!(
         count(fields, "vector_bytes"),
-        1032 + profiles * iterations * if native { 32 } else { 80 }
+        base_bytes + profiles * iterations * if native { 32 } else { 80 }
     );
 }
 
@@ -203,7 +204,11 @@ fn native_streaming_stores_original_baseline_measurement() {
     assert_eq!(before["native_ymm_mode"], after["native_ymm_mode"]);
     check_counts(&before, ITERATIONS, 1, false);
     check_counts(&after, ITERATIONS, 1, admitted(&after));
-    let promoted = if admitted(&after) { 2 * ITERATIONS } else { 0 };
+    let promoted = if admitted(&after) {
+        32 + 2 * ITERATIONS
+    } else {
+        0
+    };
     assert_eq!(
         count(&after, "native_instructions") - count(&before, "native_instructions"),
         promoted
@@ -214,7 +219,11 @@ fn native_streaming_stores_original_baseline_measurement() {
     );
     assert_eq!(
         count(&before, "vector_bytes") - count(&after, "vector_bytes"),
-        promoted * 24
+        if admitted(&after) {
+            1024 + 48 * ITERATIONS
+        } else {
+            0
+        }
     );
     println!(
         "native_streaming_stores_measurement_iterations={ITERATIONS} native_streaming_stores_measurement_mode={} baseline_elapsed_ns={before_ns} candidate_elapsed_ns={after_ns} baseline_entries={} candidate_entries={} baseline_blocks={} candidate_blocks={} baseline_work={} candidate_work={} baseline_publications={} candidate_publications={} baseline_reuses={} candidate_reuses={}",

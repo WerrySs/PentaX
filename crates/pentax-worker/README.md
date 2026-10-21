@@ -614,6 +614,45 @@ also retains a compiler memory barrier. There is no guest-limit increase or
 claim of atomic vector writes. The default software fallback remains available
 when the admitted native vector mode is absent.
 
+The separate native temporal-move request covers exactly 28 memory forms:
+128/256-bit DQA/DQU and APS/UPS/APD/UPD loads/stores, plus SS/SD scalar memory
+loads/stores. The worker enables it only through its already admitted full-YMM
+mode; both widths require actual AVX, not AVX2. Scalar memory loads zero all
+destination bits above the low 32/64 bits, packed VEX128 loads clear the upper
+half, and memory stores retain the complete source vector. These transfers do
+not evaluate floating-point bits or modify flags/MXCSR.
+
+Every execution retains exact current-owner read/write spans and address
+dependency checks. DQA/APS/APD alignment is checked for the new forms and six
+existing legacy load/store forms; the closed emitted-move flag also requires
+these checks in manual and diagnostic entry paths. Other memory families,
+addr32, segment overrides, VSIB and EVEX remain excluded. Temporal moves do not
+acquire a non-temporal fence requirement.
+
+Original consumers preserve their literal results and meaningful native-to-Rust
+boundaries through still-modeled operations. A modeled streaming load after NT
+stores remains a software operation, including when its guest encoding names
+AVX2; it does not demonstrate native host AVX2 execution. Historical comparison
+artifacts pass their arithmetic and temporal-copy profiles explicitly rather
+than deriving a release's capabilities from the shared observed vector mode.
+Mediated vector counters intentionally decrease as real copies become native;
+the complete memory accesses remain checked. No game boot or frame is implied.
+
+The final epoch-stop snapshot also reports `scheduling_pending_equeue_waits`,
+`video_open_ports`, `video_registered_buffers` and `video_vblank_subscriptions`.
+These count actual pending event-queue tickets and retained registrations for
+current live port generations. Subscriptions are included before their first
+signal. The bounded snapshot adds no per-block polling, ticks or presentation
+acknowledgements, and reveals no queue, port or buffer identity. Registration
+counts do not prove accessible pixel backing, readiness or a completed frame.
+Together with the real window state they can investigate a possible dependency
+between a guest's first vblank wait and the first submitted flip.
+
+Service profiles count admission actions. A parked wait is not an immediate
+nonzero return, and its later resumption/timeout is not recorded by that profile.
+Zero nonzero-return counts therefore do not establish immediate mutex success
+or useful game progress.
+
 Prepared image execution uses a bounded 2 MiB native code cache with 4096 fixed
 512-byte slots, each including a private trailer cell. Guest PC selects a slot;
 the pure planner re-encodes for that exact address. A reuse requires previously

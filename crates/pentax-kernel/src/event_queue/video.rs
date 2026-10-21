@@ -75,6 +75,22 @@ impl VideoClose<'_> {
     }
 }
 impl crate::Kernel {
+    /// Retained registrations, including subscriptions not yet signaled. The
+    /// caller qualifies the port generation; this does not inspect readiness.
+    pub fn video_vblank_subscription_count(&self, handle: i32, generation: u64) -> u64 {
+        let subscription = Subscription {
+            handle,
+            generation,
+            kind: VideoEventKind::Vblank,
+        };
+        self.event_queues
+            .queues
+            .iter()
+            .flat_map(|queue| &queue.events)
+            .filter(|event| event.video == Some(subscription))
+            .count() as u64
+    }
+
     /// Core validates the actual live VideoOut port before this internal call.
     /// Membership is retained by the queue; queue deletion cannot revive it.
     pub fn add_video_event(

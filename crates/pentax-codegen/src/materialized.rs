@@ -289,6 +289,9 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
     pub const fn emits_non_temporal_store(&self) -> bool {
         self.inner.emits_non_temporal_store()
     }
+    pub const fn emits_vector_memory_move(&self) -> bool {
+        self.inner.emits_vector_memory_move()
+    }
     pub const fn usage(&self) -> BlockUsage {
         self.inner.usage()
     }

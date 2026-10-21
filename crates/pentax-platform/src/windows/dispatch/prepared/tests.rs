@@ -77,6 +77,8 @@ mod native_packed_float_memory_tests;
 mod native_packed_float_tests;
 #[path = "tests/native_streaming_stores.rs"]
 mod native_streaming_stores_tests;
+#[path = "tests/native_vector_memory.rs"]
+mod native_vector_memory_tests;
 #[path = "tests/native_vector_register_bits.rs"]
 mod native_vector_register_bits_tests;
 #[path = "tests/native_ymm.rs"]

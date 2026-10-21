@@ -401,8 +401,7 @@ fn native_audio_out2_headless_pcm_lease_and_full_queue_preserve_real_thread_cont
         assert_eq!(fields["service_stops"], calls.to_string(), "{text}");
         assert_eq!(fields["unavailable_functions"], "0", "{text}");
         assert_eq!(fields["phase"], "main-entry", "{text}");
-        assert_eq!(fields["vector_ops"], "8", "{text}");
-        assert_eq!(fields["vector_bytes"], "144", "{text}");
+        assert_modeled_vector_counters(&fields, [(8, 144), (4, 16), (4, 16)]);
         assert_eq!(
             fields["string_elements"],
             if pcm { "4096" } else { "0" },

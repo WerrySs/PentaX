@@ -221,9 +221,9 @@ fn native_event_flag_wait_parks_both_threads_and_restores_all_ymm_with_real_clea
     assert_eq!(fields["scheduling_active_role"], "main", "{text}");
     assert_eq!(fields["unavailable_functions"], "0", "{text}");
     // Both contexts independently load/check all16 complete vectors and access
-    // MXCSR each way. Memory forms remain mediated in every engine mode.
-    assert_eq!(fields["vector_ops"], "68", "{text}");
-    assert_eq!(fields["vector_bytes"], "2064", "{text}");
+    // MXCSR each way. Temporal copies promote under the actual AVX profile;
+    // all spans still receive live preflight and MXCSR remains mediated.
+    assert_modeled_vector_counters(&fields, [(68, 2064), (4, 16), (4, 16)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(
         fields["kernel_handles_live"], fields["kernel_handles_accounted"],

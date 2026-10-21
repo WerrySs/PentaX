@@ -912,11 +912,13 @@ fn publish_block_with_mode(
     // The closed diagnostic wrapper above always selects the SSE2 mode.
     // A declared vector request cannot override that immutable entry/tail pair.
     if ((plan.policy().requests_native_packed_float_memory()
-        || plan.policy().requests_native_streaming_stores())
+        || plan.policy().requests_native_streaming_stores()
+        || plan.policy().requests_native_vector_moves())
         && !plan.policy().requests_native_ymm_registers())
         || ((plan.policy().requests_native_ymm_registers()
             || plan.policy().requests_native_packed_float_memory()
-            || plan.policy().requests_native_streaming_stores())
+            || plan.policy().requests_native_streaming_stores()
+            || plan.policy().requests_native_vector_moves())
             && mode.features().is_none())
     {
         return Err(PlatformError::UnsupportedHostFeature {
@@ -1233,11 +1235,11 @@ fn complete_non_temporal_stores() {
     unsafe { std::arch::asm!("mfence", options(nostack, preserves_flags)) };
 }
 
-fn preflight_diagnostic_streaming_memory(
+fn preflight_diagnostic_vector_memory(
     space: &mut NativeAddressSpace,
     plan: &BlockPlan<'_, '_>,
 ) -> Result<(), PlatformError> {
-    if !plan.emits_non_temporal_store() {
+    if !plan.emits_non_temporal_store() && !plan.emits_vector_memory_move() {
         return Ok(());
     }
     // SAFETY: run_one_block's caller holds DispatchGuard. No bridge call is in
@@ -1251,12 +1253,12 @@ fn preflight_diagnostic_streaming_memory(
             analyzer
                 .analyze(record, &gpr)
                 .map_err(|_| PlatformError::NativeDispatchFailed {
-                    stage: "streaming-store footprint",
+                    stage: "native-vector footprint",
                 })?;
         let dependencies = accesses.register_dependencies();
         if dependencies.address & written != 0 {
             return Err(PlatformError::NativeDispatchFailed {
-                stage: "streaming-store address dependency",
+                stage: "native-vector address dependency",
             });
         }
         written |= dependencies.written;
@@ -1291,7 +1293,7 @@ fn run_one_block(
     guest_pc: u64,
 ) -> Result<(), PlatformError> {
     publish_block(cache, space, plan, guest_pc)?;
-    preflight_diagnostic_streaming_memory(space, plan)?;
+    preflight_diagnostic_vector_memory(space, plan)?;
     let streaming = plan.emits_non_temporal_store();
     // SAFETY: We hold the exclusive DispatchGuard, so no other access to
     // CONTEXT races this. The cache body at CONTEXT.rip was attested above:

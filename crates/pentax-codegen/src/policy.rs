@@ -56,6 +56,7 @@ pub struct TranslationPolicy {
     native_ymm_registers: bool,
     native_packed_float_memory: bool,
     native_streaming_stores: bool,
+    native_vector_moves: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -67,6 +68,7 @@ impl TranslationPolicy {
             native_ymm_registers: false,
             native_packed_float_memory: false,
             native_streaming_stores: false,
+            native_vector_moves: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -102,6 +104,15 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_streaming_stores(self) -> bool {
         self.native_streaming_stores
+    }
+    /// Separately request exact temporal VEX vector/scalar memory transfers.
+    /// This grants no live backing, alignment or host vector-state authority.
+    pub const fn with_native_vector_moves(mut self) -> Self {
+        self.native_vector_moves = true;
+        self
+    }
+    pub const fn requests_native_vector_moves(self) -> bool {
+        self.native_vector_moves
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -230,9 +241,13 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_streaming_stores()
         && native_streaming_store_width(instruction).is_some();
+    let vex_moves = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_vector_moves()
+        && native_vector_move_shape(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
-        && (native_ymm_registers(instruction) || vex_memory || vex_streaming);
+        && (native_ymm_registers(instruction) || vex_memory || vex_streaming || vex_moves);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -250,7 +265,8 @@ pub(crate) fn ordinary(
     if vex_vector {
         // Exact gates prove either same-width registers only, or two such
         // registers plus the separately requested ordinary64-bit read, or one
-        // vector source plus a separately requested exact streaming write. No other
+        // vector source plus a separately requested exact streaming write, or
+        // one exact requested temporal vector/scalar transfer. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -301,6 +317,113 @@ pub(crate) fn ordinary(
         }
     }
     Ok(())
+}
+
+/// Exact temporal memory shape: (memory bytes, write). Scalar memory widths
+/// are4/8, but their sole register is still XMM. No live address is retained.
+pub(crate) fn native_vector_move_shape(instruction: &Instruction) -> Option<(usize, bool)> {
+    use Code::*;
+    let (width, write) = match instruction.code() {
+        VEX_Vmovdqa_xmm_xmmm128
+        | VEX_Vmovdqu_xmm_xmmm128
+        | VEX_Vmovaps_xmm_xmmm128
+        | VEX_Vmovups_xmm_xmmm128
+        | VEX_Vmovapd_xmm_xmmm128
+        | VEX_Vmovupd_xmm_xmmm128 => (16, false),
+        VEX_Vmovdqa_xmmm128_xmm
+        | VEX_Vmovdqu_xmmm128_xmm
+        | VEX_Vmovaps_xmmm128_xmm
+        | VEX_Vmovups_xmmm128_xmm
+        | VEX_Vmovapd_xmmm128_xmm
+        | VEX_Vmovupd_xmmm128_xmm => (16, true),
+        VEX_Vmovdqa_ymm_ymmm256
+        | VEX_Vmovdqu_ymm_ymmm256
+        | VEX_Vmovaps_ymm_ymmm256
+        | VEX_Vmovups_ymm_ymmm256
+        | VEX_Vmovapd_ymm_ymmm256
+        | VEX_Vmovupd_ymm_ymmm256 => (32, false),
+        VEX_Vmovdqa_ymmm256_ymm
+        | VEX_Vmovdqu_ymmm256_ymm
+        | VEX_Vmovaps_ymmm256_ymm
+        | VEX_Vmovups_ymmm256_ymm
+        | VEX_Vmovapd_ymmm256_ymm
+        | VEX_Vmovupd_ymmm256_ymm => (32, true),
+        VEX_Vmovss_xmm_m32 => (4, false),
+        VEX_Vmovss_m32_xmm => (4, true),
+        VEX_Vmovsd_xmm_m64 => (8, false),
+        VEX_Vmovsd_m64_xmm => (8, true),
+        _ => return None,
+    };
+    let register_operand = u32::from(write);
+    let memory_operand = u32::from(!write);
+    let register = instruction.op_register(register_operand);
+    let register_width = if width == 32 { 32 } else { 16 };
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 2
+        || instruction.op_kind(memory_operand) != OpKind::Memory
+        || instruction.op_kind(register_operand) != OpKind::Register
+        || register.size() != register_width
+        || !(if width == 32 {
+            register.is_ymm() && register <= Register::YMM15
+        } else {
+            register.is_xmm() && register <= Register::XMM15
+        })
+        || instruction.memory_size().size() != width
+        || instruction.is_vsib()
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+    {
+        return None;
+    }
+    let base = instruction.memory_base();
+    let index = instruction.memory_index();
+    if !(base == Register::None || base == Register::RIP || base.is_gpr64())
+        || !(index == Register::None || index.is_gpr64())
+        || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+        || (base == Register::None
+            && index == Register::None
+            && instruction.memory_displ_size() != 8)
+    {
+        return None;
+    }
+    Some((width, write))
+}
+
+/// Architectural alignment of selected temporal memory transfers only. Shared
+/// register encodings and all unaligned/scalar/NT families are excluded.
+pub(crate) fn aligned_vector_move_width(instruction: &Instruction) -> Option<usize> {
+    use Code::*;
+    let width = match instruction.code() {
+        Movdqa_xmm_xmmm128
+        | Movdqa_xmmm128_xmm
+        | Movaps_xmm_xmmm128
+        | Movaps_xmmm128_xmm
+        | Movapd_xmm_xmmm128
+        | Movapd_xmmm128_xmm
+        | VEX_Vmovdqa_xmm_xmmm128
+        | VEX_Vmovdqa_xmmm128_xmm
+        | VEX_Vmovaps_xmm_xmmm128
+        | VEX_Vmovaps_xmmm128_xmm
+        | VEX_Vmovapd_xmm_xmmm128
+        | VEX_Vmovapd_xmmm128_xmm => 16,
+        VEX_Vmovdqa_ymm_ymmm256
+        | VEX_Vmovdqa_ymmm256_ymm
+        | VEX_Vmovaps_ymm_ymmm256
+        | VEX_Vmovaps_ymmm256_ymm
+        | VEX_Vmovapd_ymm_ymmm256
+        | VEX_Vmovapd_ymmm256_ymm => 32,
+        _ => return None,
+    };
+    (instruction.op_count() == 2 && instruction.op_kinds().any(|kind| kind == OpKind::Memory))
+        .then_some(width)
+}
+
+/// Emitted-only classification for mandatory manual-path span preflight. It
+/// includes the new28 VEX forms and only the six aligned legacy counterparts.
+pub(crate) fn vector_memory_move(instruction: &Instruction) -> bool {
+    native_vector_move_shape(instruction).is_some()
+        || aligned_vector_move_width(instruction).is_some()
 }
 
 /// Exact ordinary64-bit write shape; never a live address/permission proof.

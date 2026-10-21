@@ -100,7 +100,7 @@ fn check_result(p: &mut Program, words: [u64; 4]) {
         p.word(80 + word as u8 * 8, value);
     }
 }
-fn consumer(iterations: u64, all_forms: bool, separated: bool) -> Vec<u8> {
+fn consumer(iterations: u64, all_forms: bool, snapshot_each_operation: bool) -> Vec<u8> {
     let mut p = Program::new();
     p.stack(0x89, 4, 8);
     p.reg(12, 0x1020_3040_5060_7080);
@@ -134,11 +134,13 @@ fn consumer(iterations: u64, all_forms: bool, separated: bool) -> Vec<u8> {
             }
             for _ in 0..if all_forms { 1 } else { 4 } {
                 bits(&mut p, opcode, pp, wide, destination);
-                if separated {
+                // Snapshot count is independent of mediation. Current checked
+                // temporal stores can coalesce with the native raw-bit body.
+                if snapshot_each_operation {
                     vector_memory(&mut p, false, destination, 80);
                 }
             }
-            if !separated {
+            if !snapshot_each_operation {
                 vector_memory(&mut p, false, destination, 80);
             }
             if all_forms {
@@ -193,8 +195,9 @@ fn check_counts(
     fields: &HashMap<String, String>,
     iterations: u64,
     all_forms: bool,
-    separated: bool,
+    snapshot_each_operation: bool,
     native: bool,
+    native_copies: bool,
 ) {
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], "1");
@@ -202,14 +205,23 @@ fn check_counts(
     assert_eq!(fields["integer_ops"], "0");
     let profiles = if all_forms { 32 } else { 1 };
     let operations = if all_forms { 1 } else { 4 };
-    let stores = if separated { operations } else { 1 };
+    let stores = if snapshot_each_operation {
+        operations
+    } else {
+        1
+    };
+    let copies = if native_copies {
+        32 + profiles * iterations * (2 + stores)
+    } else {
+        0
+    };
     assert_eq!(
         count(fields, "vector_ops"),
-        34 + profiles * iterations * (2 + stores + if native { 0 } else { operations })
+        34 + profiles * iterations * (2 + stores + if native { 0 } else { operations }) - copies
     );
     assert_eq!(
         count(fields, "vector_bytes"),
-        1032 + profiles * iterations * (64 + stores * 32)
+        1032 + profiles * iterations * (64 + stores * 32) - copies * 32
     );
 }
 
@@ -220,7 +232,14 @@ fn native_vector_register_bits_family_proves_raw_bits_aliases_context_and_real_c
         let image = super::native_packed_float::original(&consumer(iterations, true, true));
         let (status, fields, text) = probe(&image);
         assert_eq!(status, 0, "{text}");
-        check_counts(&fields, iterations, true, true, admitted(&fields));
+        check_counts(
+            &fields,
+            iterations,
+            true,
+            true,
+            admitted(&fields),
+            admitted(&fields),
+        );
         results.push(fields);
     }
     assert_eq!(results[0]["native_ymm_mode"], results[1]["native_ymm_mode"]);
@@ -228,12 +247,12 @@ fn native_vector_register_bits_family_proves_raw_bits_aliases_context_and_real_c
     for key in ["native_instructions", "primary_native_instructions"] {
         assert_eq!(
             count(&results[1], key) - count(&results[0], key),
-            if native { 320 } else { 256 }
+            if native { 512 } else { 256 }
         );
     }
     assert_eq!(
         count(&results[1], "vector_ops") - count(&results[0], "vector_ops"),
-        if native { 192 } else { 256 }
+        if native { 0 } else { 256 }
     );
     println!(
         "native_vector_register_bits_worker_mode={} native_vector_register_bits_worker_forms=32 native_vector_register_bits_worker_programs=2",
@@ -249,14 +268,44 @@ fn native_vector_register_bits_original_baseline_measurement() {
     let candidate = std::env::var_os("PENTAX_TEST_WORKER").expect("explicit candidate required");
     assert!(baseline != candidate, "distinct worker artifacts required");
     const ITERATIONS: u64 = 50_000;
-    for separated in [true, false] {
-        let image = super::native_packed_float::original(&consumer(ITERATIONS, false, separated));
+    for snapshot_each_operation in [true, false] {
+        let image = super::native_packed_float::original(&consumer(
+            ITERATIONS,
+            false,
+            snapshot_each_operation,
+        ));
         let (before, before_ns) = super::native_packed_float::measured(&baseline, &image);
         let (after, after_ns) = super::native_packed_float::measured(&candidate, &image);
         assert_eq!(before["native_ymm_mode"], after["native_ymm_mode"]);
-        check_counts(&before, ITERATIONS, false, separated, false);
-        check_counts(&after, ITERATIONS, false, separated, admitted(&after));
-        let promoted = if admitted(&after) { 4 * ITERATIONS } else { 0 };
+        // This verified 0.32.5 baseline predates the 32 register-bit forms and
+        // temporal copies, even when its immutable bridge mode is also AVX.
+        check_counts(
+            &before,
+            ITERATIONS,
+            false,
+            snapshot_each_operation,
+            false,
+            false,
+        );
+        check_counts(
+            &after,
+            ITERATIONS,
+            false,
+            snapshot_each_operation,
+            admitted(&after),
+            admitted(&after),
+        );
+        let stores = if snapshot_each_operation { 4 } else { 1 };
+        let copies = if admitted(&after) {
+            32 + (2 + stores) * ITERATIONS
+        } else {
+            0
+        };
+        let promoted = if admitted(&after) {
+            4 * ITERATIONS + copies
+        } else {
+            0
+        };
         assert_eq!(
             count(&after, "native_instructions") - count(&before, "native_instructions"),
             promoted
@@ -265,9 +314,12 @@ fn native_vector_register_bits_original_baseline_measurement() {
             count(&before, "vector_ops") - count(&after, "vector_ops"),
             promoted
         );
-        assert_eq!(before["vector_bytes"], after["vector_bytes"]);
+        assert_eq!(
+            count(&before, "vector_bytes") - count(&after, "vector_bytes"),
+            copies * 32
+        );
         println!(
-            "native_vector_register_bits_measurement_separated={separated} native_vector_register_bits_measurement_iterations={ITERATIONS} native_vector_register_bits_measurement_mode={} baseline_elapsed_ns={before_ns} candidate_elapsed_ns={after_ns} baseline_entries={} candidate_entries={} baseline_blocks={} candidate_blocks={} baseline_work={} candidate_work={} baseline_publications={} candidate_publications={} baseline_reuses={} candidate_reuses={}",
+            "native_vector_register_bits_measurement_snapshot_each_operation={snapshot_each_operation} native_vector_register_bits_measurement_iterations={ITERATIONS} native_vector_register_bits_measurement_mode={} baseline_elapsed_ns={before_ns} candidate_elapsed_ns={after_ns} baseline_entries={} candidate_entries={} baseline_blocks={} candidate_blocks={} baseline_work={} candidate_work={} baseline_publications={} candidate_publications={} baseline_reuses={} candidate_reuses={}",
             after["native_ymm_mode"],
             before["native_entries"],
             after["native_entries"],

@@ -65,7 +65,7 @@ fn native_cpu_write_mapping_supports_x86_vector_reads_without_changing_reported_
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], calls.to_string());
-    assert_eq!(fields["vector_ops"], "2");
+    assert_modeled_vector_operations(&fields, ["2", "0", "0"]);
 }
 
 const PAGE: u32 = 0x4000;

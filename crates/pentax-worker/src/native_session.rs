@@ -607,7 +607,9 @@ fn run_prepared_consumer_inner<'plan, 'image>(
         );
         // Preserve a terminal queue observation before propagating typed stops.
         // This bounded snapshot never probes readiness or changes scheduling.
-        progress.scheduling = state.scheduling.observations();
+        progress.scheduling = state
+            .scheduling
+            .observations(session.video_registration_counts());
         match outcome? {
             None => {
                 return state
@@ -809,7 +811,8 @@ fn execute_epoch<'plan, 'image>(
         policy = policy
             .with_native_ymm_registers()
             .with_native_packed_float_memory()
-            .with_native_streaming_stores();
+            .with_native_streaming_stores()
+            .with_native_vector_moves();
     }
     let plans = plan_cache::PlanCache::new(
         source,

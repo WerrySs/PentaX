@@ -168,11 +168,12 @@ Original codegen and actual-platform fixtures enumerate all thirty-two forms,
 directions and aliases using arbitrary bits and unchanged status. The native
 worker consumer uses two finite original images with exact mode-aware counter
 deltas. Newly native operations count as `native_instructions`, rather than
-mediated `vector_ops`; memory setup and readback retain their exact mediated
-bytes. The ignored `native_vector_register_bits_original_baseline_measurement`
+mediated `vector_ops`. Without the separate temporal-memory request below,
+memory setup and readback retain their exact mediated bytes; enabling that
+request changes those actual-path counts too. The ignored `native_vector_register_bits_original_baseline_measurement`
 requires explicit independently verified `PENTAX_VECTOR_REGISTER_BITS_BASELINE_WORKER`
 and `PENTAX_TEST_WORKER` artifacts. It compares the same 50,000-iteration original
-separated/coalesced inputs with bounded concurrent diagnostic drains. It asserts
+inputs with intermediate/final snapshot layouts and bounded diagnostic drains. It asserts
 results and counter differences, not a timing inequality or a title speedup.
 
 Packed native ADD/SUB/MUL uses the existing checked host-compatible MXCSR
@@ -208,8 +209,8 @@ memory arithmetic contributes to `native_instructions` and ordinary checked
 memory bytes; mediated `vector_ops` and `vector_bytes` intentionally decrease.
 The ignored `native_packed_float_memory_original_baseline_measurement` uses
 explicit `PENTAX_PACKED_FLOAT_MEMORY_BASELINE_WORKER` (the independently verified
-register-only reference artifact) and `PENTAX_TEST_WORKER`. Its separated and
-coalesced 50,000-iteration original inputs retain literal results and exact
+register-only reference artifact) and `PENTAX_TEST_WORKER`. Its two snapshot
+layouts use 50,000-iteration original inputs with literal results and exact
 counter checks. Concurrent bounded diagnostic drains are shared with the prior
 measurement helper. Timings include process startup/teardown; no title speedup
 or whole-run instruction-frequency inference is made.
@@ -240,6 +241,33 @@ The ignored 50,000-iteration comparison requires independently verified
 elapsed times also include the executable-source interval memo and process
 startup/teardown; no isolated NT-store or game speedup is inferred.
 
+`with_native_vector_moves()` separately requests twenty-eight exact temporal
+VEX memory forms: MOVDQA/DQU and MOVAPS/UPS/APD/UPD load/store at128/256 bits,
+plus MOVSS/SD memory load/store at4/8 bytes. It requires the full-YMM request,
+declared AVX and independent actual AVX CPU/OS admission; AVX2 is not required.
+One XMM0..15/YMM0..15 register and one ordinary64-bit memory operand are allowed.
+The direction-specific single Read32/Write32 exceptions are confined to these
+exact transfers. Addr32, VSIB, segment/repeat/lock overrides, EVEX, register
+merge/scalar arithmetic and additional streaming forms remain outside this request.
+
+MOVDQA/APS/APD require16/32-byte alignment; DQU/UPS/UPD and scalar accesses may
+be unaligned. Scalar memory loads zero all destination bits above bit31/63,
+including YMM upper bits; scalar stores preserve their whole source and touch
+only4/8 bytes. All transfers are raw bits with unchanged MXCSR/flags and no
+NaN classification. These semantics follow the corresponding entries in
+[Intel Volume2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf).
+
+The six already-native legacy MOVDQA/APS/APD memory directions also receive
+explicit16-byte alignment admission. A separate immutable emitted-body flag
+covers them and the twenty-eight new VEX forms, forcing complete span/dependency
+preflight in manual/diagnostic consumers. This deliberately strengthens those
+legacy/manual checks and may add their existing conservative analysis charges;
+it grants no unrelated legacy memory authority. Temporal transfers do not set
+the NT flag or introduce an MFENCE. The checked worker retains all live owner,
+source-byte, stack, operand, cache and permission checks. Native moves contribute
+to native/ordinary-memory counters, rather than mediated vector counters; no
+budget, host control, scheduler or guest CPUID profile changes are implied.
+
 Consecutive admitted register operations can share the existing finite native
 block. Every live source/cache/owner/operand/stack check remains in place, with
 the existing 256-instruction/4096-byte default block limits. The complete joined
@@ -255,7 +283,7 @@ memory checks remain charged; old aggregate counts are not fabricated.
 The ignored original worker test `native_packed_float_original_baseline_measurement`
 requires explicit `PENTAX_PACKED_FLOAT_BASELINE_WORKER` and `PENTAX_TEST_WORKER`
 artifacts, independently verified by the coordinating runner. It uses the same
-finite 50,000-iteration inputs for separated and coalesced arithmetic and the
+finite 50,000-iteration inputs with two arithmetic snapshot layouts and the
 existing extended-startup profile, without changing any production limit.
 It checks results and intentional native/mediated counter differences, then
 records end-to-end process elapsed time, including startup/teardown, cache and

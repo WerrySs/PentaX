@@ -46,7 +46,7 @@ fn result(opcode: u8, double: bool, narrow: bool) -> [u64; 4] {
     words
 }
 fn vector_memory(p: &mut Program, load: bool, register: u8, offset: u8) {
-    // VMOVUPS memory always remains mediated, including on admitted AVX hosts.
+    // The current temporal-memory profile independently checks and emits this.
     p.code.extend([
         0xc5,
         if register >= 8 { 0x7c } else { 0xfc },
@@ -130,8 +130,10 @@ fn consumer(iterations: u64, dense: bool, all_forms: bool) -> Vec<u8> {
         }
         arithmetic(&mut p, opcode, double, true, [9, 13, 14], false);
         // Preserve this result before another instruction could overwrite it.
-        // This exact memory store forces real native -> checked Rust -> native.
+        // The full snapshot can now be native. The excluded eight-byte VMOVQ
+        // repeats its low word, retaining native -> checked Rust -> native.
         vector_memory(&mut p, false, 9, 112);
+        p.code.extend([0xc5, 0x79, 0xd6, 0x4c, 0x24, 112]);
         arithmetic(&mut p, opcode, double, true, [9, 13, 0], true);
         if dense {
             arithmetic(&mut p, opcode, double, true, [14, 13, 14], false);
@@ -233,19 +235,29 @@ fn check_counts(
     register_ops: u64,
     native: bool,
     native_memory: bool,
+    native_copies: bool,
 ) {
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], "1");
+    // Artifact feature facts are explicit: an older AVX bridge does not imply
+    // either packed-FP profile or today's temporal-memory-copy profile.
+    let copies = if native_copies {
+        32 + 3 * profiles + 3 * profiles * iterations
+    } else {
+        0
+    };
     assert_eq!(
         count(fields, "vector_ops"),
         34 + 3 * profiles
             + profiles
                 * iterations
-                * (4 - u64::from(native_memory) + if native { 0 } else { register_ops })
+                * (5 - u64::from(native_memory) + if native { 0 } else { register_ops })
+            - copies
     );
     assert_eq!(
         count(fields, "vector_bytes"),
-        1032 + 96 * profiles + (128 - 32 * u64::from(native_memory)) * profiles * iterations
+        1032 + 96 * profiles + (136 - 32 * u64::from(native_memory)) * profiles * iterations
+            - copies * 32
     );
     assert_eq!(count(fields, "integer_ops"), 0);
     assert_eq!(count(fields, "fp_status"), 4);
@@ -265,6 +277,7 @@ fn native_packed_float_family_proves_memory_continuations_full_context_and_real_
             3,
             admitted(&fields),
             admitted(&fields),
+            admitted(&fields),
         );
         observations.push(fields);
     }
@@ -275,16 +288,17 @@ fn native_packed_float_family_proves_memory_continuations_full_context_and_real_
     let native = admitted(&observations[0]);
     for key in ["native_instructions", "primary_native_instructions"] {
         // Six profiles, two extra iterations; each has MOV/MOV/CMP/DEC and,
-        // only under actual admitted execution, three register FP instructions
-        // plus the separately requested read-only packed memory instruction.
+        // only under actual admitted execution, three register FP instructions,
+        // one packed memory instruction and three temporal copies. The extra
+        // VMOVQ is modeled in both modes and adds no emitted instruction.
         assert_eq!(
             count(&observations[1], key) - count(&observations[0], key),
-            if native { 96 } else { 48 }
+            if native { 132 } else { 48 }
         );
     }
     assert_eq!(
         count(&observations[1], "vector_ops") - count(&observations[0], "vector_ops"),
-        if native { 36 } else { 84 }
+        if native { 12 } else { 96 }
     );
     println!(
         "native_packed_float_worker_mode={} native_packed_float_worker_forms=12 native_packed_float_worker_programs=2",
@@ -395,7 +409,9 @@ fn native_packed_float_original_baseline_measurement() {
         let (after, after_ns) = measured(&candidate, &source);
         assert_eq!(before["native_ymm_mode"], after["native_ymm_mode"]);
         let registers = if dense { 3 } else { 1 };
-        check_counts(&before, ITERATIONS, 1, registers, false, false);
+        // The externally verified baseline predates both FP profiles and the
+        // temporal-copy profile, regardless of its identical AVX mode label.
+        check_counts(&before, ITERATIONS, 1, registers, false, false, false);
         check_counts(
             &after,
             ITERATIONS,
@@ -403,9 +419,12 @@ fn native_packed_float_original_baseline_measurement() {
             registers,
             admitted(&after),
             admitted(&after),
+            admitted(&after),
         );
         let promoted = if admitted(&after) {
-            ITERATIONS * (registers + 1)
+            // P arithmetic promotions plus C=35+3N temporal copies. The
+            // retained VMOVQ contributes symmetrically to both artifact runs.
+            ITERATIONS * (registers + 1) + 35 + 3 * ITERATIONS
         } else {
             0
         };
@@ -416,6 +435,14 @@ fn native_packed_float_original_baseline_measurement() {
         assert_eq!(
             count(&before, "vector_ops") - count(&after, "vector_ops"),
             promoted
+        );
+        assert_eq!(
+            count(&before, "vector_bytes") - count(&after, "vector_bytes"),
+            if admitted(&after) {
+                1120 + 128 * ITERATIONS
+            } else {
+                0
+            }
         );
         // End-to-end process elapsed includes startup and teardown. Warmed
         // repeated plans dominate the finite loop; there is no timing assertion.

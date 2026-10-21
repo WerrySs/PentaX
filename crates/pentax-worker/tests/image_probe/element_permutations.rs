@@ -132,8 +132,7 @@ fn native_element_permutations_consume_all_eight_forms_with_lane_isolation_and_a
     let (status, fields, text) = probe(&original);
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
-    assert_eq!(fields["vector_ops"], "38", "{text}");
-    assert_eq!(fields["vector_bytes"], "1016", "{text}");
+    assert_modeled_vector_counters(&fields, [(38, 1016), (10, 120), (10, 120)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");

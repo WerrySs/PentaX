@@ -50,7 +50,7 @@ fn check_flags(p: &mut Program) {
         .extend([0xc1, 0xe2, 2, 0xc1, 0xe1, 6, 0x09, 0xd0, 0x09, 0xc8]);
     p.expect(5);
 }
-fn check(mut p: Program, fp_status: u32, bytes: u64, operations: u64) {
+fn check(mut p: Program, fp_status: u32, bytes: u64, operations: u64, native: (u64, u64)) {
     p.reg(0, 42);
     p.code.extend([0x48, 0x81, 0xc4, 0, 1, 0, 0, 0x5d, 0xc3]);
     finish_checks(&mut p.code, p.branches);
@@ -60,8 +60,7 @@ fn check(mut p: Program, fp_status: u32, bytes: u64, operations: u64) {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
     assert_eq!(fields["fp_status"], fp_status.to_string(), "{text}");
-    assert_eq!(fields["vector_bytes"], bytes.to_string(), "{text}");
-    assert_eq!(fields["vector_ops"], operations.to_string(), "{text}");
+    assert_modeled_vector_counters(&fields, [(operations, bytes), native, native]);
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");
 }
@@ -121,9 +120,10 @@ fn native_float_to_packed_dword_rounding_truncation_and_mixed_lane_flags_continu
             check_control(&mut p, 0x5fa5); // Existing ZE + packed IE|PE, never DE.
         }
     }
-    // Eight32-byte source loads/stores, eight4-byte controls each way, and
-    // four truncating memory sources16/32/16/32. No hidden wider read is counted.
-    check(p, 37, 672, 40);
+    // SSE2 counts eight32-byte source loads/stores, eight4-byte controls each
+    // way, and four memory sources16/32/16/32. On AVX the temporal copies
+    // promote; conversion reads and controls retain their exact160-byte sum.
+    check(p, 37, 672, 40, (24, 160));
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn native_packed_dword_to_float_uses_rounding_exact_doubles_and_narrow_memory_so
             check_control(&mut p, if kind == 4 { 0x3fa4 } else { 0x3f84 });
         }
     }
-    // Four32-byte loads/stores and control transfers plus exact8/16-byte
-    // DQ->PD source reads. L0 reads m64 even though its register source is XMM.
-    check(p, 4, 312, 20);
+    // SSE2 includes four32-byte loads/stores. AVX retains only controls plus
+    // exact8/16-byte DQ->PD reads (56 bytes); L0 reads m64 with an XMM source.
+    check(p, 4, 312, 20, (12, 56));
 }

@@ -1261,8 +1261,9 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<NativeBlockStop, NativeDispatchError> {
         self.preflight_block(memory, block)?;
-        // Even manual stepping cannot bypass checked atomic/non-temporal
-        // backing, rights and alignment. Address dependencies remain checked.
+        // Even manual stepping cannot bypass checked atomic/non-temporal or
+        // the closed vector-move family's backing, rights and alignment.
+        // This includes the six already-native aligned legacy memory moves.
         self.preflight_atomic_memory(memory, block)?;
         // SAFETY: This entry retains the caller's complete ordinary-memory and
         // preparation obligations documented above.
@@ -1357,6 +1358,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             "atomic classification",
         )?;
         if block.emits_non_temporal_store()
+            || block.emits_vector_memory_move()
             || block
                 .instructions()
                 .iter()
@@ -1703,11 +1705,13 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<bool, NativeDispatchError> {
         if ((block.policy().requests_native_packed_float_memory()
-            || block.policy().requests_native_streaming_stores())
+            || block.policy().requests_native_streaming_stores()
+            || block.policy().requests_native_vector_moves())
             && !block.policy().requests_native_ymm_registers())
             || ((block.policy().requests_native_ymm_registers()
                 || block.policy().requests_native_packed_float_memory()
-                || block.policy().requests_native_streaming_stores())
+                || block.policy().requests_native_streaming_stores()
+                || block.policy().requests_native_vector_moves())
                 && self.machine.vector_mode.features().is_none())
         {
             return Err(NativeDispatchError::InvalidState);

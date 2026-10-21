@@ -81,10 +81,9 @@ fn native_acm_context_creation_binds_exact_scopes_and_writes_sequential_u32_hand
         assert_eq!(fields["unavailable_functions"], "0", "{text}");
         assert_eq!(fields["phase"], "main-entry", "{text}");
         assert_eq!(fields["initializer_calls"], "0", "{text}");
-        // Every vector instruction here is a memory move or MXCSR access, so
-        // optional native register-only AVX admission cannot change these counts.
-        assert_eq!(fields["vector_ops"], "4", "{text}");
-        assert_eq!(fields["vector_bytes"], "72", "{text}");
+        // Temporal load/store moves promote under the actual AVX profile;
+        // the two MXCSR accesses remain modeled at their exact4-byte widths.
+        assert_modeled_vector_counters(&fields, [(4, 72), (2, 8), (2, 8)]);
         assert_eq!(fields["fp_status"], "4", "{text}");
         assert_eq!(fields["integer_ops"], "0", "{text}");
         assert_eq!(

@@ -2,6 +2,27 @@
 
 use super::*;
 
+/// Exact mediated counts under the engine's observed closed profile. AVX and
+/// AVX2 both promote these temporal transfers; SSE2 retains its old mediator.
+fn assert_transfer_counters(fields: &HashMap<String, String>, sse2: (u64, u64), avx: (u64, u64)) {
+    let mode = fields["native_ymm_mode"].as_str();
+    let expected = match mode {
+        "sse2" => sse2,
+        "avx" | "avx2" => avx,
+        other => panic!("unexpected closed native vector mode: {other}"),
+    };
+    assert_eq!(
+        fields["vector_ops"].parse::<u64>().unwrap(),
+        expected.0,
+        "mode={mode}"
+    );
+    assert_eq!(
+        fields["vector_bytes"].parse::<u64>().unwrap(),
+        expected.1,
+        "mode={mode}"
+    );
+}
+
 #[test]
 fn native_x87_controls_retain_guest_environment_across_service_calls() {
     let mut p = Program::new();
@@ -147,8 +168,11 @@ fn native_vector_shifts_keep_count_widths_signs_and_lane_boundaries() {
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
         assert_eq!(fields["fp_status"], "0");
-        assert_eq!(fields["vector_ops"], "14");
-        assert_eq!(fields["vector_bytes"], if wide { "304" } else { "288" });
+        assert_transfer_counters(
+            &fields,
+            (14, if wide { 304 } else { 288 }),
+            (6, if wide { 48 } else { 32 }),
+        );
     }
 }
 
@@ -226,8 +250,11 @@ fn native_vector_blends_keep_element_masks_and_upper_lane_rules() {
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
         assert_eq!(fields["fp_status"], "0");
-        assert_eq!(fields["vector_ops"], "17");
-        assert_eq!(fields["vector_bytes"], if wide { "448" } else { "384" });
+        assert_transfer_counters(
+            &fields,
+            (17, if wide { 448 } else { 384 }),
+            (7, if wide { 128 } else { 64 }),
+        );
     }
 }
 
@@ -286,8 +313,7 @@ fn native_unsigned_vector_products_keep_full_even_dwords_and_upper_results() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "0");
-    assert_eq!(fields["vector_ops"], "16");
-    assert_eq!(fields["vector_bytes"], "432");
+    assert_transfer_counters(&fields, (16, 432), (4, 48));
 }
 
 #[test]
@@ -344,8 +370,7 @@ fn native_scalar_insert_vectors_preserve_merge_bits_and_clear_upper() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "16");
-    assert_eq!(fields["vector_bytes"], "146");
+    assert_transfer_counters(&fields, (16, 146), (12, 18));
     assert_eq!(fields["fp_status"], "0");
 }
 
@@ -388,8 +413,7 @@ fn native_half_vectors_merge_and_store_selected_quadwords() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "0");
-    assert_eq!(fields["vector_ops"], "16");
-    assert_eq!(fields["vector_bytes"], "256");
+    assert_transfer_counters(&fields, (16, 256), (10, 64));
 }
 
 #[test]
@@ -438,7 +462,6 @@ fn native_duplicate_vectors_keep_selected_bits_and_clear_vex128_upper_halves() {
                 assert_eq!(status, 0, "{text}");
                 assert_eq!(fields["value"], "42");
                 assert_eq!(fields["fp_status"], "0");
-                assert_eq!(fields["vector_ops"], "3");
                 let read = if wide {
                     32
                 } else if pp == 3 {
@@ -446,10 +469,8 @@ fn native_duplicate_vectors_keep_selected_bits_and_clear_vex128_upper_halves() {
                 } else {
                     16
                 };
-                assert_eq!(
-                    fields["vector_bytes"],
-                    (64 + if memory { read } else { 0 }).to_string()
-                );
+                let optional_read = if memory { read } else { 0 };
+                assert_transfer_counters(&fields, (3, 64 + optional_read), (1, optional_read));
             }
         }
     }
@@ -508,8 +529,11 @@ fn native_scalar_float_comparisons_drive_flags_and_preserve_vector_sources() {
             assert_eq!(status, 0, "{text}");
             assert_eq!(fields["value"], "42");
             assert_eq!(fields["fp_status"], if ordered { "1" } else { "0" });
-            assert_eq!(fields["vector_ops"], "6");
-            assert_eq!(fields["vector_bytes"], if double { "96" } else { "80" });
+            assert_transfer_counters(
+                &fields,
+                (6, if double { 96 } else { 80 }),
+                (4, if double { 32 } else { 16 }),
+            );
         }
     }
 }
@@ -551,8 +575,7 @@ fn native_float_arithmetic_keeps_status_across_scalar_and_packed_execution() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "36");
-    assert_modeled_vector_operations(&fields, ["7", "6", "6"]);
-    assert_eq!(fields["vector_bytes"], "96");
+    assert_transfer_counters(&fields, (7, 96), (4, 32));
 }
 
 #[test]
@@ -660,8 +683,7 @@ fn native_scalar_elements_insert_mask_then_extract_exact_words() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "9");
-    assert_eq!(fields["vector_bytes"], "120");
+    assert_transfer_counters(&fields, (9, 120), (5, 8));
 }
 
 #[test]
@@ -708,9 +730,9 @@ fn native_pair_shuffles_select_distinct_lanes_and_clear_vex128_upper_halves() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    // One register VMOVUPS is native only in the admitted full-YMM profile.
-    assert_modeled_vector_operations(&fields, ["8", "7", "7"]);
-    assert_eq!(fields["vector_bytes"], "160");
+    // Register copy and temporal setup/readback promote; the PD shuffle's
+    // independent memory read remains mediated at its exact32-byte width.
+    assert_transfer_counters(&fields, (8, 160), (3, 32));
 }
 
 #[test]
@@ -766,8 +788,7 @@ fn native_full_width_permutations_read_back_cross_lane_bits_and_aliased_sources(
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "6");
-        assert_eq!(fields["vector_bytes"], "160");
+        assert_transfer_counters(&fields, (6, 160), (2, 32));
     }
 }
 
@@ -808,8 +829,7 @@ fn native_unpack_vectors_interleave_memory_and_aliases_without_crossing_lanes() 
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "8");
-    assert_eq!(fields["vector_bytes"], "176");
+    assert_transfer_counters(&fields, (8, 176), (3, 16));
 }
 
 #[test]
@@ -835,8 +855,7 @@ fn native_lane_insertions_preserve_both_halves_across_native_bridge_calls() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "6");
-    assert_eq!(fields["vector_bytes"], "128");
+    assert_transfer_counters(&fields, (6, 128), (2, 16));
 }
 
 #[test]
@@ -897,8 +916,7 @@ fn native_scalar_float_moves_merge_registers_and_access_exact_memory_widths() {
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "7");
-        assert_eq!(fields["vector_bytes"], (128 + scalar * 2).to_string());
+        assert_transfer_counters(&fields, (7, 128 + scalar * 2), (1, 0));
     }
 }
 
@@ -1009,8 +1027,7 @@ fn native_logical_vectors_read_memory_shuffle_bytes_and_zero_aliased_registers()
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_modeled_vector_operations(&fields, ["8", "7", "7"]);
-    assert_eq!(fields["vector_bytes"], "160");
+    assert_transfer_counters(&fields, (8, 160), (3, 32));
 }
 
 #[test]
@@ -1050,8 +1067,7 @@ fn native_scalar_vectors_transfer_gprs_and_exact_memory_words_with_upper_zeroing
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "13");
-    assert_eq!(fields["vector_bytes"], "120");
+    assert_transfer_counters(&fields, (13, 120), (10, 24));
 }
 
 #[test]
@@ -1113,8 +1129,7 @@ fn native_floating_bit_tests_set_sign_flags_and_preserve_upper_source_lanes() {
             let (status, fields, text) = probe(&input(&code, false));
             assert_eq!(status, 0, "{text}");
             assert_eq!(fields["value"], "42");
-            assert_eq!(fields["vector_ops"], "9");
-            assert_eq!(fields["vector_bytes"], (160 + 2 * size).to_string());
+            assert_transfer_counters(&fields, (9, 160 + 2 * size), (4, 2 * size));
         }
     }
 }
@@ -1155,8 +1170,7 @@ fn native_integer_widening_uses_signed_elements_narrow_memory_and_aliased_source
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "5");
-        assert_eq!(fields["vector_bytes"], "104");
+        assert_transfer_counters(&fields, (5, 104), (2, 8));
     }
 }
 
@@ -1206,8 +1220,7 @@ fn native_integer_extractions_zero_extend_and_store_only_the_selected_scalar() {
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "4");
-        assert_eq!(fields["vector_bytes"], (64 + size).to_string());
+        assert_transfer_counters(&fields, (4, 64 + size as u64), (2, size as u64));
     }
 }
 
@@ -1243,8 +1256,7 @@ fn native_streaming_loads_copy_full_width_and_clear_only_vex128_upper_lanes() {
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "3");
-        assert_eq!(fields["vector_bytes"], (64 + size).to_string());
+        assert_transfer_counters(&fields, (3, 64 + size), (1, size));
     }
 }
 
@@ -1286,16 +1298,7 @@ fn native_non_temporal_vector_stores_write_exact_width_and_preserve_the_source()
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_modeled_vector_operations(&fields, ["3", "2", "2"]);
-        assert_eq!(
-            fields["vector_bytes"],
-            if fields["native_ymm_mode"] == "sse2" {
-                64 + size
-            } else {
-                64
-            }
-            .to_string()
-        );
+        assert_transfer_counters(&fields, (3, 64 + size), (0, 0));
     }
 }
 
@@ -1335,7 +1338,7 @@ fn native_vector_moves_preserve_upper_lanes_across_sse_and_clear_them_on_vex128(
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    // The wide copy and narrow self-copy promote; all six memory moves remain checked.
-    assert_modeled_vector_operations(&fields, ["10", "8", "8"]);
-    assert_eq!(fields["vector_bytes"], "192");
+    // Register copies and all six temporal memory moves now execute natively
+    // after live preflight. The two vector-control operations remain mediated.
+    assert_transfer_counters(&fields, (10, 192), (2, 0));
 }

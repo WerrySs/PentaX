@@ -141,6 +141,9 @@ jobs:
       - name: Test aligned native streaming stores and pre-entry refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_streaming_stores_tests:: -- --test-threads=1
+      - name: Test exact native vector memory copies and pre-entry refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_vector_memory_tests:: -- --test-threads=1
       - name: Test original native packed floating-point continuations
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -161,21 +164,33 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_streaming_stores:: -- --test-threads=1
+      - name: Test original vector memory copies across real native boundaries
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_memory:: -- --test-threads=1
       - name: Test existing non-temporal store consumers
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_non_temporal_vector_stores_write_exact_width_and_preserve_the_source -- --test-threads=1
-      - name: Test pair shuffles after register copy promotion
+      - name: Test existing vector instructions after memory copy promotion
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
-          cargo test --locked -p pentax-worker --test image_probe native_pair_shuffles_select_distinct_lanes_and_clear_vex128_upper_halves -- --test-threads=1
-      - name: Test narrow self-copy and complete upper vector state
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::vector_instructions:: -- --test-threads=1
+      - name: Test affected original vector consumers and CPU memory mapping
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
-          cargo test --locked -p pentax-worker --test image_probe native_vector_moves_preserve_upper_lanes_across_sse_and_clear_them_on_vex128 -- --test-threads=1
+          cargo test --locked -p pentax-worker --test image_probe --
+          kernel_results::precision_vectors:: kernel_results::minmax_vectors::
+          kernel_results::align_right:: kernel_results::element_permutations::
+          kernel_results::immediate_permutations:: kernel_results::lane_extract::
+          kernel_results::minimum_position:: kernel_results::packed_convert::
+          kernel_results::rounding::
+          native_cpu_write_mapping_supports_x86_vector_reads_without_changing_reported_protection
+          --test-threads=1
       - name: Test retained main-thread wait observations on a typed stop
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

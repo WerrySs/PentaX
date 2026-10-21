@@ -4,8 +4,8 @@
 
 use super::*;
 
-/// Only the engine's observed closed mode selects these exact counts. Memory
-/// forms in these fixtures stay mediated; callers account for known register promotions.
+/// Only the engine's observed closed mode selects these exact counts. Each
+/// fixture accounts for its own admitted register and memory promotions.
 fn assert_modeled_vector_operations(fields: &HashMap<String, String>, expected: [&str; 3]) {
     let mode = fields["native_ymm_mode"].as_str();
     let index = match mode {
@@ -17,6 +17,27 @@ fn assert_modeled_vector_operations(fields: &HashMap<String, String>, expected: 
     assert_eq!(
         fields["vector_ops"], expected[index],
         "native_ymm_mode={mode}"
+    );
+}
+
+/// Exact mediated operations and bytes after the fixture's native promotions.
+fn assert_modeled_vector_counters(fields: &HashMap<String, String>, expected: [(u64, u64); 3]) {
+    let mode = fields["native_ymm_mode"].as_str();
+    let index = match mode {
+        "sse2" => 0,
+        "avx" => 1,
+        "avx2" => 2,
+        other => panic!("unexpected closed native vector mode: {other}"),
+    };
+    assert_eq!(
+        fields["vector_ops"].parse::<u64>().unwrap(),
+        expected[index].0,
+        "mode={mode}"
+    );
+    assert_eq!(
+        fields["vector_bytes"].parse::<u64>().unwrap(),
+        expected[index].1,
+        "mode={mode}"
     );
 }
 
@@ -75,6 +96,8 @@ mod native_packed_float;
 mod native_packed_float_memory;
 #[path = "native_streaming_stores.rs"]
 mod native_streaming_stores;
+#[path = "native_vector_memory.rs"]
+mod native_vector_memory;
 #[path = "native_vector_register_bits.rs"]
 mod native_vector_register_bits;
 #[path = "native_ymm.rs"]

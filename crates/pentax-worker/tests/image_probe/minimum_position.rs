@@ -83,8 +83,7 @@ fn native_minimum_position_consumes_unsigned_ties_aliases_and_both_upper_rules()
     let (status, fields, text) = probe(&original);
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
-    assert_eq!(fields["vector_ops"], "26", "{text}");
-    assert_eq!(fields["vector_bytes"], "616", "{text}");
+    assert_modeled_vector_counters(&fields, [(26, 616), (8, 40), (8, 40)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");

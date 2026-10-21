@@ -43,8 +43,7 @@ fn native_precision_scalar_conversions_merge_sources_and_clear_upper_vectors() {
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "32");
-    assert_eq!(fields["vector_ops"], "6");
-    assert_eq!(fields["vector_bytes"], "120");
+    assert_modeled_vector_counters(&fields, [(6, 120), (2, 8), (2, 8)]);
 }
 
 #[test]
@@ -100,6 +99,5 @@ fn native_precision_packed_conversions_capture_aliased_sources_and_zero_unused_l
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["fp_status"], "0");
-    assert_eq!(fields["vector_ops"], "12");
-    assert_eq!(fields["vector_bytes"], "256");
+    assert_modeled_vector_counters(&fields, [(12, 256), (4, 0), (4, 0)]);
 }

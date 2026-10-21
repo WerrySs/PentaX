@@ -72,7 +72,7 @@ fn snapshot_word(p: &mut Program, offset: u32, bits: u64) {
     p.code.extend(offset.to_le_bytes());
     p.expect(bits);
 }
-fn consumer(iterations: u64, all_forms: bool, separated: bool) -> Vec<u8> {
+fn consumer(iterations: u64, all_forms: bool, snapshot_before_narrow: bool) -> Vec<u8> {
     let mut p = Program::new();
     p.stack(0x89, 4, 8);
     p.reg(12, 0x1020_3040_5060_7080);
@@ -112,11 +112,13 @@ fn consumer(iterations: u64, all_forms: bool, separated: bool) -> Vec<u8> {
             p.code.extend([0x48, 0x39, 0xd0]);
         }
         arithmetic(&mut p, opcode, double, true);
-        if separated {
+        // This selects snapshot placement, not a modeled boundary: the current
+        // temporal-copy profile may emit either snapshot natively.
+        if snapshot_before_narrow {
             vector_memory(&mut p, false, 9, 112);
         }
         arithmetic(&mut p, opcode, double, false);
-        if !separated {
+        if !snapshot_before_narrow {
             vector_memory(&mut p, false, 9, 112);
         }
         if all_forms {
@@ -182,17 +184,29 @@ fn admitted(fields: &HashMap<String, String>) -> bool {
         _ => panic!("unknown closed native mode"),
     }
 }
-fn check_counts(fields: &HashMap<String, String>, iterations: u64, profiles: u64, native: bool) {
+fn check_counts(
+    fields: &HashMap<String, String>,
+    iterations: u64,
+    profiles: u64,
+    native: bool,
+    native_copies: bool,
+) {
     assert_eq!(fields["value"], "42");
     assert_eq!(fields["service_stops"], "1");
     assert_eq!(fields["fp_status"], "4");
+    let copies = if native_copies {
+        32 + 2 * profiles + 2 * profiles * iterations
+    } else {
+        0
+    };
     assert_eq!(
         count(fields, "vector_ops"),
-        34 + 2 * profiles + profiles * iterations * if native { 2 } else { 4 }
+        34 + 2 * profiles + profiles * iterations * (if native { 2 } else { 4 }) - copies
     );
     assert_eq!(
         count(fields, "vector_bytes"),
-        1032 + 64 * profiles + profiles * iterations * if native { 64 } else { 112 }
+        1032 + 64 * profiles + profiles * iterations * (if native { 64 } else { 112 })
+            - copies * 32
     );
     assert_eq!(count(fields, "integer_ops"), 0);
 }
@@ -204,7 +218,7 @@ fn native_packed_float_memory_family_proves_unaligned_spans_context_and_real_cou
         let input = super::native_packed_float::original(&consumer(iterations, true, true));
         let (status, fields, text) = probe(&input);
         assert_eq!(status, 0, "{text}");
-        check_counts(&fields, iterations, 6, admitted(&fields));
+        check_counts(&fields, iterations, 6, admitted(&fields), admitted(&fields));
         results.push(fields);
     }
     assert_eq!(results[0]["native_ymm_mode"], results[1]["native_ymm_mode"]);
@@ -212,12 +226,12 @@ fn native_packed_float_memory_family_proves_unaligned_spans_context_and_real_cou
     for key in ["native_instructions", "primary_native_instructions"] {
         assert_eq!(
             count(&results[1], key) - count(&results[0], key),
-            if native { 72 } else { 48 }
+            if native { 96 } else { 48 }
         );
     }
     assert_eq!(
         count(&results[1], "vector_ops") - count(&results[0], "vector_ops"),
-        if native { 24 } else { 48 }
+        if native { 0 } else { 48 }
     );
     println!(
         "native_packed_float_memory_worker_mode={} native_packed_float_memory_worker_forms=12 native_packed_float_memory_worker_programs=2",
@@ -233,14 +247,25 @@ fn native_packed_float_memory_original_baseline_measurement() {
     let candidate = std::env::var_os("PENTAX_TEST_WORKER").expect("explicit candidate is required");
     assert!(baseline != candidate, "distinct worker artifacts required");
     const ITERATIONS: u64 = 50_000;
-    for separated in [true, false] {
-        let input = super::native_packed_float::original(&consumer(ITERATIONS, false, separated));
+    for snapshot_before_narrow in [true, false] {
+        let input = super::native_packed_float::original(&consumer(
+            ITERATIONS,
+            false,
+            snapshot_before_narrow,
+        ));
         let (before, before_ns) = super::native_packed_float::measured(&baseline, &input);
         let (after, after_ns) = super::native_packed_float::measured(&candidate, &input);
         assert_eq!(before["native_ymm_mode"], after["native_ymm_mode"]);
-        check_counts(&before, ITERATIONS, 1, false);
-        check_counts(&after, ITERATIONS, 1, admitted(&after));
-        let promoted = if admitted(&after) { 2 * ITERATIONS } else { 0 };
+        // This verified 0.32.4 baseline has neither memory-FP nor temporal-copy
+        // promotion; its AVX bridge label alone cannot identify those features.
+        check_counts(&before, ITERATIONS, 1, false, false);
+        check_counts(&after, ITERATIONS, 1, admitted(&after), admitted(&after));
+        let promoted = if admitted(&after) {
+            // P=2N memory FP operations; C=34+2N temporal copies.
+            2 * ITERATIONS + 34 + 2 * ITERATIONS
+        } else {
+            0
+        };
         assert_eq!(
             count(&after, "native_instructions") - count(&before, "native_instructions"),
             promoted
@@ -251,10 +276,14 @@ fn native_packed_float_memory_original_baseline_measurement() {
         );
         assert_eq!(
             count(&before, "vector_bytes") - count(&after, "vector_bytes"),
-            if admitted(&after) { 48 * ITERATIONS } else { 0 }
+            if admitted(&after) {
+                1088 + 112 * ITERATIONS
+            } else {
+                0
+            }
         );
         println!(
-            "native_packed_float_memory_measurement_separated={separated} native_packed_float_memory_measurement_iterations={ITERATIONS} native_packed_float_memory_measurement_mode={} baseline_elapsed_ns={before_ns} candidate_elapsed_ns={after_ns} baseline_entries={} candidate_entries={} baseline_blocks={} candidate_blocks={} baseline_work={} candidate_work={} baseline_publications={} candidate_publications={} baseline_reuses={} candidate_reuses={}",
+            "native_packed_float_memory_measurement_snapshot_before_narrow={snapshot_before_narrow} native_packed_float_memory_measurement_iterations={ITERATIONS} native_packed_float_memory_measurement_mode={} baseline_elapsed_ns={before_ns} candidate_elapsed_ns={after_ns} baseline_entries={} candidate_entries={} baseline_blocks={} candidate_blocks={} baseline_work={} candidate_work={} baseline_publications={} candidate_publications={} baseline_reuses={} candidate_reuses={}",
             after["native_ymm_mode"],
             before["native_entries"],
             after["native_entries"],

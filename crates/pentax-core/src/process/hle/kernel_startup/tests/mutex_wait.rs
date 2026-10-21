@@ -107,67 +107,92 @@ fn limits() -> KernelStartupLimits {
 }
 
 #[test]
-fn usleep_wait_checks_selected_tls_and_current_executor_before_any_ticket_completion() {
+fn usleep_and_equeue_waits_check_selected_tls_and_current_executor_before_any_ticket_completion() {
     let mut bounds = limits();
-    // This original exit-only fixture never sleeps or enters the bridge. Its
-    // distant deadline keeps the ticket pending while wrong-owner proofs run.
+    // These original exit-only waits never sleep or enter the bridge. The
+    // distant sleep deadline and empty equeue retain genuine pending tickets.
     bounds.kernel.max_sleep_nanoseconds = 60_000_000_000;
-    with_plan(bounds, |plan, owner, base, pointers| {
-        let mut session = session(plan, owner, &pointers);
-        let main = session.prepare_main_thread().unwrap();
-        let child = session.prepare_thread_context(1).unwrap();
-        session.activate_thread_context(&child).unwrap();
-        let proof = session
-            .prepare_native_source(&BlockLimits::default())
-            .unwrap();
-        let syscall = stop(plan, Service::Usleep, [60_000_000, 0, 0, 0, 0, 0]);
-        let (mut engine, token) = stopped(&mut session, &proof, syscall, base);
-        let (foreign, _) = stopped(&mut session, &proof, syscall, base);
-        let NativeServiceAction::WaitThread(pending) =
-            session.service_action(&proof, request(token)).unwrap()
-        else {
-            panic!("positive native usleep must park");
-        };
-        let attempts = session.kernel_usage().attempts;
-        let services = session.native_service_requests();
-        assert!(!session.thread_wait_ready(&pending).unwrap());
-        assert!(session.thread_wait_delay(&pending).unwrap().is_some());
-        assert!(matches!(
-            session.complete_thread_wait(&pending, token, &proof, &foreign),
-            Err(KernelStartupError::InvalidProvider(
-                "thread wait executor continuation"
-            ))
-        ));
-        session.activate_thread_context(&main).unwrap();
-        // Readiness is an observation, allowed while another TLS is selected.
-        assert!(!session.thread_wait_ready(&pending).unwrap());
-        assert!(matches!(
-            session.complete_thread_wait(&pending, token, &proof, &engine),
-            Err(KernelStartupError::InvalidProvider(
-                "thread wait continuation"
-            ))
-        ));
-        session.activate_thread_context(&child).unwrap();
-        assert_eq!(
-            session
-                .complete_thread_wait(&pending, token, &proof, &engine)
-                .unwrap(),
-            None
-        );
-        // A consumed platform token is not authority to complete the still-live
-        // kernel wait, even when all public PC/ID/argument fields still match.
-        engine.complete_syscall(token, 0).unwrap();
-        assert!(matches!(
-            session.complete_thread_wait(&pending, token, &proof, &engine),
-            Err(KernelStartupError::InvalidProvider(
-                "thread wait executor continuation"
-            ))
-        ));
-        assert!(!session.thread_wait_ready(&pending).unwrap());
-        assert_eq!(session.kernel_usage().attempts, attempts);
-        assert_eq!(session.native_service_requests(), services);
-        assert_eq!(engine.usage().native_entries, 0);
-    });
+    for service in [Service::Usleep, Service::WaitEqueue] {
+        with_plan(bounds, |plan, owner, base, pointers| {
+            let mut session = session(plan, owner, &pointers);
+            let main = session.prepare_main_thread().unwrap();
+            let child = session.prepare_thread_context(1).unwrap();
+            session.activate_thread_context(&child).unwrap();
+            let proof = session
+                .prepare_native_source(&BlockLimits::default())
+                .unwrap();
+            let args = if service == Service::WaitEqueue {
+                session
+                    .pause()
+                    .unwrap()
+                    .write(base + NAME, b"original-wait-observation\0")
+                    .unwrap();
+                assert_eq!(
+                    call(
+                        &mut session,
+                        Service::CreateEqueue,
+                        &[base + OUTPUT, base + NAME]
+                    ),
+                    0
+                );
+                let queue = word(&mut session, base + OUTPUT);
+                [queue, base + OUTPUT + 128, 1, base + OUTPUT + 192, 0, 0]
+            } else {
+                [60_000_000, 0, 0, 0, 0, 0]
+            };
+            let syscall = stop(plan, service, args);
+            let (mut engine, token) = stopped(&mut session, &proof, syscall, base);
+            let (foreign, _) = stopped(&mut session, &proof, syscall, base);
+            let NativeServiceAction::WaitThread(pending) =
+                session.service_action(&proof, request(token)).unwrap()
+            else {
+                panic!("positive native wait must park");
+            };
+            assert_eq!(pending.is_event_queue(), service == Service::WaitEqueue);
+            let attempts = session.kernel_usage().attempts;
+            let services = session.native_service_requests();
+            assert!(!session.thread_wait_ready(&pending).unwrap());
+            assert_eq!(
+                session.thread_wait_delay(&pending).unwrap().is_some(),
+                service == Service::Usleep
+            );
+            assert!(matches!(
+                session.complete_thread_wait(&pending, token, &proof, &foreign),
+                Err(KernelStartupError::InvalidProvider(
+                    "thread wait executor continuation"
+                ))
+            ));
+            session.activate_thread_context(&main).unwrap();
+            // Readiness is an observation, allowed while another TLS is selected.
+            assert!(!session.thread_wait_ready(&pending).unwrap());
+            assert!(matches!(
+                session.complete_thread_wait(&pending, token, &proof, &engine),
+                Err(KernelStartupError::InvalidProvider(
+                    "thread wait continuation"
+                ))
+            ));
+            session.activate_thread_context(&child).unwrap();
+            assert_eq!(
+                session
+                    .complete_thread_wait(&pending, token, &proof, &engine)
+                    .unwrap(),
+                None
+            );
+            // A consumed platform token is not authority to complete the still-live
+            // kernel wait, even when all public PC/ID/argument fields still match.
+            engine.complete_syscall(token, 0).unwrap();
+            assert!(matches!(
+                session.complete_thread_wait(&pending, token, &proof, &engine),
+                Err(KernelStartupError::InvalidProvider(
+                    "thread wait executor continuation"
+                ))
+            ));
+            assert!(!session.thread_wait_ready(&pending).unwrap());
+            assert_eq!(session.kernel_usage().attempts, attempts);
+            assert_eq!(session.native_service_requests(), services);
+            assert_eq!(engine.usage().native_entries, 0);
+        });
+    }
 }
 
 fn session<'plan, 'image>(

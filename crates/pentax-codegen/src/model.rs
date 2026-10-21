@@ -244,6 +244,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) placement: CachePlacement,
     pub(crate) policy: TranslationPolicy,
     pub(crate) emits_non_temporal_store: bool,
+    pub(crate) emits_vector_memory_move: bool,
     pub(crate) usage: BlockUsage,
 }
 impl fmt::Debug for BlockPlan<'_, '_> {
@@ -294,6 +295,11 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     /// completion; a nonemitted terminating store does not set this flag.
     pub const fn emits_non_temporal_store(&self) -> bool {
         self.emits_non_temporal_store
+    }
+    /// Exact emitted temporal-memory classification for manual-path preflight.
+    /// It grants neither backing authority nor a non-temporal fence requirement.
+    pub const fn emits_vector_memory_move(&self) -> bool {
+        self.emits_vector_memory_move
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage

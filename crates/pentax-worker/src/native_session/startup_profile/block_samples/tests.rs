@@ -290,6 +290,15 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
     assert!(!progress.progress_fields().contains("sample_exit_top="));
     assert!(progress.protocol_fields().contains("sample_completed=0"));
     assert!(progress.protocol_fields().contains("scheduling_threads=0"));
+    for name in [
+        "scheduling_pending_equeue_waits",
+        "video_vblank_subscriptions",
+        "video_registered_buffers",
+        "video_open_ports",
+    ] {
+        assert!(!progress.progress_fields().contains(name));
+        assert!(progress.protocol_fields().contains(&format!("{name}=0")));
+    }
     assert!(
         progress
             .protocol_fields()

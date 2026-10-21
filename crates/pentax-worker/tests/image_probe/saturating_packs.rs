@@ -257,22 +257,16 @@ fn native_all_pack_profiles_saturate_signed_sources_and_preserve_lane_order_alia
         assert_eq!(fields["value"], "42", "profile={kind}: {text}");
         // Three legacy SSE2 families remain native: their two pack operations
         // and16-byte source read do not enter mediated vector counters. USDW
-        // remains mediated. The two32-byte loads/stores in each of six cases,
-        // unrelated vector each way and two MXCSR operations are unchanged.
-        // The optional YMM bridge promotes only the register VEX128 form on
-        // AVX, plus register VEX256 on AVX2. Exact memory counts do not change.
-        assert_modeled_vector_operations(
+        // remains mediated. AVX promotes the temporal operand/readback copies
+        // and register VEX128 pack; AVX2 additionally promotes register VEX256.
+        // Pack memory operands and both MXCSR operations remain mediated.
+        assert_modeled_vector_counters(
             &fields,
             if kind == 3 {
-                ["34", "33", "32"]
+                [(34, 904), (7, 72), (6, 72)]
             } else {
-                ["32", "31", "30"]
+                [(32, 888), (5, 56), (4, 56)]
             },
-        );
-        assert_eq!(
-            fields["vector_bytes"],
-            if kind == 3 { "904" } else { "888" },
-            "profile={kind}: {text}"
         );
         assert_eq!(fields["integer_ops"], "0", "{text}");
         assert_eq!(fields["fp_status"], "4", "{text}");

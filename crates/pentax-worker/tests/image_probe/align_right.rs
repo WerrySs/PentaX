@@ -150,8 +150,7 @@ fn native_align_right_consumes_concatenation_boundaries_aliases_zero_fill_and_in
     let (status, fields, text) = probe(&original);
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
-    assert_eq!(fields["vector_ops"], "34", "{text}");
-    assert_eq!(fields["vector_bytes"], "904", "{text}");
+    assert_modeled_vector_counters(&fields, [(34, 904), (8, 72), (8, 72)]);
     assert_eq!(fields["integer_ops"], "0", "{text}");
     assert_eq!(fields["fp_status"], "37", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");

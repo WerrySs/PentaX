@@ -221,7 +221,9 @@ fn memory_request_is_separate_and_does_not_expand_address_write_or_other_vector_
     }
     // Deliberately fabricated metadata is NOT an execution plan. It proves the
     // evaluator's32-byte exception cannot become a generic load/store ceiling.
-    for code in [[0xc5, 0xfc, 0x10, 0x00], [0xc5, 0xfc, 0x11, 0x00]] {
+    // Temporal transfers now have their own exact footprint profile. These
+    // unrelated logical-read/NT-float-write forms still prove the size ceiling.
+    for code in [[0xc5, 0xf4, 0x54, 0x00], [0xc5, 0xfc, 0x2b, 0x00]] {
         let decoded = Decoder::with_ip(64, &code, BIAS, DecoderOptions::NONE).decode();
         let mut analyzer = MemoryAccessAnalyzer::default();
         let template = analyzer.prepare(&decoded);

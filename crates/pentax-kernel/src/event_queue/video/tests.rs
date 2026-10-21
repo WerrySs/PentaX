@@ -27,12 +27,17 @@ fn poll(kernel: &mut crate::Kernel, guest: &mut TestGuest, queue: u64) -> Result
 #[test]
 fn real_video_subscriptions_coalesce_exact_payload_and_keep_source_active_order() {
     let (mut kernel, mut guest, queue) = setup();
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 0);
     kernel
         .add_video_event(queue, 1, 9, VideoEventKind::Flip, 17)
         .unwrap();
     kernel
         .add_video_event(queue, 1, 9, VideoEventKind::Vblank, 27)
         .unwrap();
+    // Initial inactive membership counts without requiring a first tick.
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 1);
+    assert_eq!(kernel.video_vblank_subscription_count(1, 10), 0);
+    assert_eq!(kernel.video_vblank_subscription_count(2, 9), 0);
     {
         let _uncommitted = kernel
             .prepare_video_interrupt(1, 9, VideoEventKind::Flip, 99, 0x3456)
@@ -74,6 +79,25 @@ fn real_video_subscriptions_coalesce_exact_payload_and_keep_source_active_order(
         (41 << 16) | 0x1567
     );
     assert_eq!(poll(&mut kernel, &mut guest, queue), Ok(0x8002_003c));
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 1);
+    assert_eq!(
+        kernel.delete_video_event(queue, VideoEventKind::Vblank),
+        Ok(0)
+    );
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 0);
+    kernel
+        .add_video_event(queue, 1, 9, VideoEventKind::Vblank, 27)
+        .unwrap();
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 1);
+    assert_eq!(
+        kernel.invoke_library(
+            Service::DeleteEqueue,
+            CallArgs([queue, 0, 0, 0, 0, 0]),
+            &mut guest
+        ),
+        Ok(0)
+    );
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 0);
 }
 #[test]
 fn output_quota_generation_and_close_refusals_do_not_consume_or_reorder_notifications() {

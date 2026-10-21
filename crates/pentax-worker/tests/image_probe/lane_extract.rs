@@ -87,8 +87,7 @@ fn native_lane_extract_both_forms_continue_with_alias_zeroing_and_exact_unaligne
     let (status, fields, text) = probe(&original);
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
-    assert_eq!(fields["vector_ops"], "25", "{text}");
-    assert_eq!(fields["vector_bytes"], "524", "{text}");
+    assert_modeled_vector_counters(&fields, [(25, 524), (11, 76), (11, 76)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");

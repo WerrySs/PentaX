@@ -150,8 +150,7 @@ fn native_cpuid_consumes_software_leaves_subleaves_and_preserves_unrelated_conte
     assert_eq!(fields["value"], "42", "{text}");
     assert_eq!(fields["integer_ops"], queries.len().to_string(), "{text}");
     assert_eq!(fields["integer_bytes"], "0", "{text}");
-    assert_eq!(fields["vector_ops"], "4", "{text}");
-    assert_eq!(fields["vector_bytes"], "72", "{text}");
+    assert_modeled_vector_counters(&fields, [(4, 72), (2, 8), (2, 8)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");

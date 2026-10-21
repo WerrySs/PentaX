@@ -93,8 +93,7 @@ fn native_immediate_permutations_continue_with_both_aliases_zero_overrides_and_f
     let (status, fields, text) = probe(&original);
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
-    assert_eq!(fields["vector_ops"], "42", "{text}");
-    assert_eq!(fields["vector_bytes"], "1096", "{text}");
+    assert_modeled_vector_counters(&fields, [(42, 1096), (12, 136), (12, 136)]);
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
     assert_eq!(fields["phase"], "main-entry", "{text}");

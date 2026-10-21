@@ -19,7 +19,7 @@ fn pattern(register: u8) -> [u64; 4] {
 }
 
 fn load(p: &mut Program, register: u8) {
-    // VMOVDQU YMMn,[RSP+16] remains mediated even on the native-YMM profile.
+    // The current temporal-memory profile can emit this checked full-width copy.
     p.code.extend([
         0xc5,
         if register >= 8 { 0x7e } else { 0xfe },
@@ -129,7 +129,9 @@ fn loop_consumer(iterations: u64) -> Vec<u8> {
         if register == 7 {
             // An actual memory operation forces native -> mediated -> native
             // inside every loop without relying on planner window boundaries.
-            store(&mut p, 7);
+            // Excluded VMOVQ [RSP+80],XMM7 writes exactly eight bytes and leaves
+            // its complete source unchanged. Full32 readbacks below may promote.
+            p.code.extend([0xc5, 0xf9, 0xd6, 0x7c, 0x24, 80]);
         }
     }
     p.code.extend([0x48, 0xff, 0xc9]); // The only per-loop native scalar: DEC RCX.
@@ -184,17 +186,21 @@ fn native_ymm_bridge_proves_all_registers_boundaries_upper_rules_and_real_native
         assert_eq!(fields["phase"], "main-entry", "{text}");
         assert_eq!(fields["service_stops"], "1", "{text}");
         let native = bridge_mode(&fields);
-        // All memory moves and MXCSR accesses are still mediated; the register
-        // moves are mediated ONLY on the honest SSE2 fallback.
+        // The current artifact promotes its 32 fixed temporal copies. VMOVQ
+        // and both MXCSR accesses remain modeled in either actual bridge mode.
         let modeled_moves = if native { 0 } else { iterations * 16 + 3 };
         assert_eq!(
             counter(&fields, "vector_ops"),
-            34 + iterations + modeled_moves,
+            if native {
+                2 + iterations
+            } else {
+                34 + iterations + modeled_moves
+            },
             "{text}"
         );
         assert_eq!(
             counter(&fields, "vector_bytes"),
-            1032 + iterations * 32,
+            (if native { 8 } else { 1032 }) + iterations * 8,
             "{text}"
         );
         assert_eq!(counter(&fields, "integer_ops"), 0, "{text}");

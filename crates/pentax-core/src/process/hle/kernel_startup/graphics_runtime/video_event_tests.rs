@@ -89,6 +89,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 0
             );
             let queue = u64::from_le_bytes(read(session, scratch));
+            assert_eq!(session.video_registration_counts(), (0, 0, 0));
             assert_eq!(
                 call(
                     session,
@@ -107,6 +108,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 ),
                 0
             );
+            assert_eq!(session.video_registration_counts(), (1, 0, 0));
             assert_eq!(
                 call(
                     session,
@@ -116,6 +118,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 ),
                 0
             );
+            assert_eq!(session.video_registration_counts(), (1, 0, 1));
             assert_eq!(
                 kernel(
                     session,
@@ -151,6 +154,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 ),
                 0
             );
+            assert_eq!(session.video_registration_counts(), (1, 1, 1));
             assert_eq!(
                 call(
                     session,
@@ -201,6 +205,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
             );
             assert_eq!(i64::from_le_bytes(read(session, scratch + 80)), -7);
             assert_eq!(poll(session, scratch, queue), 0x8002_003c);
+            assert_eq!(session.video_registration_counts(), (1, 1, 1));
             assert_eq!(
                 call(
                     session,
@@ -210,6 +215,7 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                 ),
                 0
             );
+            assert_eq!(session.video_registration_counts(), (0, 0, 0));
             assert_eq!(poll(session, scratch, queue), 0x8002_003c);
             Ok::<_, ()>(())
         },

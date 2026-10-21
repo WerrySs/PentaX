@@ -1784,7 +1784,7 @@ instruction descriptions, without copying another emulator implementation:
   ANDPD/PS and ANDNPD/PS, pages3-81..92: raw bit operations and logical-source
   order, including `(~source1) & source2`.
 - [Intel Volume2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf),
-  MOVAPD/APS pages4-44..51, MOVUPD/UPS pages4-131..138 and ORPD/PS
+  MOVAPD/APS pages4-44..51, MOVUPD/UPS pages4-130..137 and ORPD/PS
   pages4-171..178: both move opcode directions, reserved move vvvv, vector
   widths, destination upper clearing and AVX feature requirements.
 - [Intel Volume2D](https://cdrdv2-public.intel.com/671143/334569-sdm-vol-2d.pdf),
@@ -1827,3 +1827,29 @@ The source-interval memo retains only immutable initialized executable metadata;
 it never retains guest operands or live memory permissions. Counter differences
 identify actual native admission, while timing and sampled plans do not prove
 commercial boot, a frame or playable performance.
+
+## Native temporal vector memory transfers
+
+The independently implemented 28-form profile follows
+[Intel Volume 2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf):
+MOVAPD/MOVAPS pages 4-44..51, MOVDQA/MOVDQU pages 4-67..77, MOVSD pages 4-116..118,
+MOVSS pages 4-125..127 and MOVUPD/MOVUPS pages 4-130..137. These entries define
+AVX requirements for both packed widths, exact alignment, memory direction,
+scalar-load zeroing and unchanged source registers on stores. No arithmetic,
+NaN quieting or additional floating-point status effect is introduced.
+
+Intel warns against MOVSS VEX.L=1 hardware execution. The pinned
+[Iced encoder defaults](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/src/rust/iced-x86/src/encoder.rs)
+and [VEX handler](https://github.com/icedland/iced/blob/c50f29b7bc305696895c075f3fc7719751426b12/src/rust/iced-x86/src/encoder/op_code_handler.rs)
+emit canonical L=0 for these LIG forms. PentaX uses that default and explicitly
+checks the emitted scalar prefix for both input L values in its original
+codegen fixtures. Detached source bytes are not copied into the native cache.
+
+The narrow numerical footprint exceptions do not grant live address authority.
+The native runtime checks full owned spans, permissions, dependencies and
+alignment, including the six previously native aligned legacy counterparts.
+Only an actually emitted closed move sets the retained manual-preflight flag;
+it does not set the distinct NT fence flag. All encodings, bit patterns,
+canaries, guest programs and finite comparison inputs are original PentaX work.
+The counter corrections preserve literal outcomes and meaningful modeled
+boundaries; increased native counts alone establish no commercial progress.

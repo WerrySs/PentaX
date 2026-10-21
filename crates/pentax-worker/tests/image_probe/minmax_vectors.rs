@@ -54,7 +54,6 @@ fn native_packed_dword_minmax_handles_unsigned_order_and_vex128_zeroing() {
     let (status, fields, text) = probe(&input(&code, false));
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42");
-    assert_eq!(fields["vector_ops"], "10");
-    assert_eq!(fields["vector_bytes"], "208");
+    assert_modeled_vector_counters(&fields, [(10, 208), (4, 16), (4, 16)]);
     assert_eq!(fields["fp_status"], "0");
 }

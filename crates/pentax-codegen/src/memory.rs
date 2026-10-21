@@ -158,6 +158,8 @@ pub enum MemoryAccessError {
     UnalignedAtomic,
     /// Architectural NT vector-store alignment, checked before native entry.
     UnalignedNonTemporal,
+    /// Architectural aligned temporal vector transfer, before native entry.
+    UnalignedVector,
 }
 impl std::fmt::Display for MemoryAccessError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -269,7 +271,14 @@ impl MemoryAccessAnalyzer {
                 && info.memory_count == 1
                 && used.access() == OpAccess::Write
                 && crate::policy::native_streaming_store_width(instruction) == Some(32);
-            if size == 0 || (size > 16 && !packed_read && !streaming_write) {
+            let vector_move = size == 32
+                && info.memory_count == 1
+                && match crate::policy::native_vector_move_shape(instruction) {
+                    Some((32, false)) => used.access() == OpAccess::Read,
+                    Some((32, true)) => used.access() == OpAccess::Write,
+                    _ => false,
+                };
+            if size == 0 || (size > 16 && !packed_read && !streaming_write && !vector_move) {
                 return Err(MemoryAccessError::UnsupportedSize);
             }
             let kind = match used.access() {
@@ -310,6 +319,14 @@ impl MemoryAccessAnalyzer {
                 }
                 if !address.is_multiple_of(alignment as u64) {
                     return Err(MemoryAccessError::UnalignedNonTemporal);
+                }
+            }
+            if let Some(alignment) = crate::policy::aligned_vector_move_width(instruction) {
+                if info.memory_count != 1 || size != alignment as u64 {
+                    return Err(MemoryAccessError::UnsupportedAddress);
+                }
+                if !address.is_multiple_of(alignment as u64) {
+                    return Err(MemoryAccessError::UnalignedVector);
                 }
             }
             if address

@@ -27,6 +27,12 @@ enum Ticket {
     AudioOut2(AudioOut2Wait),
     Time(TimeWait),
 }
+impl PendingThreadWait {
+    /// Classify an actual retained wait without probing or consuming its ticket.
+    pub fn is_event_queue(&self) -> bool {
+        matches!(&self.ticket, Ticket::EventQueue(_))
+    }
+}
 impl fmt::Debug for PendingThreadWait {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingThreadWait").finish_non_exhaustive()

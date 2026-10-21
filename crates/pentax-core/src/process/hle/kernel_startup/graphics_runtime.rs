@@ -267,6 +267,30 @@ pub(super) fn stop(
     .map_err(KernelStartupError::Graphics)
 }
 impl PreparedNativeKernelStartup<'_, '_> {
+    /// Final diagnostics: open ports, committed buffer registrations and retained
+    /// vblank subscriptions for those exact live port generations. Registration
+    /// is not live pixel permission, notification readiness or display proof.
+    pub fn video_registration_counts(&self) -> (u64, u64, u64) {
+        let Some(driver) = self.graphics.as_ref() else {
+            return (0, 0, 0);
+        };
+        let mut ports = 0;
+        let mut buffers = 0;
+        let mut subscriptions = 0;
+        for handle in 1..=3 {
+            if let Some(port) = driver.video_port(handle) {
+                ports += 1;
+                for buffer in 0..16 {
+                    buffers += u64::from(driver.video_surface(handle, buffer).is_some());
+                }
+                subscriptions += self
+                    .kernel
+                    .video_vblank_subscription_count(handle, port.generation);
+            }
+        }
+        (ports, buffers, subscriptions)
+    }
+
     pub fn graphics_usage(&self) -> driver::Usage {
         self.graphics
             .as_ref()

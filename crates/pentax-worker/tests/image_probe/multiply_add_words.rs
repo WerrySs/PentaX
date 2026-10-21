@@ -166,12 +166,10 @@ fn native_word_multiply_add_profiles_wrap_signed_pairs_aliases_and_preserve_stat
     assert_eq!(status, 0, "{text}");
     assert_eq!(fields["value"], "42", "{text}");
     // Two legacy PMADDWDs remain existing native SSE2 operations. Four VEX
-    // variants, twelve input loads, twelve result/source stores, one unrelated
-    // load/store and both MXCSR accesses account for32 modeled operations.
-    assert_eq!(fields["vector_ops"], "32", "{text}");
-    // Only mediated memory bytes count here; the legacy native m128 read does
-    // not. VEX m128+m256 add48 bytes to the840 setup/check bytes.
-    assert_eq!(fields["vector_bytes"], "888", "{text}");
+    // variants and both MXCSR accesses remain mediated on AVX; temporal input
+    // and readback transfers promote. SSE2 still models all32 operations.
+    // VEX m128+m256 reads add48 bytes to the8 modeled control bytes on AVX.
+    assert_modeled_vector_counters(&fields, [(32, 888), (6, 56), (6, 56)]);
     assert_eq!(fields["integer_ops"], "0", "{text}");
     assert_eq!(fields["fp_status"], "4", "{text}");
     assert_eq!(fields["service_stops"], "0", "{text}");
