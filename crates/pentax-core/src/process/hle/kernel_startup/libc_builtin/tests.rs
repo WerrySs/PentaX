@@ -27,6 +27,29 @@ fn supplied() -> Vec<u8> {
     image
 }
 
+fn supplied_standard_scope(module: &[u8], library: &[u8]) -> Vec<u8> {
+    let mut image = supplied();
+    // These original descriptor slots fit either short public name. Remove
+    // the three aliases of each selected role so an old pair cannot mask a miss.
+    for (row, name) in [(5, module), (7, library)] {
+        let at = 0x300 + row * 16 + 8;
+        let word = u64::from_le_bytes(image[at..at + 8].try_into().unwrap());
+        let start = 0x400 + (word as u32) as usize;
+        let length = image[start..].iter().position(|byte| *byte == 0).unwrap();
+        assert!(name.len() <= length);
+        image[start..start + length].fill(0);
+        image[start..start + name.len()].copy_from_slice(name);
+    }
+    for function in 0..3 {
+        for alias in 0..3 {
+            let row = crate::process::hle::provider::LIBC_ALIAS_SYMBOL + function * 3 + alias;
+            let at = crate::process::hle::provider::SYMBOLS_AT + row * 24;
+            image[at..at + 4].fill(0);
+        }
+    }
+    image
+}
+
 fn block<'view, 'source, 'image>(
     proof: &'view PreparedNativeSource<'source, 'image>,
     engine: &NativeBlockStepper<'view, 'source, 'image>,
@@ -129,6 +152,47 @@ fn physical_alias(
                 &Default::default(),
             )
             .unwrap();
+    }
+}
+
+#[test]
+fn standard_libc_pair_matches_exactly_without_internal_hybrids_or_version_fallback() {
+    let primary = crate::process::hle::unavailable::tests::original_input(0);
+    for (module, library, minor, version, matched) in [
+        (b"libc".as_slice(), b"libc".as_slice(), 1_u8, 1_u16, true),
+        (b"libc", b"LibcInternal", 1, 1, false),
+        (b"LibcInternal", b"libc", 1, 1, false),
+        (b"libc", b"libc", 2, 1, false),
+        (b"libc", b"libc", 1, 2, false),
+    ] {
+        let mut image = supplied_standard_scope(module, library);
+        for (row, version, mask) in [
+            (5, u64::from(minor), 255_u64),
+            (7, u64::from(version), 65535),
+        ] {
+            let at = 0x300 + row * 16 + 8;
+            let word = u64::from_le_bytes(image[at..at + 8].try_into().unwrap());
+            image[at..at + 8]
+                .copy_from_slice(&((word & !(mask << 32)) | (version << 32)).to_le_bytes());
+        }
+        with_native_image_session(
+            &[&primary, &image],
+            &NativeImageLimits::default(),
+            |session, _| {
+                let proof = session.prepare_native_source(&Default::default()).unwrap();
+                let manifest = session.prepare_libc_builtins(&proof, 1).unwrap();
+                assert_eq!(manifest.function_count(), if matched { 3 } else { 0 });
+                let bias = proof.materialized_source().source_plan().modules()[1].load_bias();
+                for offset in [0x100, 0x110, 0x120] {
+                    assert_eq!(manifest.contains_pc(bias + offset), matched);
+                    assert!(!manifest.contains_pc(bias + offset + 1));
+                }
+                assert_eq!(session.libc_builtin_usage(), LibcBuiltinUsage::default());
+                assert_eq!(session.hle.service_attempts(), 0);
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
     }
 }
 

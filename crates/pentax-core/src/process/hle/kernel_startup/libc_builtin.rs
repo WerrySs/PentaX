@@ -16,7 +16,15 @@ const FUNCTIONS: [KnownFunction; 3] = [
     KnownFunction::Memmove,
     KnownFunction::Memset,
 ];
-const SCOPES: [&[u8]; 2] = [b"LibcInternal", b"libSceLibcInternal"];
+// Four existing finite declarations, plus one separate standard-memory entry
+// profile. The libc pair does not participate in prefix/name crossproducts.
+const SCOPES: [(&[u8], &[u8]); 5] = [
+    (b"LibcInternal", b"LibcInternal"),
+    (b"LibcInternal", b"libSceLibcInternal"),
+    (b"libSceLibcInternal", b"LibcInternal"),
+    (b"libSceLibcInternal", b"libSceLibcInternal"),
+    (b"libc", b"libc"),
+];
 
 /// Helper attempts/completions in memcpy, memmove, memset order. A completed
 /// helper can still encounter a terminal normal-RET fault; these are not native
@@ -173,88 +181,86 @@ impl PreparedNativeKernelStartup<'_, '_> {
             entries: [None; 3],
         };
         for (index, function) in FUNCTIONS.into_iter().enumerate() {
-            for module_name in SCOPES {
-                for library_name in SCOPES {
-                    let remaining = self
-                        .plan
-                        .limits
-                        .max_provider_work
-                        .saturating_sub(self.provider_work);
-                    let limits = ModuleLookupLimits {
-                        max_work: remaining,
-                        ..Default::default()
-                    };
-                    let query = ModuleExportQuery {
-                        nid: NidToken::parse(function.nid()).expect("public NID"),
-                        module: module_name,
-                        library: library_name,
-                        versions: DescriptorVersions {
-                            module_major: 1,
-                            module_minor: 1,
-                            library: 1,
-                        },
-                    };
-                    let attempt = lookup_qualified_module_export(source, module, &query, &limits);
-                    charge(
-                        &mut self.provider_work,
-                        attempt.work,
-                        self.plan.limits.max_provider_work,
-                    )?;
-                    let Some(export) = attempt.result.map_err(|_| invalid())? else {
-                        continue;
-                    };
-                    let remaining = self
-                        .plan
-                        .limits
-                        .max_provider_work
-                        .saturating_sub(self.provider_work);
-                    let identity = export.qualified_identity(remaining);
-                    charge(
-                        &mut self.provider_work,
-                        identity.work,
-                        self.plan.limits.max_provider_work,
-                    )?;
-                    let identity = identity.result.map_err(|_| invalid())?;
-                    // These are exactly the existing finite HLE declaration pairs,
-                    // including independently prefix-stripped module/library names.
-                    charge(
-                        &mut self.provider_work,
-                        128,
-                        self.plan.limits.max_provider_work,
-                    )?;
-                    if !identity.global_function
-                        || identity.nid != NidToken::parse(function.nid()).expect("public NID")
-                        || !matches!(identity.module, b"LibcInternal" | b"libSceLibcInternal")
-                        || !matches!(identity.library, b"LibcInternal" | b"libSceLibcInternal")
-                        || identity.versions.module_major != 1
-                        || identity.versions.module_minor != 1
-                        || identity.versions.library != 1
+            for (module_name, library_name) in SCOPES {
+                let remaining = self
+                    .plan
+                    .limits
+                    .max_provider_work
+                    .saturating_sub(self.provider_work);
+                let limits = ModuleLookupLimits {
+                    max_work: remaining,
+                    ..Default::default()
+                };
+                let query = ModuleExportQuery {
+                    nid: NidToken::parse(function.nid()).expect("public NID"),
+                    module: module_name,
+                    library: library_name,
+                    versions: DescriptorVersions {
+                        module_major: 1,
+                        module_minor: 1,
+                        library: 1,
+                    },
+                };
+                let attempt = lookup_qualified_module_export(source, module, &query, &limits);
+                charge(
+                    &mut self.provider_work,
+                    attempt.work,
+                    self.plan.limits.max_provider_work,
+                )?;
+                let Some(export) = attempt.result.map_err(|_| invalid())? else {
+                    continue;
+                };
+                let remaining = self
+                    .plan
+                    .limits
+                    .max_provider_work
+                    .saturating_sub(self.provider_work);
+                let identity = export.qualified_identity(remaining);
+                charge(
+                    &mut self.provider_work,
+                    identity.work,
+                    self.plan.limits.max_provider_work,
+                )?;
+                let identity = identity.result.map_err(|_| invalid())?;
+                // Recheck the exact selected pair; neither name alone admits
+                // a hybrid between libc and the existing internal scopes.
+                charge(
+                    &mut self.provider_work,
+                    128,
+                    self.plan.limits.max_provider_work,
+                )?;
+                if !identity.global_function
+                    || identity.nid != NidToken::parse(function.nid()).expect("public NID")
+                    || identity.module != module_name
+                    || identity.library != library_name
+                    || identity.versions.module_major != 1
+                    || identity.versions.module_minor != 1
+                    || identity.versions.library != 1
+                {
+                    continue;
+                }
+                charge(
+                    &mut self.provider_work,
+                    source_scan_work,
+                    self.plan.limits.max_provider_work,
+                )?;
+                let (selected, executable) =
+                    executable_interval(source, export.address())?.ok_or_else(invalid)?;
+                if selected != module || export.definition().module.index() != module {
+                    return Err(invalid());
+                }
+                for (other, entry) in manifest.entries.iter().enumerate() {
+                    if let Some(entry) = entry
+                        && ((other == index && entry.address != export.address())
+                            || (other != index && entry.address == export.address()))
                     {
-                        continue;
-                    }
-                    charge(
-                        &mut self.provider_work,
-                        source_scan_work,
-                        self.plan.limits.max_provider_work,
-                    )?;
-                    let (selected, executable) =
-                        executable_interval(source, export.address())?.ok_or_else(invalid)?;
-                    if selected != module || export.definition().module.index() != module {
                         return Err(invalid());
                     }
-                    for (other, entry) in manifest.entries.iter().enumerate() {
-                        if let Some(entry) = entry
-                            && ((other == index && entry.address != export.address())
-                                || (other != index && entry.address == export.address()))
-                        {
-                            return Err(invalid());
-                        }
-                    }
-                    manifest.entries[index] = Some(Entry {
-                        address: export.address(),
-                        executable,
-                    });
                 }
+                manifest.entries[index] = Some(Entry {
+                    address: export.address(),
+                    executable,
+                });
             }
         }
         Ok(manifest)

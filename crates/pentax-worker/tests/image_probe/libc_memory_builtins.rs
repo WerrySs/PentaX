@@ -71,7 +71,7 @@ fn expect_word(p: &mut Program, at: i32, value: u64) {
     p.expect(value);
 }
 
-fn original_library(outer_memcpy: bool) -> Input {
+fn original_library(outer_memcpy: bool, module_name: &str, library_name: &str) -> Input {
     let mut p = Program::new();
     p.stack(0x89, 12, 0x78); // Preserve the initializer's own incoming R12.
     p.reg(12, 0x1a2b_3c4d_5566_7788);
@@ -115,7 +115,7 @@ fn original_library(outer_memcpy: bool) -> Input {
         KnownFunction::Memset,
     ];
     let names = functions.map(|function| std::str::from_utf8(function.nid()).unwrap());
-    let original = scoped_system_image(&code, &names, "LibcInternal", "LibcInternal", 1);
+    let original = scoped_system_image(&code, &names, module_name, library_name, 1);
     let mut bytes = original.bytes.clone();
     bytes.resize(0x5000, 0);
     // Replace imports with GLOBAL/PROTECTED function definitions. There are no
@@ -170,9 +170,18 @@ fn original_library(outer_memcpy: bool) -> Input {
 
 #[test]
 fn checked_libc_memory_builtins_preserve_original_callers_and_real_outer_returns() {
+    compare_profiles("LibcInternal", "LibcInternal");
+}
+
+#[test]
+fn checked_standard_libc_pair_uses_real_helpers_and_preserves_original_callers_and_outer_returns() {
+    compare_profiles("libc", "libc");
+}
+
+fn compare_profiles(module_name: &str, library_name: &str) {
     for outer_memcpy in [false, true] {
         let main = module_input(&[0xb8, 42, 0, 0, 0, 0xc3], false, None);
-        let library = original_library(outer_memcpy);
+        let library = original_library(outer_memcpy, module_name, library_name);
         let mut ordinary = None;
         for profile in ["off", "checked"] {
             let (status, fields, text) = probe_arguments(&[
@@ -186,6 +195,11 @@ fn checked_libc_memory_builtins_preserve_original_callers_and_real_outer_returns
             assert_eq!(status, 0, "{text}");
             assert_eq!(fields["value"], "42", "{text}");
             assert_eq!(fields["initializer_calls"], "1", "{text}");
+            assert_eq!(
+                fields["libc_builtin_bound_entries"],
+                if profile == "checked" { "3" } else { "0" },
+                "{text}"
+            );
             for (index, name) in ["memcpy", "memmove", "memset"].iter().enumerate() {
                 let expected = if profile == "off" || (outer_memcpy && index != 0) {
                     "0"
