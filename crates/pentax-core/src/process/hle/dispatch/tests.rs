@@ -46,6 +46,100 @@ fn pattern(size: usize, seed: u8) -> Vec<u8> {
 }
 
 #[test]
+fn builtin_budget_eligibility_is_pure_at_exact_limits_and_checked_overflows() {
+    let snapshot = |budget: &ServiceBudget| {
+        (
+            budget.attempts,
+            budget.total_bytes,
+            budget.work,
+            budget.calls,
+            budget.string_reads,
+            budget.string_writes,
+            budget.string_scratch_peak,
+            budget.reservations,
+            budget.refuse_reservation,
+        )
+    };
+    for function in [F::Memcpy, F::Memmove, F::Memset] {
+        let exact_work = 19 + SITE_LOOKUP_WORK + work(function, 8).unwrap();
+        for boundary in 0..7 {
+            let mut limits = MemoryServiceLimits {
+                max_attempts: 3,
+                max_span_bytes: 8,
+                max_scratch_bytes: 8,
+                max_total_bytes: 21,
+                max_work_units: exact_work,
+                ..MemoryServiceLimits::default()
+            };
+            match boundary {
+                1 => limits.max_attempts = 2,
+                2 => limits.max_span_bytes = 7,
+                3 => limits.max_scratch_bytes = 7,
+                4 => limits.max_total_bytes = 20,
+                5 => limits.max_work_units -= 1,
+                6 => limits.max_work_units = 19 + SITE_LOOKUP_WORK - 1,
+                _ => {}
+            }
+            let mut budget = ServiceBudget::new(limits);
+            budget.attempts = 2;
+            budget.total_bytes = 13;
+            budget.work = 19;
+            budget.calls[F::Memset.index()] = 1;
+            budget.refuse_reservation = Some(0);
+            let before = snapshot(&budget);
+            for _ in 0..3 {
+                assert_eq!(budget.can_admit_builtin(function, 8), boundary == 0);
+                assert_eq!(snapshot(&budget), before);
+            }
+        }
+    }
+    let mut budget = ServiceBudget::new(MemoryServiceLimits {
+        max_attempts: 1,
+        max_span_bytes: 0,
+        max_scratch_bytes: 0,
+        max_total_bytes: 0,
+        max_work_units: SITE_LOOKUP_WORK + 1,
+        ..MemoryServiceLimits::default()
+    });
+    for function in [F::Memcpy, F::Memmove, F::Memset] {
+        assert!(budget.can_admit_builtin(function, 0));
+    }
+    for function in [
+        F::Memcmp,
+        F::Strlen,
+        F::CxaAtExit,
+        F::HeapGetTraceInfo,
+        F::Snprintf,
+    ] {
+        assert!(!budget.can_admit_builtin(function, 0));
+    }
+    budget.limits.max_work_units = SITE_LOOKUP_WORK;
+    assert!(!budget.can_admit_builtin(F::Memset, 0)); // Zero length still has fixed operation work.
+    budget.limits.max_attempts = u64::MAX;
+    budget.limits.max_span_bytes = u64::MAX;
+    budget.limits.max_scratch_bytes = u64::MAX;
+    budget.limits.max_total_bytes = u64::MAX;
+    budget.limits.max_work_units = u64::MAX;
+    for boundary in 0..5 {
+        budget.attempts = if boundary == 0 { u64::MAX } else { 0 };
+        budget.total_bytes = if boundary == 1 { u64::MAX } else { 0 };
+        budget.work = match boundary {
+            2 => u64::MAX - SITE_LOOKUP_WORK + 1, // Site lookup addition overflows.
+            3 => u64::MAX - SITE_LOOKUP_WORK,     // Site fits; fixed operation addition overflows.
+            _ => 0,
+        };
+        let length = match boundary {
+            1 => 1,
+            4 => u64::MAX,
+            _ => 0,
+        };
+        let before = snapshot(&budget);
+        assert!(!budget.can_admit_builtin(F::Memset, length));
+        assert_eq!(snapshot(&budget), before);
+    }
+}
+
+#[test]
 fn memcpy_copies_unaligned_cross_page_spans_and_returns_the_full_destination() {
     let mut memory = memory(3);
     let mut budget = budget();
@@ -375,6 +469,11 @@ fn injected_scratch_reservation_failures_change_no_guest_state() {
         let resident = memory.resident_bytes();
         let mut budget = budget();
         budget.refuse_reservation = Some(refuse);
+        if function != F::Memcmp {
+            // Eligibility predicts quotas, not a successful allocation. A
+            // genuine provider/helper error still retains its admitted charges.
+            assert!(budget.can_admit_builtin(function, 32));
+        }
         assert_eq!(
             call(&mut budget, &mut memory, function, SECOND - 8, BASE, 32),
             Err(MemoryServiceError::Allocation)
@@ -384,6 +483,12 @@ fn injected_scratch_reservation_failures_change_no_guest_state() {
         assert_eq!(memory.resident_bytes(), resident);
         assert_eq!(budget.completed(), 0);
         assert_eq!(budget.reservations, refuse + 1);
+        assert_eq!(budget.attempts(), 1);
+        assert_eq!(budget.total_bytes(), 32);
+        assert_eq!(
+            budget.work(),
+            SITE_LOOKUP_WORK + work(function, 32).unwrap()
+        );
         budget.refuse_reservation = None;
         call(&mut budget, &mut memory, function, SECOND - 8, BASE, 32).unwrap();
     }
@@ -401,7 +506,10 @@ fn span_scratch_attempt_byte_and_work_caps_are_inclusive_and_retained() {
     };
     let mut memory = memory(1);
     let mut budget = ServiceBudget::new(limits);
+    assert!(budget.can_admit_builtin(F::Memset, 16));
     call(&mut budget, &mut memory, F::Memset, BASE, 1, 16).unwrap();
+    let first_work = SITE_LOOKUP_WORK + work(F::Memset, 16).unwrap();
+    assert!(!budget.can_admit_builtin(F::Memset, 17));
     assert_eq!(
         call(&mut budget, &mut memory, F::Memset, BASE, 1, 17),
         Err(MemoryServiceError::LimitExceeded {
@@ -409,6 +517,10 @@ fn span_scratch_attempt_byte_and_work_caps_are_inclusive_and_retained() {
             requested: 17,
             maximum: 16,
         })
+    );
+    assert_eq!(
+        (budget.attempts(), budget.total_bytes(), budget.work()),
+        (2, 16, first_work + SITE_LOOKUP_WORK)
     );
     // Memcmp holds two snapshots: 2 * 13 exceeds the scratch cap.
     assert_eq!(
@@ -421,6 +533,8 @@ fn span_scratch_attempt_byte_and_work_caps_are_inclusive_and_retained() {
     );
     call(&mut budget, &mut memory, F::Memcmp, BASE, BASE + 64, 12).unwrap();
     assert_eq!(budget.total_bytes(), 28);
+    let before_refusal = budget.work();
+    assert!(!budget.can_admit_builtin(F::Memcpy, 13));
     assert_eq!(
         call(&mut budget, &mut memory, F::Memcpy, BASE + 32, BASE, 13),
         Err(MemoryServiceError::LimitExceeded {
@@ -429,7 +543,10 @@ fn span_scratch_attempt_byte_and_work_caps_are_inclusive_and_retained() {
             maximum: 40,
         })
     );
+    assert_eq!(budget.total_bytes(), 28);
+    assert_eq!(budget.work(), before_refusal + SITE_LOOKUP_WORK);
     assert_eq!(budget.attempts(), 5);
+    assert!(!budget.can_admit_builtin(F::Memcpy, 0));
     assert_eq!(
         call(&mut budget, &mut memory, F::Memcpy, BASE + 32, BASE, 0),
         Err(MemoryServiceError::LimitExceeded {
@@ -440,6 +557,7 @@ fn span_scratch_attempt_byte_and_work_caps_are_inclusive_and_retained() {
     );
     // Rejected attempts were charged; the counters never restart.
     assert_eq!(budget.attempts(), 5);
+    assert_eq!(budget.work(), before_refusal + SITE_LOOKUP_WORK);
     assert_eq!(budget.completed(), 2);
 }
 
@@ -465,8 +583,10 @@ fn work_is_precharged_conservatively_and_failures_do_not_reset_it() {
         max_work_units: exact,
         ..MemoryServiceLimits::default()
     });
+    assert!(budget.can_admit_builtin(F::Memset, 8));
     call(&mut budget, &mut memory, F::Memset, BASE, 1, 8).unwrap();
     assert_eq!(budget.work(), exact);
+    assert!(!budget.can_admit_builtin(F::Memset, 0));
     assert_eq!(
         budget.begin_attempt().map(|_| ()),
         Err(MemoryServiceError::LimitExceeded {
@@ -484,6 +604,7 @@ fn work_is_precharged_conservatively_and_failures_do_not_reset_it() {
         max_work_units: u64::MAX,
         ..MemoryServiceLimits::default()
     });
+    assert!(!budget.can_admit_builtin(F::Memcpy, u64::MAX));
     assert_eq!(
         call(
             &mut budget,
@@ -498,6 +619,10 @@ fn work_is_precharged_conservatively_and_failures_do_not_reset_it() {
         })
     );
     assert_eq!(
+        (budget.attempts(), budget.total_bytes(), budget.work()),
+        (1, 0, SITE_LOOKUP_WORK)
+    );
+    assert_eq!(
         call(
             &mut budget,
             &mut memory,
@@ -509,5 +634,9 @@ fn work_is_precharged_conservatively_and_failures_do_not_reset_it() {
         Err(MemoryServiceError::CounterOverflow {
             kind: ServiceLimit::ScratchBytes,
         })
+    );
+    assert_eq!(
+        (budget.attempts(), budget.total_bytes(), budget.work()),
+        (2, 0, 2 * SITE_LOOKUP_WORK)
     );
 }

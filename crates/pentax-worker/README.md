@@ -14,6 +14,11 @@ state, and keeps the original guarded stack and live source checks. Physical
 output aliases of the real return slot or protected source spans fall back
 before a helper attempt. Entry REP strings retain their original bounded
 continuation. Memory-service limits remain shared with ordinary libc calls.
+Before selecting a helper, a read-only admission check includes the retained
+attempt, lookup-work, span, scratch, aggregate-byte and work allowances. A call
+that does not fit keeps its original checked native implementation without
+consuming a helper attempt or changing those limits. This is selection before
+effects, not recovery from an error or a reset of the shared service budget.
 After a helper attempt, failure is terminal; a late return fault preserves
 completed writes and cannot replay the operation through the native path.
 

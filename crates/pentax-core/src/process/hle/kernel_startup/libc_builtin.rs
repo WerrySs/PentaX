@@ -324,6 +324,12 @@ impl PreparedNativeKernelStartup<'_, '_> {
             .hle
             .pause_with_service_budget()
             .map_err(KernelStartupError::Hle)?;
+        // This is optional route selection, not recovery from a failed helper.
+        // Preserve the original native path when the unchanged shared service
+        // allowance cannot admit this entire call. No attempt or token exists.
+        if !budget.can_admit_builtin(FUNCTIONS[index], args.rdx) {
+            return Ok(None);
+        }
         let token = engine.begin_libc_builtin(&memory, block)?;
         let eligibility = (|| -> Result<bool, LibcBuiltinError> {
             if args.rdx == 0 {

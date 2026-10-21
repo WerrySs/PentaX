@@ -71,10 +71,26 @@ fn expect_word(p: &mut Program, at: i32, value: u64) {
     p.expect(value);
 }
 
-fn original_library(outer_memcpy: bool, module_name: &str, library_name: &str) -> Input {
+fn original_library(
+    outer_memcpy: bool,
+    module_name: &str,
+    library_name: &str,
+    large_fill: bool,
+) -> Input {
     let mut p = Program::new();
     p.stack(0x89, 12, 0x78); // Preserve the initializer's own incoming R12.
     p.reg(12, 0x1a2b_3c4d_5566_7788);
+    if large_fill {
+        // One byte above the optional helper's default span allowance. The
+        // original REP body must finish this call before later small helpers.
+        p.path(7, 0x8000);
+        p.reg(6, 0x17e);
+        p.reg(2, 65_537);
+        call(&mut p, 2);
+        expect_pointer(&mut p, 0x8000);
+        expect_word(&mut p, 0x8000, 0x7e7e_7e7e_7e7e_7e7e);
+        expect_word(&mut p, 0x8000 + 65_537 - 8, 0x7e7e_7e7e_7e7e_7e7e);
+    }
     p.path(7, DEST);
     p.path(6, SOURCE);
     p.reg(2, 32);
@@ -120,7 +136,15 @@ fn original_library(outer_memcpy: bool, module_name: &str, library_name: &str) -
     bytes.resize(0x5000, 0);
     // Replace imports with GLOBAL/PROTECTED function definitions. There are no
     // relocation consumers competing with the generated provider's exports.
-    let bodies = [copy_body(false), copy_body(true), set_body()];
+    let fill = if large_fill {
+        // R8 preserves the original destination while AL/RCX/RDI serve STOSB.
+        vec![
+            0x49, 0x89, 0xf8, 0x89, 0xf0, 0x48, 0x89, 0xd1, 0xf3, 0xaa, 0x4c, 0x89, 0xc0, 0xc3,
+        ]
+    } else {
+        set_body()
+    };
+    let bodies = [copy_body(false), copy_body(true), fill];
     for (index, body) in bodies.iter().enumerate() {
         let symbol = 0x600 + (index + 1) * 24;
         bytes[symbol + 5] = 3;
@@ -157,7 +181,7 @@ fn original_library(outer_memcpy: bool, module_name: &str, library_name: &str) -
         (8, 0x4000_u64),
         (16, 0x4000),
         (32, 0x1000),
-        (40, 0x4000),
+        (40, if large_fill { 0x20000 } else { 0x4000 }),
         (48, 0x4000),
     ] {
         put(&mut bytes, 176 + offset, &value.to_le_bytes());
@@ -170,18 +194,23 @@ fn original_library(outer_memcpy: bool, module_name: &str, library_name: &str) -
 
 #[test]
 fn checked_libc_memory_builtins_preserve_original_callers_and_real_outer_returns() {
-    compare_profiles("LibcInternal", "LibcInternal");
+    compare_profiles("LibcInternal", "LibcInternal", false);
 }
 
 #[test]
 fn checked_standard_libc_pair_uses_real_helpers_and_preserves_original_callers_and_outer_returns() {
-    compare_profiles("libc", "libc");
+    compare_profiles("libc", "libc", false);
 }
 
-fn compare_profiles(module_name: &str, library_name: &str) {
+#[test]
+fn checked_libc_memory_builtins_leave_oversized_calls_native_without_consuming_helper_budget() {
+    compare_profiles("libc", "libc", true);
+}
+
+fn compare_profiles(module_name: &str, library_name: &str, large_fill: bool) {
     for outer_memcpy in [false, true] {
         let main = module_input(&[0xb8, 42, 0, 0, 0, 0xc3], false, None);
-        let library = original_library(outer_memcpy, module_name, library_name);
+        let library = original_library(outer_memcpy, module_name, library_name, large_fill);
         let mut ordinary = None;
         for profile in ["off", "checked"] {
             let (status, fields, text) = probe_arguments(&[

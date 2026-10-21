@@ -380,6 +380,13 @@ impl ServiceBudget {
 
     /// Count one trap and its site lookup before the site is inspected.
     pub(super) fn begin_attempt(&mut self) -> Result<Attempt, MemoryServiceError> {
+        let (attempts, work) = self.attempt_totals()?;
+        self.attempts = attempts;
+        self.work = work;
+        Ok(Attempt(()))
+    }
+
+    fn attempt_totals(&self) -> Result<(u64, u64), MemoryServiceError> {
         let attempts = total(
             self.attempts,
             1,
@@ -392,9 +399,27 @@ impl ServiceBudget {
             self.limits.max_work_units,
             ServiceLimit::WorkUnits,
         )?;
-        self.attempts = attempts;
-        self.work = work;
-        Ok(Attempt(()))
+        Ok((attempts, work))
+    }
+
+    /// Quota eligibility for the optional supplied-library substitution only.
+    /// Simulate the same attempt/site lookup and memory admission without
+    /// consuming any counters. This neither validates guest spans nor predicts
+    /// allocation success or the allocator's eventual reported capacity.
+    #[cfg_attr(
+        not(all(target_os = "windows", target_arch = "x86_64")),
+        allow(dead_code)
+    )]
+    pub(super) fn can_admit_builtin(&self, function: KnownFunction, length: u64) -> bool {
+        if !matches!(
+            function,
+            KnownFunction::Memcpy | KnownFunction::Memmove | KnownFunction::Memset
+        ) {
+            return false;
+        }
+        self.attempt_totals()
+            .and_then(|(_, work)| self.admission_totals(function, length, work))
+            .is_ok()
     }
 
     /// Native PRE-marker admission additionally visits the complete eight-byte
@@ -411,6 +436,18 @@ impl ServiceBudget {
 
     /// Pure span/scratch checks, then requested bytes and work together.
     fn admit(&mut self, function: KnownFunction, length: u64) -> Result<(), MemoryServiceError> {
+        let (total_bytes, work) = self.admission_totals(function, length, self.work)?;
+        self.total_bytes = total_bytes;
+        self.work = work;
+        Ok(())
+    }
+
+    fn admission_totals(
+        &self,
+        function: KnownFunction,
+        length: u64,
+        initial_work: u64,
+    ) -> Result<(u64, u64), MemoryServiceError> {
         let limits = self.limits;
         within(length, limits.max_span_bytes, ServiceLimit::SpanBytes)?;
         let buffers = if function == KnownFunction::Memcmp {
@@ -438,14 +475,12 @@ impl ServiceBudget {
             kind: ServiceLimit::WorkUnits,
         })?;
         let work = total(
-            self.work,
+            initial_work,
             cost,
             limits.max_work_units,
             ServiceLimit::WorkUnits,
         )?;
-        self.total_bytes = total_bytes;
-        self.work = work;
-        Ok(())
+        Ok((total_bytes, work))
     }
 
     /// Reserve one zeroed scratch buffer; `held` is this operation's reported
