@@ -293,7 +293,9 @@ fn refused_label_drops_notification_and_completed_prefix_cannot_be_replayed() {
                 release(&mut valid, base + 0x900, 17, 19, 4);
                 assert_eq!(submit(session, base, &valid), Ok(0));
                 assert_eq!(poll(session, scratch, queue), Ok(0));
-                assert_eq!(u64::from_le_bytes(read(session, base + 0x900)), 17);
+                // Public RELEASE_MEM INT_SEL4 delivers its interrupt while
+                // dropping the label on both processor queues.
+                assert_eq!(read::<16>(session, base + 0x900), [0xa5; 16]);
             }
         });
     }
