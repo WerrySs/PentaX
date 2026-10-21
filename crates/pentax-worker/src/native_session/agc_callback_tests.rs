@@ -57,7 +57,12 @@ fn marker(
         let Some(metadata) = inspection.metadata() else {
             continue;
         };
-        let descriptors = metadata.descriptors().decoded().unwrap();
+        // A plain ELF source may have symbols without SCE scope descriptors.
+        // It cannot supply this qualified export; retain the exact typed
+        // module/library/version checks on every candidate below.
+        let Some(descriptors) = metadata.descriptors().decoded() else {
+            continue;
+        };
         for symbol in metadata.link().symbols() {
             if symbol.is_undefined()
                 || symbol.binding() != SymbolBinding::GLOBAL
