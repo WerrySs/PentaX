@@ -122,9 +122,11 @@ fn privacy_writes_exactly_four_bytes_at_unaligned_and_page_crossing_outputs() {
 
 #[test]
 fn privacy_backing_and_budget_failures_preserve_the_complete_output_transaction() {
+    // This finite raw fixture coalesces all refused write spans to WriteDenied.
+    // Actual native backing separately proves the precise unmapped domain.
     for (output, readonly, expected) in [
-        (ARG + PAGE, false, GuestError::Unmapped),
-        (ARG + PAGE - 2, false, GuestError::Unmapped),
+        (ARG + PAGE, false, GuestError::WriteDenied),
+        (ARG + PAGE - 2, false, GuestError::WriteDenied),
         (ARG + 1, true, GuestError::WriteDenied),
         (u64::MAX - 1, false, GuestError::AddressOverflow),
     ] {
