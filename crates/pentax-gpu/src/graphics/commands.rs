@@ -294,14 +294,13 @@ pub fn plan_commands(
                 at = end;
                 continue;
             }
-            if matches!(
+            if (matches!(
                 header.opcode(),
                 0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42
-            ) || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
+            ) || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
+                && actions.len() >= action_count
             {
-                if actions.len() >= action_count {
-                    return Err(Error::Limit("command actions"));
-                }
+                return Err(Error::Limit("command actions"));
             }
             if matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
