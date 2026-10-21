@@ -65,7 +65,7 @@ impl NativeBlockStepper<'_, '_, '_> {
         state: NativeCpuState,
         stack: NativeStackFrame,
     ) -> Result<NativeThreadContext, NativeDispatchError> {
-        if self.machine.phase == Phase::Terminal {
+        if matches!(self.machine.phase, Phase::Terminal | Phase::LibcBuiltin(_)) {
             return Err(NativeDispatchError::WrongPhase);
         }
         if memory.owner_id() != self.machine.owner {
@@ -141,8 +141,8 @@ impl NativeBlockStepper<'_, '_, '_> {
         {
             return Err(NativeDispatchError::WrongOwner);
         }
-        if self.machine.phase == Phase::Terminal
-            || parked.phase == Phase::Terminal
+        if matches!(self.machine.phase, Phase::Terminal | Phase::LibcBuiltin(_))
+            || matches!(parked.phase, Phase::Terminal | Phase::LibcBuiltin(_))
             || parked.index == self.machine.thread_index
         {
             return Err(NativeDispatchError::WrongPhase);

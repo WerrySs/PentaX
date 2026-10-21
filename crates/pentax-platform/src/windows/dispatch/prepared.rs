@@ -349,8 +349,9 @@ pub enum NativeBlockStop {
     Unsupported { guest_pc: u64 },
 }
 
-/// Observation minted only after actual native entry returns and its exact
-/// outer-return exit is admitted. Numeric stop data cannot construct this.
+/// Observation minted only after the selected call's checked outer return,
+/// including an explicitly authenticated builtin or modeled RET continuation.
+/// Numeric stop data cannot construct this.
 /// It is historical evidence, not continuing liveness or an initialization policy.
 ///
 /// ```compile_fail
@@ -408,6 +409,7 @@ impl std::fmt::Debug for NativeCallReturn<'_, '_> {
 enum Phase {
     Ready,
     Syscall(PreSyscallToken),
+    LibcBuiltin(u64),
     Returned,
     Terminal,
 }
@@ -419,6 +421,9 @@ mod align_right;
 mod bit_counts;
 #[path = "prepared/cache_hints.rs"]
 mod cache_hints;
+#[path = "prepared/libc_builtin.rs"]
+mod libc_builtin;
+pub use libc_builtin::NativeLibcBuiltin;
 #[path = "prepared/cpu_identification.rs"]
 mod cpu_identification;
 #[path = "prepared/float_ops.rs"]
@@ -543,7 +548,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             if memory.owner_id() != machine.owner {
                 return Err(NativeDispatchError::WrongOwner);
             }
-            if machine.phase == Phase::Terminal {
+            if matches!(machine.phase, Phase::Terminal | Phase::LibcBuiltin(_)) {
                 return Err(NativeDispatchError::WrongPhase);
             }
             let plan = source.source_plan();
@@ -1725,47 +1730,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         {
             return Err(NativeDispatchError::InvalidState);
         }
-        let end_pc = if block.exit().instruction().is_some() {
-            block.exit().next_guest_pc()
-        } else {
-            block.exit().guest_pc()
-        };
-        let consumed = usize::try_from(
-            end_pc
-                .checked_sub(block.guest_pc())
-                .ok_or(NativeDispatchError::SourceMismatch)?,
-        )
-        .map_err(|_| NativeDispatchError::SourceMismatch)?;
-        let expected = block
-            .relocated_source_bytes()
-            .get(..consumed)
-            .ok_or(NativeDispatchError::SourceMismatch)?;
-        // Source logical-X remains physically NX and must also be logically
-        // immutable. Safe re-protection between steps cannot admit RWX source.
-        let mut address = block.guest_pc();
-        while address < end_pc {
-            match memory.preflight_write(address, 1) {
-                Err(NativeMemoryError::PermissionDenied(_)) => {}
-                Ok(()) => return Err(NativeDispatchError::WritableSource),
-                Err(error) => return Err(error.into()),
-            }
-            address = (address | (NATIVE_GUEST_PAGE - 1))
-                .checked_add(1)
-                .ok_or(NativeDispatchError::SourceMismatch)?;
-        }
-        // One small scratch buffer serves every entry. The exclusive pause
-        // keeps these bounded comparisons coherent even for larger callers.
-        let mut live = [0; 128];
-        for (index, chunk) in expected.chunks(live.len()).enumerate() {
-            let address = block
-                .guest_pc()
-                .checked_add((index * live.len()) as u64)
-                .ok_or(NativeDispatchError::SourceMismatch)?;
-            memory.fetch_source(address, &mut live[..chunk.len()])?;
-            if live[..chunk.len()] != *chunk {
-                return Err(NativeDispatchError::SourceMismatch);
-            }
-        }
+        attest_live_source(memory, block)?;
         let bytes = block.bytes();
         if bytes.len() < 2 || !block.attest_emission(block.placement().address, bytes) {
             return Err(NativeDispatchError::EmissionMismatch);
@@ -2018,6 +1983,56 @@ impl Drop for NativeBlockMachine {
         self.observed_return = None;
         self.phase = Phase::Terminal;
     }
+}
+
+// Shared entry-window attestation; neither this check nor a builtin bypass
+// grants authority to execute a supplied library's body.
+fn attest_live_source(
+    memory: &PausedNativeMemory<'_>,
+    block: &MaterializedBlockPlan<'_, '_, '_>,
+) -> Result<(), NativeDispatchError> {
+    let end_pc = if block.exit().instruction().is_some() {
+        block.exit().next_guest_pc()
+    } else {
+        block.exit().guest_pc()
+    };
+    let consumed = usize::try_from(
+        end_pc
+            .checked_sub(block.guest_pc())
+            .ok_or(NativeDispatchError::SourceMismatch)?,
+    )
+    .map_err(|_| NativeDispatchError::SourceMismatch)?;
+    let expected = block
+        .relocated_source_bytes()
+        .get(..consumed)
+        .ok_or(NativeDispatchError::SourceMismatch)?;
+    // Source logical-X remains physically NX and must also be logically
+    // immutable. Safe re-protection between steps cannot admit RWX source.
+    let mut address = block.guest_pc();
+    while address < end_pc {
+        match memory.preflight_write(address, 1) {
+            Err(NativeMemoryError::PermissionDenied(_)) => {}
+            Ok(()) => return Err(NativeDispatchError::WritableSource),
+            Err(error) => return Err(error.into()),
+        }
+        address = (address | (NATIVE_GUEST_PAGE - 1))
+            .checked_add(1)
+            .ok_or(NativeDispatchError::SourceMismatch)?;
+    }
+    // One small scratch buffer serves every entry. The exclusive pause
+    // keeps these bounded comparisons coherent even for larger callers.
+    let mut live = [0; 128];
+    for (index, chunk) in expected.chunks(live.len()).enumerate() {
+        let address = block
+            .guest_pc()
+            .checked_add((index * live.len()) as u64)
+            .ok_or(NativeDispatchError::SourceMismatch)?;
+        memory.fetch_source(address, &mut live[..chunk.len()])?;
+        if live[..chunk.len()] != *chunk {
+            return Err(NativeDispatchError::SourceMismatch);
+        }
+    }
+    Ok(())
 }
 
 fn snapshot_declarations(

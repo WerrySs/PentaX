@@ -52,7 +52,9 @@ mod symbolic;
 mod tables;
 
 pub use symbolic::{
-    ModuleExport, ModuleLookupAttempt, ModuleLookupError, ModuleLookupLimits, lookup_module_export,
+    ModuleExport, ModuleExportIdentity, ModuleExportIdentityAttempt, ModuleExportQuery,
+    ModuleLookupAttempt, ModuleLookupError, ModuleLookupLimits, lookup_module_export,
+    lookup_qualified_module_export,
 };
 
 pub use error::{LimitKind, LinkError, TableKind};

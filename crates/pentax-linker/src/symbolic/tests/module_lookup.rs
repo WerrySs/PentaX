@@ -1,11 +1,85 @@
 // SPDX-License-Identifier: GPL-2.0-only
 use super::*;
+use crate::NidToken;
 
 fn provider() -> Module {
     let mut module = Module::provider();
     module.primary = true;
     module.symbols[0].name = b"QDLarCRo4Bc#R#f".to_vec();
     module
+}
+
+#[test]
+fn qualified_lookup_selects_exact_offered_scope_before_alias_ambiguity_and_charges_refusals() {
+    let mut module = provider();
+    module.declarations.push(Declaration {
+        role: DescriptorRole::ExportLibrary,
+        encoding: DescriptorEncoding::Classic,
+        name: b"other-library".to_vec(),
+        id: 18,
+        version: 4,
+    });
+    let mut alias = module.symbols[0].clone();
+    alias.name = b"QDLarCRo4Bc#S#f".to_vec();
+    alias.value += 16;
+    module.symbols.push(alias);
+    let bytes = module.build();
+    let source = single(&bytes);
+    assert!(matches!(
+        lookup_module_export(&source, 0, b"QDLarCRo4Bc", &Default::default()).result,
+        Err(ModuleLookupError::Ambiguous { .. })
+    ));
+    let mut query = ModuleExportQuery {
+        nid: NidToken::parse(b"QDLarCRo4Bc").unwrap(),
+        module: b"fixture-module",
+        library: b"fixture-library",
+        versions: DescriptorVersions {
+            module_major: 2,
+            module_minor: 3,
+            library: 4,
+        },
+    };
+    let attempt = lookup_qualified_module_export(&source, 0, &query, &Default::default());
+    assert!(attempt.work > 0);
+    let export = attempt.result.unwrap().unwrap();
+    assert_eq!(export.address(), A_BIAS + DEFINITION);
+    let refused = export.qualified_identity(0);
+    assert_eq!(refused.work, 0);
+    assert!(matches!(refused.result, Err(ModuleLookupError::Budget)));
+    let identity = export.qualified_identity(u64::MAX);
+    assert!(identity.work > 0);
+    let identity = identity.result.unwrap();
+    assert_eq!(
+        (identity.module, identity.library, identity.versions),
+        (query.module, query.library, query.versions)
+    );
+    assert_eq!(identity.nid, query.nid);
+    assert!(identity.global_function);
+    query.library = b"other-library";
+    assert_eq!(
+        lookup_qualified_module_export(&source, 0, &query, &Default::default())
+            .result
+            .unwrap()
+            .unwrap()
+            .address(),
+        A_BIAS + DEFINITION + 16
+    );
+    query.versions.library = 5;
+    assert!(
+        lookup_qualified_module_export(&source, 0, &query, &Default::default())
+            .result
+            .unwrap()
+            .is_none()
+    );
+    let limits = ModuleLookupLimits {
+        max_work: 1,
+        ..Default::default()
+    };
+    assert!(
+        lookup_qualified_module_export(&source, 0, &query, &limits)
+            .result
+            .is_err()
+    );
 }
 fn single(bytes: &[u8]) -> SymbolicLinkPlan<'_> {
     plan_symbolic(

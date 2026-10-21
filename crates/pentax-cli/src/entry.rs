@@ -34,7 +34,7 @@ fn collect(reader: impl Read) -> io::Result<Vec<u8>> {
 pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
     if args.is_empty()
         || !args.len().is_multiple_of(2)
-        || args.len() / 2 > 125 + 256 + 6
+        || args.len() / 2 > 125 + 256 + 7
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -46,6 +46,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                     && pair[0] != "--memory-profile"
                     && pair[0] != "--execution-profile"
                     && pair[0] != "--present-window"
+                    && pair[0] != "--libc-memory-builtins"
             })
             .count()
             > 125
@@ -68,6 +69,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                 && pair[0] != "--memory-profile"
                 && pair[0] != "--execution-profile"
                 && pair[0] != "--present-window"
+                && pair[0] != "--libc-memory-builtins"
         })
         || args
             .chunks_exact(2)
@@ -102,9 +104,23 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
         || args
             .chunks_exact(2)
             .any(|pair| pair[0] == "--present-window" && pair[1] != "yes" && pair[1] != "no")
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--libc-memory-builtins")
+            .count()
+            > 1
+        || args.chunks_exact(2).any(|pair| {
+            pair[0] == "--libc-memory-builtins" && pair[1] != "off" && pair[1] != "checked"
+        })
+        || (args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--libc-memory-builtins" && pair[1] == "checked")
+            && !args
+                .chunks_exact(2)
+                .any(|pair| pair[0] == "--preload-libc" || pair[0] == "--preload-libc-as"))
     {
         return Err(
-            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup] [--present-window yes|no] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>]; first image is primary".into(),
+            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup] [--present-window yes|no] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--libc-memory-builtins off|checked] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>]; first image is primary".into(),
         );
     }
     if args

@@ -2,7 +2,7 @@
 
 //! Opt-in lookup within one retained module, distinct from import resolution.
 use super::{SymbolRef, SymbolicError, SymbolicLimits, SymbolicLinkPlan, resolve::Resolver};
-use crate::{NidToken, SymbolType};
+use crate::{NidToken, QualifiedNid, SymbolType};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
@@ -52,6 +52,66 @@ pub struct ModuleExport<'plan, 'image> {
     definition: SymbolRef,
     address: u64,
 }
+
+/// Borrowed, exact offered identity. Metadata alone grants no execution rights.
+pub struct ModuleExportIdentity<'a> {
+    pub nid: NidToken,
+    pub module: &'a [u8],
+    pub library: &'a [u8],
+    pub versions: super::DescriptorVersions,
+    pub global_function: bool,
+}
+
+pub struct ModuleExportIdentityAttempt<'a> {
+    pub result: Result<ModuleExportIdentity<'a>, ModuleLookupError>,
+    pub work: u64,
+}
+
+/// Exact offered scope for an explicitly selected module-local query.
+pub struct ModuleExportQuery<'a> {
+    pub nid: NidToken,
+    pub module: &'a [u8],
+    pub library: &'a [u8],
+    pub versions: super::DescriptorVersions,
+}
+
+/// Separate from dlsym's hash-first scope selection and ordinary import
+/// resolution. Only the named module's exact offered identity is eligible.
+pub fn lookup_qualified_module_export<'plan, 'image>(
+    source: &'plan SymbolicLinkPlan<'image>,
+    module: usize,
+    query: &ModuleExportQuery<'_>,
+    limits: &ModuleLookupLimits,
+) -> ModuleLookupAttempt<'plan, 'image> {
+    let mut symbolic = limits.symbolic;
+    symbolic.max_lookup_steps = symbolic.max_lookup_steps.min(limits.max_work);
+    let mut resolver = Resolver::empty(source.modules(), (&symbolic).into(), true);
+    let result = (|| {
+        if module >= source.modules().len() {
+            return Err(ModuleLookupError::InvalidModule);
+        }
+        if query.module.len() > limits.max_name_bytes
+            || query.library.len() > limits.max_name_bytes
+            || query.module.len() > 1024 * 1024
+            || query.library.len() > 1024 * 1024
+        {
+            return Err(ModuleLookupError::Budget);
+        }
+        resolver.populate(Some(module), source.retired_fallbacks())?;
+        resolver.filter_module_exports(query)?;
+        Ok(resolver
+            .module_export(query.nid)?
+            .map(|(definition, address)| ModuleExport {
+                source,
+                definition,
+                address,
+            }))
+    })();
+    ModuleLookupAttempt {
+        result,
+        work: resolver.work_used(),
+    }
+}
 impl<'plan, 'image> ModuleExport<'plan, 'image> {
     pub const fn source_plan(&self) -> &'plan SymbolicLinkPlan<'image> {
         self.source
@@ -67,6 +127,60 @@ impl<'plan, 'image> ModuleExport<'plan, 'image> {
     }
     pub fn symbol_type(&self) -> SymbolType {
         self.symbol().symbol_type()
+    }
+    /// Inspect only the selected export's offered descriptors, with all scans
+    /// preadmitted. No name hashing, import-role substitution or allocation.
+    pub fn qualified_identity(&self, maximum: u64) -> ModuleExportIdentityAttempt<'_> {
+        let mut work = 0;
+        let result = (|| {
+            let metadata = self.source.modules[self.definition.module.index()]
+                .metadata
+                .as_ref()
+                .ok_or(ModuleLookupError::InvalidName)?;
+            let symbol = self.symbol();
+            let name = symbol
+                .name
+                .as_ref()
+                .ok_or(ModuleLookupError::InvalidName)?
+                .as_bytes();
+            let decoded = metadata
+                .descriptors()
+                .decoded()
+                .ok_or(ModuleLookupError::InvalidName)?;
+            let requested = (name.len() as u64)
+                .checked_add(decoded.module_info().len() as u64)
+                .and_then(|n| n.checked_add(decoded.export_libraries().len() as u64))
+                .and_then(|n| n.checked_add(1))
+                .filter(|n| *n <= maximum)
+                .ok_or(ModuleLookupError::Budget)?;
+            work = requested;
+            let qualified =
+                QualifiedNid::parse(name).map_err(|_| ModuleLookupError::InvalidName)?;
+            let module = decoded
+                .module_info()
+                .iter()
+                .find(|d| d.id() == qualified.module())
+                .ok_or(ModuleLookupError::InvalidName)?;
+            let library = decoded
+                .export_libraries()
+                .iter()
+                .find(|d| d.id() == qualified.library())
+                .ok_or(ModuleLookupError::InvalidName)?;
+            Ok(ModuleExportIdentity {
+                nid: qualified.nid(),
+                module: module.name().as_bytes(),
+                library: library.name().as_bytes(),
+                versions: super::DescriptorVersions {
+                    module_major: module.version_major(),
+                    module_minor: module.version_minor(),
+                    library: library.version(),
+                },
+                global_function: symbol.binding() == crate::SymbolBinding::GLOBAL
+                    && symbol.symbol_type() == SymbolType::FUNC
+                    && !symbol.is_undefined(),
+            })
+        })();
+        ModuleExportIdentityAttempt { result, work }
     }
     fn symbol(&self) -> &crate::Symbol {
         &self.source.modules[self.definition.module.index()]

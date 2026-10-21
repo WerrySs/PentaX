@@ -407,6 +407,37 @@ impl<'m, 'a> Resolver<'m, 'a> {
         )
     }
 
+    pub(super) fn filter_module_exports(
+        &mut self,
+        query: &super::module_lookup::ModuleExportQuery<'_>,
+    ) -> Result<(), E> {
+        // This resolver belongs only to the separate qualified lookup. Charge
+        // all comparisons before filtering its temporary index; no allocation
+        // or change to ordinary resolution/dlsym selection is involved.
+        // keys already bounds every copied module/library name, including
+        // duplicates. Its scalar census is a conservative comparison envelope.
+        let per_key = (query.module.len() as u64)
+            .checked_add(query.library.len() as u64)
+            .and_then(|n| n.checked_add(1))
+            .ok_or(E::SizeOverflow {
+                budget: B::LookupSteps,
+            })?;
+        let work = (self.providers.len() as u64)
+            .checked_mul(per_key)
+            .and_then(|n| n.checked_add(self.keys))
+            .ok_or(E::SizeOverflow {
+                budget: B::LookupSteps,
+            })?;
+        self.steps(work)?;
+        self.providers.retain(|key, _| {
+            key.nid == query.nid
+                && key.module == query.module
+                && key.library == query.library
+                && key.versions() == query.versions
+        });
+        Ok(())
+    }
+
     pub(super) fn module_export(
         &mut self,
         nid: NidToken,

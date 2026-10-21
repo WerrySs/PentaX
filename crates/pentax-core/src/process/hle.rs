@@ -49,13 +49,14 @@ pub use json_provider::{GeneratedJsonProvider, build_json_provider};
 pub use kernel_provider::{GeneratedKernelProvider, KernelProviderError, build_kernel_provider};
 pub use kernel_startup::{
     DynamicModuleInput, DynamicModuleStart, KernelStartupError, KernelStartupLimits,
-    KernelStartupPlan, NativeEntryError, NativeEntryLayout, NativeEntryLimits, NativeEntryPolicy,
-    NativeEntryRequest, NativeModuleStartError, NativeServiceAction, NativeServiceRequest,
-    OriginalPreparedError, OriginalPreparedLayout, OriginalPreparedReport, PendingModuleLoad,
-    PendingThreadCreate, PendingThreadWait, PreparedFontParserCallback, PreparedImeCallback,
-    PreparedNativeEntry, PreparedNativeKernelStartup, PreparedNativeModuleStart,
-    PreparedNativeSource, PreparedNativeThread, PreparedNetCtlCallback, PreparedPthreadOnce,
-    PreparedThreadStart, ThreadEntryLayout, plan_kernel_startup, prepare_native_kernel_startup,
+    KernelStartupPlan, LibcBuiltinError, LibcBuiltinUsage, NativeEntryError, NativeEntryLayout,
+    NativeEntryLimits, NativeEntryPolicy, NativeEntryRequest, NativeModuleStartError,
+    NativeServiceAction, NativeServiceRequest, OriginalPreparedError, OriginalPreparedLayout,
+    OriginalPreparedReport, PendingModuleLoad, PendingThreadCreate, PendingThreadWait,
+    PreparedFontParserCallback, PreparedImeCallback, PreparedLibcBuiltins, PreparedNativeEntry,
+    PreparedNativeKernelStartup, PreparedNativeModuleStart, PreparedNativeSource,
+    PreparedNativeThread, PreparedNetCtlCallback, PreparedPthreadOnce, PreparedThreadStart,
+    ThreadEntryLayout, plan_kernel_startup, prepare_native_kernel_startup,
     prepare_native_kernel_startup_in, run_original_prepared_fixture,
 };
 pub use kernel_startup::{GraphicsStartupOptions, plan_kernel_startup_with_graphics};

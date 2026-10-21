@@ -334,6 +334,13 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         assert!(progress.protocol_fields().contains(&format!("{name}=none")));
     }
     for name in [
+        "libc_builtin_attempted_memcpy",
+        "libc_builtin_attempted_memmove",
+        "libc_builtin_attempted_memset",
+        "libc_builtin_completed_memcpy",
+        "libc_builtin_completed_memmove",
+        "libc_builtin_completed_memset",
+        "libc_builtin_bound_entries",
         "graphics_shader_create_ok",
         "graphics_shader_create_rejected",
         "graphics_shader_create_failed",

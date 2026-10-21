@@ -41,7 +41,9 @@ pub use model::{
     SymbolicPatch,
 };
 pub use module_lookup::{
-    ModuleExport, ModuleLookupAttempt, ModuleLookupError, ModuleLookupLimits, lookup_module_export,
+    ModuleExport, ModuleExportIdentity, ModuleExportIdentityAttempt, ModuleExportQuery,
+    ModuleLookupAttempt, ModuleLookupError, ModuleLookupLimits, lookup_module_export,
+    lookup_qualified_module_export,
 };
 pub use tls::{
     TlsBinding, TlsBindingBudget, TlsBindingError, TlsBindingLimits, TlsBindingPlan,

@@ -37,6 +37,13 @@ impl<'plan, 'image> PreparedNativeHleStartup<'plan, 'image> {
     pub fn pause(&mut self) -> Result<PausedNativeMemory<'_>, HleError> {
         self.tls.memory.pause().map_err(HleError::Memory)
     }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub(super) fn pause_with_service_budget(
+        &mut self,
+    ) -> Result<(PausedNativeMemory<'_>, &mut ServiceBudget), HleError> {
+        let memory = self.tls.memory.pause().map_err(HleError::Memory)?;
+        Ok((memory, &mut self.budget))
+    }
     pub(crate) fn pause_with_tls(
         &mut self,
     ) -> Result<

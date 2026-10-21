@@ -55,6 +55,8 @@ mod insert_vectors;
 mod integer_convert;
 #[path = "tests/lane_extract.rs"]
 mod lane_extract;
+#[path = "tests/libc_builtin.rs"]
+mod libc_builtin_tests;
 #[path = "tests/logical_vectors.rs"]
 mod logical_vectors;
 #[path = "tests/mask_comparisons.rs"]

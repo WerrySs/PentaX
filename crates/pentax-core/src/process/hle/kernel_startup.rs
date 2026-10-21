@@ -19,7 +19,9 @@ use pentax_loader::open_executable;
 use pentax_platform::native_memory::{NativeAddressSpace, PausedNativeMemory};
 use std::fmt;
 
+mod libc_builtin;
 mod native_execution;
+pub use libc_builtin::{LibcBuiltinError, LibcBuiltinUsage, PreparedLibcBuiltins};
 mod pthread_once;
 pub use pthread_once::PreparedPthreadOnce;
 mod netctl_callback;
@@ -664,6 +666,7 @@ pub struct PreparedNativeKernelStartup<'plan, 'image> {
     stop_attempts: u64,
     provider_work: u64,
     native_service_requests: u64,
+    libc_builtins: LibcBuiltinUsage,
     last_admitted_kernel_service: Option<&'static str>,
     loaded_modules: module_lifecycle::LoadedModules,
     once: pthread_once::OnceState,
@@ -1132,6 +1135,7 @@ fn prepare_in<'plan, 'image>(
         stop_attempts: 0,
         provider_work: 0,
         native_service_requests: 0,
+        libc_builtins: LibcBuiltinUsage::default(),
         last_admitted_kernel_service: None,
         loaded_modules: module_lifecycle::LoadedModules::new(plan.kernel_provider_index())?,
         once: pthread_once::OnceState::new()?,

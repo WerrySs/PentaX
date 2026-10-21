@@ -296,6 +296,8 @@ const I32_BUSY: u64 = 0x8002_0010;
 
 #[path = "align_right.rs"]
 mod align_right;
+#[path = "libc_memory_builtins.rs"]
+mod libc_memory_builtins;
 
 struct Program {
     code: Vec<u8>,

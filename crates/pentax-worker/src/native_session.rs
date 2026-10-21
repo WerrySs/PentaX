@@ -49,6 +49,8 @@ pub(super) struct NativeSessionLimits {
     pub max_admission_work: u64,
     pub report_progress: bool,
     pub progress_interval_blocks: u64,
+    /// Explicitly selected supplied libc input, never a guessed module index.
+    pub libc_memory_builtins: Option<usize>,
 }
 impl Default for NativeSessionLimits {
     fn default() -> Self {
@@ -63,6 +65,7 @@ impl Default for NativeSessionLimits {
             max_admission_work: 64 * 1024 * 1024,
             report_progress: false,
             progress_interval_blocks: 2048,
+            libc_memory_builtins: None,
         }
     }
 }
@@ -133,6 +136,19 @@ impl From<NativeMemoryError> for NativeSessionError {
     }
 }
 
+impl From<pentax_core::process::hle::LibcBuiltinError> for NativeSessionError {
+    fn from(value: pentax_core::process::hle::LibcBuiltinError) -> Self {
+        use pentax_core::process::hle::{HleError, LibcBuiltinError};
+        match value {
+            LibcBuiltinError::Core(error) => Self::Core(error),
+            LibcBuiltinError::Dispatch(error) => Self::Dispatch(error),
+            LibcBuiltinError::Service(error) => {
+                Self::Core(KernelStartupError::Hle(HleError::Service(error)))
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct NativeSessionReport {
     pub return_value: u64,
@@ -165,6 +181,8 @@ pub(super) struct NativeSessionProgress {
     pub output_bytes: u64,
     pub kernel_handles: Option<pentax_kernel::HandleUsage>,
     pub audio_out2: Option<pentax_kernel::AudioOut2Usage>,
+    pub libc_builtins: pentax_core::process::hle::LibcBuiltinUsage,
+    pub libc_builtin_bound_entries: u64,
     window: frame_bridge::Observations,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
@@ -185,10 +203,17 @@ impl NativeSessionProgress {
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
         format!(
-            "{}{}{}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
+            self.libc_builtins.attempted[0],
+            self.libc_builtins.attempted[1],
+            self.libc_builtins.attempted[2],
+            self.libc_builtins.completed[0],
+            self.libc_builtins.completed[1],
+            self.libc_builtins.completed[2],
+            self.libc_builtin_bound_entries,
         )
     }
 
@@ -605,6 +630,7 @@ fn run_prepared_consumer_inner<'plan, 'image>(
             progress,
             consumer.as_deref_mut(),
         );
+        progress.libc_builtins = session.libc_builtin_usage();
         // Preserve a terminal queue observation before propagating typed stops.
         // This bounded snapshot never probes readiness or changes scheduling.
         progress.scheduling = state.scheduling.observations(
@@ -739,6 +765,13 @@ fn execute_epoch<'plan, 'image>(
     {
         return Err(NativeSessionError::WrongPreparedSource);
     }
+    let libc_builtins = limits
+        .libc_memory_builtins
+        .map(|module| session.prepare_libc_builtins(proof, module))
+        .transpose()?;
+    progress.libc_builtin_bound_entries = libc_builtins
+        .as_ref()
+        .map_or(0, |manifest| manifest.function_count());
     if limits.report_progress {
         progress
             .profile
@@ -975,7 +1008,42 @@ fn execute_epoch<'plan, 'image>(
             StartupProfile::checkpoint(&mut stamp, &mut progress.profile.plan_ns);
             block
         };
-        let stop = {
+        // Exact supplied-library API entries are an explicit opt-in. A normal
+        // pre-effect fallback still runs the original native block below.
+        let builtin = if let Some(manifest) = libc_builtins
+            .as_ref()
+            .filter(|manifest| manifest.contains_pc(engine.state().guest_pc))
+        {
+            let next_stops = state
+                .service_stops
+                .checked_add(1)
+                .ok_or(NativeSessionError::Budget("service observations"))?;
+            let service_start = limits.report_progress.then(Instant::now);
+            let result = session.try_libc_builtin(manifest, proof, &mut engine, block);
+            progress.profile.service_finished(service_start);
+            progress.dispatch = engine.usage();
+            if !matches!(&result, Ok(None)) {
+                state.service_stops = next_stops;
+                progress.service_stops = next_stops;
+            }
+            let stop = result?;
+            if stop.is_some() && limits.report_progress {
+                // Standard libc is not a kernel catalogue label. This updates
+                // only the existing other-provider aggregate, without a scan.
+                progress.profile.services.record(
+                    None,
+                    false,
+                    &mut state.admission_work,
+                    limits.max_admission_work,
+                )?;
+            }
+            stop
+        } else {
+            None
+        };
+        let stop = if let Some(stop) = builtin {
+            stop
+        } else {
             let plan = session.plan();
             let mut paused = session.pause()?;
             let previous_native = engine.usage().native_instructions;

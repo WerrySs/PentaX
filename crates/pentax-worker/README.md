@@ -1,5 +1,29 @@
 # Native diagnostic worker
 
+`probe-entry --libc-memory-builtins checked` explicitly selects the standard
+memory ABI of the module supplied with `--preload-libc` or `--preload-libc-as`.
+The default is `off`. Exact qualified memcpy, memmove and memset exports can use
+the existing checked Rust memory helpers instead of executing their native
+bodies. Module and library versions, source epoch, owner and function entries
+must match the finite profile; missing exports keep their original native path.
+This neither changes ordinary symbol resolution nor recognizes instruction
+patterns as library functions.
+
+The route retains normal CALL/tail-JMP/RET handling, preserves RCX/R11 and SIMD
+state, and keeps the original guarded stack and live source checks. Physical
+output aliases of the real return slot or protected source spans fall back
+before a helper attempt. Entry REP strings retain their original bounded
+continuation. Memory-service limits remain shared with ordinary libc calls.
+After a helper attempt, failure is terminal; a late return fault preserves
+completed writes and cannot replay the operation through the native path.
+
+Final-only `libc_builtin_attempted_memcpy`, `libc_builtin_attempted_memmove` and
+`libc_builtin_attempted_memset` count this profile's helper attempts. The matching
+`libc_builtin_completed_*` fields count completed memory helpers, including one
+followed by a terminal RET fault. `libc_builtin_bound_entries` describes the last
+prepared epoch's matching exports, not calls or live execution authority. These
+fields contain only fixed counts and do not add native instruction counts.
+
 Guest scheduling keeps runnable contexts in round-robin order and varies the
 bounded turn by their effective priority class: high 4096, normal 2048 and low
 1024 blocks. A changed priority is observed without another service attempt,

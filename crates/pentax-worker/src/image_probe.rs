@@ -306,7 +306,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(6)
+                .saturating_add(7)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -318,6 +318,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--memory-profile"
                     && pair[0] != "--execution-profile"
                     && pair[0] != "--present-window"
+                    && pair[0] != "--libc-memory-builtins"
             })
             .count()
             > limits.max_images
@@ -340,6 +341,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--memory-profile"
                 && pair[0] != "--execution-profile"
                 && pair[0] != "--present-window"
+                && pair[0] != "--libc-memory-builtins"
         })
         || args
             .chunks_exact(2)
@@ -374,6 +376,20 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         || args
             .chunks_exact(2)
             .any(|pair| pair[0] == "--present-window" && pair[1] != "yes" && pair[1] != "no")
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--libc-memory-builtins")
+            .count()
+            > 1
+        || args.chunks_exact(2).any(|pair| {
+            pair[0] == "--libc-memory-builtins" && pair[1] != "off" && pair[1] != "checked"
+        })
+        || (args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--libc-memory-builtins" && pair[1] == "checked")
+            && !args
+                .chunks_exact(2)
+                .any(|pair| pair[0] == "--preload-libc" || pair[0] == "--preload-libc-as"))
     {
         return Err(ProbeError::Input("image-arguments"));
     }
@@ -480,6 +496,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         if pair[0] == "--memory-profile"
             || pair[0] == "--execution-profile"
             || pair[0] == "--present-window"
+            || pair[0] == "--libc-memory-builtins"
         {
             continue;
         }
@@ -693,6 +710,12 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 crate::protocol("RUNNING\tmode=entry-probe")
                     .map_err(|_| NativeSessionError::OutputUnavailable)?;
                 let mut execution = NativeSessionLimits::default();
+                if args
+                    .chunks_exact(2)
+                    .any(|pair| pair[0] == "--libc-memory-builtins" && pair[1] == "checked")
+                {
+                    execution.libc_memory_builtins = intake.startup_libc;
+                }
                 if args
                     .chunks_exact(2)
                     .any(|pair| pair[0] == "--execution-profile" && pair[1] == "startup")
