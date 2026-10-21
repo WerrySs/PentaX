@@ -123,10 +123,12 @@ attestation remain enforced; previously fetched guest bytes never authorize a
 later execution. This removes repeated scratch allocations without claiming a
 measured game speed or frame rate.
 
-The decoded-plan cache has 4,096 direct-mapped positions, matching the runtime
-native cache's position count and PC hash. Distinct native placements therefore
-do not compete for a smaller plan table. Slot metadata is charged before its
-fallible allocation; retained plan storage keeps its independent 8 MiB ceiling.
+The decoded-plan cache has 4,096 positions in paired sets, matching the runtime
+native cache's position count and PC hash. Lookup checks both the primary hash
+position and its adjacent partner. A changed variant of the same logical key
+is replaced before an empty way or least recently validated way is selected.
+Slot metadata and fixed recency storage are charged before allocation;
+retained plan storage keeps its independent 8 MiB ceiling.
 Source epoch, module, placement and the full freshly read live window still
 participate in reuse. This retention change makes no unmeasured speed claim.
 
@@ -680,8 +682,9 @@ remain independently bounded; this does not admit general rendering or boot.
 
 Each source epoch retains at most 4096 pure block plans with an 8 MiB conservative
 sum of their reported allocation capacities, plus a fixed table and one bounded
-plan being prepared. Lookup and table initialization are precharged. A direct
-slot collision replaces its entry; exceeding retained capacity clears the table.
+plan being prepared. Lookup and table initialization are precharged. A full
+paired set replaces its least recently validated entry; exceeding retained
+capacity clears the table and its recency hints.
 The cache borrows one immutable source declaration and policy; exact native placement
 is part of each lookup key along with PC, module and the full live source window.
 module publication drops it before a new source view is bound. Hits still fetch
@@ -857,8 +860,12 @@ Zero nonzero-return counts therefore do not establish immediate mutex success
 or useful game progress.
 
 Prepared image execution uses a bounded 2 MiB native code cache with 4096 fixed
-512-byte slots, each including a private trailer cell. Guest PC selects a slot;
-the pure planner re-encodes for that exact address. A reuse requires previously
+512-byte slots, each including a private trailer cell. Guest PC selects a pair;
+an exact source-epoch/PC/vector-mode residency hint is preferred, followed by
+an empty or stale-domain way, then the least recently validated way. The
+single-slot API profile retains its one-slot fallback. The pure planner
+re-encodes for that exact selected address; an old plan is never retargeted.
+A reuse requires previously
 successful sealing plus exact live code, tail and cell comparisons. Collisions
 replace one slot; publication revokes execute on the affected 16 KiB page groups
 before writing, reads back the native body and tail, then seals RX and flushes
@@ -868,6 +875,13 @@ page span. The source remains logically
 immutable and is checked against the current declaration on every step. Stack,
 CPU, host features and current operand rights are also rechecked on every reuse.
 Counters distinguish successful publications, exact reuses and hardware entries.
+Resident hints commit only after validated cache reuse or complete publication
+and sealing. A later hardware-entry admission refusal can follow that genuine
+cache event without executing the body. Historical publication keys remain
+separate, including when another PC reuses identical bytes. Every cache hit
+still performs the same checked execution admission. Native residency and pure
+plan recency use the existing admitted block count, not a new clock or guest
+value. This retention policy does not itself prove a title speedup or startup.
 
 Each immutable block also retains a fixed native-admission summary, computed
 from its final instruction records within the planning allocation and work

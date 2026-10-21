@@ -63,7 +63,7 @@ fn plan_cache_keeps_formerly_colliding_pcs_in_distinct_native_placements() {
             let offset = (pc - 0x100000) as usize;
             let live = &bytes[offset..offset + 64];
             let (plan, hit, _) = cache
-                .prepare(0, pc, live, placement, &mut work, u64::MAX)
+                .prepare(0, pc, live, placement, 0, &mut work, u64::MAX)
                 .unwrap();
             assert_eq!(hit, round != 0);
             if hit {
@@ -98,6 +98,7 @@ fn plan_cache_slot_metadata_is_charged_before_bounded_allocation() {
     let source = declare_materialized_source(&linked, &[], &limits).unwrap();
     let metadata_bytes = 4096_u64
         .checked_mul(std::mem::size_of::<Option<MaterializedBlockPlan<'_, '_, '_>>>() as u64)
+        .and_then(|bytes| bytes.checked_add(std::mem::size_of::<[u64; SLOTS]>() as u64))
         .unwrap();
     let mut work = 7;
     let exact = work + metadata_bytes;
@@ -144,11 +145,11 @@ fn plan_cache_reuses_only_exact_live_windows_and_is_bound_to_one_declaration() {
     let mut work = 0;
     let mut cache = PlanCache::new(&source, policy, limits, &mut work, u64::MAX).unwrap();
     let (_, hit, _) = cache
-        .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);
     let (plan, hit, _) = cache
-        .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert!(hit);
     assert_eq!(plan.placement(), placement);
@@ -158,45 +159,45 @@ fn plan_cache_reuses_only_exact_live_windows_and_is_bound_to_one_declaration() {
         ..placement
     };
     let (plan, hit, _) = cache
-        .prepare(0, 0x100200, &[0xc3; 64], moved, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 64], moved, 0, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);
     assert_eq!(plan.placement(), moved);
     assert!(
         !cache
-            .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+            .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
             .unwrap()
             .1
     );
     let mut changed = [0xc3; 64];
     changed[63] = 0x90; // Even an unconsumed trailing byte is attested.
     assert!(matches!(
-        cache.prepare(0, 0x100200, &changed, placement, &mut work, u64::MAX),
+        cache.prepare(0, 0x100200, &changed, placement, 0, &mut work, u64::MAX),
         Err(NativeSessionError::Codegen(
             CodegenError::MaterializedWindowMismatch { .. }
         ))
     ));
     assert!(
         cache
-            .prepare(1, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+            .prepare(1, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
             .is_err()
     );
     assert!(
         cache
-            .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+            .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
             .unwrap()
             .1
     );
     assert!(
         !cache
-            .prepare(0, 0x100200, &[0xc3; 32], placement, &mut work, u64::MAX)
+            .prepare(0, 0x100200, &[0xc3; 32], placement, 0, &mut work, u64::MAX)
             .unwrap()
             .1
     );
     let other = declare_materialized_source(&linked, &[], &limits).unwrap();
     let mut next = PlanCache::new(&other, policy, limits, &mut work, u64::MAX).unwrap();
     let (plan, hit, _) = next
-        .prepare(0, 0x100200, &[0xc3; 32], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 32], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);
     assert!(std::ptr::eq(plan.declaration(), &other));
@@ -223,16 +224,16 @@ fn plan_cache_bounds_retained_capacity_and_refuses_work_before_lookup() {
     )
     .unwrap();
     cache
-        .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     let entry_bytes = cache.retained_bytes;
     cache.max_bytes = 2 * entry_bytes;
     cache
-        .prepare(0, 0x100201, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100201, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert_eq!(cache.retained_bytes, 2 * entry_bytes);
     cache
-        .prepare(0, 0x100202, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100202, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert_eq!(cache.retained_bytes, entry_bytes);
     assert_eq!(
@@ -242,14 +243,14 @@ fn plan_cache_bounds_retained_capacity_and_refuses_work_before_lookup() {
     let before = work;
     assert!(
         cache
-            .prepare(0, 0x100202, &[0xc3; 64], placement, &mut work, before)
+            .prepare(0, 0x100202, &[0xc3; 64], placement, 0, &mut work, before)
             .is_err()
     );
     assert_eq!(work, before);
     assert_eq!(cache.retained_bytes, entry_bytes);
     assert!(
         !cache
-            .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+            .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
             .unwrap()
             .1
     );

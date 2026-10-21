@@ -41,7 +41,7 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
         )
         .unwrap();
         let (plan, hit, first) = cache
-            .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(first.retained_bytes, plan.usage().allocation_bytes);
@@ -50,30 +50,31 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
         assert_eq!(first.same_key_replacements, 0);
         assert_eq!(
             cache
-                .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+                .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
                 .unwrap()
                 .2,
             first
         );
 
-        // These original PCs really collide in the existing4096-slot table;
-        // no placement/replacement policy is changed for this observation.
+        // These original PCs share a pair. The second uses its empty way;
+        // only the third logical key evicts an occupied victim.
         let (plan, hit, second) = cache
-            .prepare(0, B, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, B, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(plan.guest_pc(), B);
         assert_eq!(
             (second.occupied_collisions, second.same_key_replacements),
-            (1, 0)
+            (0, 0)
         );
-        assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 1);
+        assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 2);
         let (_, hit, third) = cache
             .prepare(
                 1,
                 OTHER_MODULE,
                 &[0xc3; 64],
                 placement(),
+                0,
                 &mut work,
                 u64::MAX,
             )
@@ -81,16 +82,16 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
         assert!(!hit);
         assert_eq!(
             (third.occupied_collisions, third.same_key_replacements),
-            (2, 0)
+            (1, 0)
         );
-        assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 1);
+        assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 2);
 
         let moved = CachePlacement {
             address: placement().address + 0x4000,
             ..placement()
         };
         let (_, hit, changed_placement) = cache
-            .prepare(1, OTHER_MODULE, &[0xc3; 64], moved, &mut work, u64::MAX)
+            .prepare(1, OTHER_MODULE, &[0xc3; 64], moved, 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(
@@ -98,10 +99,10 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
                 changed_placement.occupied_collisions,
                 changed_placement.same_key_replacements
             ),
-            (2, 1)
+            (1, 1)
         );
         let (plan, hit, shortened) = cache
-            .prepare(1, OTHER_MODULE, &[0xc3; 32], moved, &mut work, u64::MAX)
+            .prepare(1, OTHER_MODULE, &[0xc3; 32], moved, 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(
@@ -109,15 +110,15 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
                 shortened.occupied_collisions,
                 shortened.same_key_replacements
             ),
-            (2, 2)
+            (1, 2)
         );
-        assert_eq!(shortened.retained_bytes, plan.usage().allocation_bytes);
+        assert!(shortened.retained_bytes > plan.usage().allocation_bytes);
         assert!(shortened.peak_retained_bytes >= shortened.retained_bytes);
         assert_eq!((shortened.byte_purges, shortened.purged_plans), (0, 0));
         assert!(!shortened.overflow);
         assert_eq!(
             cache
-                .prepare(1, OTHER_MODULE, &[0xc3; 32], moved, &mut work, u64::MAX)
+                .prepare(1, OTHER_MODULE, &[0xc3; 32], moved, 0, &mut work, u64::MAX)
                 .unwrap()
                 .2,
             shortened
@@ -133,7 +134,7 @@ fn committed_plan_collisions_and_same_key_changes_are_distinct_from_exact_hits()
         )
         .unwrap();
         let fresh = rebound
-            .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap()
             .2;
         assert_eq!(
@@ -160,13 +161,13 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
         )
         .unwrap();
         cache
-            .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         let first = cache.observations;
         let mut changed = [0xc3; 64];
         changed[63] = 0x90; // Unconsumed bytes still require the exact source.
         assert!(matches!(
-            cache.prepare(0, B, &changed, placement(), &mut work, u64::MAX),
+            cache.prepare(0, B, &changed, placement(), 0, &mut work, u64::MAX),
             Err(NativeSessionError::Codegen(
                 CodegenError::MaterializedWindowMismatch { .. }
             ))
@@ -174,28 +175,28 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
         assert_eq!(cache.observations, first);
         assert!(
             cache
-                .prepare(2, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+                .prepare(2, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
                 .is_err()
         );
         assert_eq!(cache.observations, first);
         let previous_work = work;
         assert!(
             cache
-                .prepare(0, B, &[0xc3; 64], placement(), &mut work, previous_work)
+                .prepare(0, B, &[0xc3; 64], placement(), 0, &mut work, previous_work)
                 .is_err()
         );
         assert_eq!(work, previous_work);
         assert_eq!(cache.observations, first);
         cache.max_bytes = first.retained_bytes - 1;
         assert!(matches!(
-            cache.prepare(0, B, &[0xc3; 64], placement(), &mut work, u64::MAX),
+            cache.prepare(0, B, &[0xc3; 64], placement(), 0, &mut work, u64::MAX),
             Err(NativeSessionError::Budget("plan cache bytes"))
         ));
         assert_eq!(cache.observations, first);
 
         cache.max_bytes = 2 * first.retained_bytes;
         cache
-            .prepare(0, A + 1, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A + 1, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert_eq!(cache.retained_bytes, cache.max_bytes);
         let before_purge = cache.observations;
@@ -207,6 +208,7 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
                     A + 2,
                     &[0xc3; 64],
                     placement(),
+                    0,
                     &mut work,
                     admission_only
                 )
@@ -216,7 +218,7 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
         assert_eq!(cache.observations, before_purge);
         assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 2);
         let (plan, hit, purged) = cache
-            .prepare(0, A + 2, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A + 2, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!((purged.byte_purges, purged.purged_plans), (1, 2));
@@ -228,12 +230,24 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
         assert_eq!(purged.peak_retained_bytes, before_purge.retained_bytes);
         assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 1);
 
-        // Incoming-slot cause and byte-pressure action are independent: this
-        // real larger valid plan both collides with A and purges all old plans.
+        // A full pair and a larger valid third plan demonstrate independently
+        // that an occupied victim and byte-pressure purge can coincide.
+        let mut cache = PlanCache::new(
+            source,
+            TranslationPolicy::x64_sse2(),
+            BlockLimits::default(),
+            &mut work,
+            u64::MAX,
+        )
+        .unwrap();
         cache
-            .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
+            .unwrap();
+        cache
+            .prepare(0, A + 1, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         let full = cache.retained_bytes;
+        cache.max_bytes = full;
         let expanded = plan_materialized_block(
             source,
             0,
@@ -249,7 +263,7 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
         let expanded_bytes = expanded.usage().allocation_bytes;
         drop(expanded);
         let (_, hit, overlap) = cache
-            .prepare(0, B, &[0xc3; 128], placement(), &mut work, u64::MAX)
+            .prepare(0, B, &[0xc3; 128], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(
@@ -258,7 +272,7 @@ fn plan_refusals_preserve_observations_and_successful_byte_purges_count_actual_v
                 overlap.byte_purges,
                 overlap.purged_plans
             ),
-            (1, 2, 4)
+            (1, 1, 2)
         );
         assert_eq!(overlap.retained_bytes, expanded_bytes);
     });
@@ -277,11 +291,14 @@ fn diagnostic_saturation_does_not_prevent_real_retention_or_change_its_gauge() {
         )
         .unwrap();
         cache
-            .prepare(0, A, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, A, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
+            .unwrap();
+        cache
+            .prepare(0, A + 1, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         cache.observations.occupied_collisions = u64::MAX;
         let (_, hit, saturated) = cache
-            .prepare(0, B, &[0xc3; 64], placement(), &mut work, u64::MAX)
+            .prepare(0, B, &[0xc3; 64], placement(), 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(saturated.occupied_collisions, u64::MAX);
@@ -294,21 +311,18 @@ fn diagnostic_saturation_does_not_prevent_real_retention_or_change_its_gauge() {
             ..placement()
         };
         let (plan, hit, saturated) = cache
-            .prepare(0, B, &[0xc3; 64], moved, &mut work, u64::MAX)
+            .prepare(0, B, &[0xc3; 64], moved, 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(plan.placement(), moved);
         assert_eq!(saturated.same_key_replacements, u64::MAX);
         assert!(saturated.overflow);
-        assert_eq!(saturated.retained_bytes, plan.usage().allocation_bytes);
-        cache.max_bytes = 2 * cache.retained_bytes;
-        cache
-            .prepare(0, B + 1, &[0xc3; 64], moved, &mut work, u64::MAX)
-            .unwrap();
+        assert!(saturated.retained_bytes > plan.usage().allocation_bytes);
+        cache.max_bytes = cache.retained_bytes;
         cache.observations.byte_purges = u64::MAX;
         cache.observations.purged_plans = u64::MAX;
         let (plan, hit, saturated) = cache
-            .prepare(0, B + 2, &[0xc3; 64], moved, &mut work, u64::MAX)
+            .prepare(0, B + 2, &[0xc3; 64], moved, 0, &mut work, u64::MAX)
             .unwrap();
         assert!(!hit);
         assert_eq!(

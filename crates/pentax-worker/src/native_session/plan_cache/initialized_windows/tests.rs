@@ -151,32 +151,44 @@ fn initialized_window_memo_optional_cost_and_capacity_never_displace_existing_pl
         capacity: 4096,
     };
     cache
-        .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100200, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     let plan_bytes = cache.retained_bytes;
     assert!(cache.initialized_windows.bytes != 0);
     assert!(cache.retained_bytes + cache.initialized_windows.bytes <= cache.max_bytes);
     cache.max_bytes = 2 * plan_bytes;
     cache
-        .prepare(0, 0x100201, &[0xc3; 64], placement, &mut work, u64::MAX)
+        .prepare(0, 0x100201, &[0xc3; 64], placement, 0, &mut work, u64::MAX)
         .unwrap();
     assert_eq!(cache.initialized_windows.bytes, 0);
     assert_eq!(cache.retained_bytes, 2 * plan_bytes);
     assert_eq!(cache.slots.iter().filter(|slot| slot.is_some()).count(), 2);
-    // The exact former constructor work bound still admits the original plan
-    // table and leaves an allocation-free initialized-window scanner fallback.
+    // Recency is explicitly admitted in addition to the original plan table.
+    // The exact current metadata bound leaves the allocation-free scanner.
     let original_table_work =
         SLOTS as u64 * std::mem::size_of::<Option<MaterializedBlockPlan<'_, '_, '_>>>() as u64;
     let mut exact_work = 0;
+    assert!(matches!(
+        PlanCache::new(
+            &source,
+            TranslationPolicy::x64_sse2(),
+            BlockLimits::default(),
+            &mut exact_work,
+            original_table_work
+        ),
+        Err(NativeSessionError::Budget("admission work"))
+    ));
+    assert_eq!(exact_work, 0);
+    let table_work = original_table_work + std::mem::size_of::<[u64; SLOTS]>() as u64;
     let mut exact = PlanCache::new(
         &source,
         TranslationPolicy::x64_sse2(),
         BlockLimits::default(),
         &mut exact_work,
-        original_table_work,
+        table_work,
     )
     .unwrap();
-    assert_eq!(exact_work, original_table_work);
+    assert_eq!(exact_work, table_work);
     assert_eq!(exact.initialized_windows.bytes, 0);
     assert_eq!(exact.initialized_window(0x100200, 64).unwrap(), (0, 64));
     eprintln!("initialized_window_memo_bytes={requested}");
@@ -219,7 +231,7 @@ fn initialized_window_memo_never_reuses_live_bytes_or_protection_checks() {
     let (module, length) = cache.initialized_window(pc, 64).unwrap();
     let live = fetch_window_into(&owner.pause().unwrap(), pc, length, 64, &mut storage).unwrap();
     cache
-        .prepare(module, pc, live, placement, &mut work, u64::MAX)
+        .prepare(module, pc, live, placement, 0, &mut work, u64::MAX)
         .unwrap();
     let retained = cache.retained_bytes;
     let scans = cache.initialized_windows.scans;
@@ -241,7 +253,7 @@ fn initialized_window_memo_never_reuses_live_bytes_or_protection_checks() {
     let live = fetch_window_into(&owner.pause().unwrap(), pc, length, 64, &mut storage).unwrap();
     assert_eq!(live[63], 0x90);
     assert!(matches!(
-        cache.prepare(module, pc, live, placement, &mut work, u64::MAX),
+        cache.prepare(module, pc, live, placement, 0, &mut work, u64::MAX),
         Err(NativeSessionError::Codegen(
             CodegenError::MaterializedWindowMismatch { .. }
         ))

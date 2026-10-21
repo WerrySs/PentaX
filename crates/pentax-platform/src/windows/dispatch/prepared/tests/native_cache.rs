@@ -72,6 +72,7 @@ fn native_admission_summary_preserves_dispatch_work_and_live_source_checks() {
                     before.memory_bytes_checked
                 );
             }
+            let maximum_work = engine.machine.limits.max_work_units;
             engine.machine.limits.max_work_units = engine.usage().work_units + records * 128 - 1;
             let before = engine.usage();
             assert_eq!(
@@ -79,6 +80,7 @@ fn native_admission_summary_preserves_dispatch_work_and_live_source_checks() {
                 Err(NativeDispatchError::Budget("memory analysis"))
             );
             assert_eq!(engine.usage(), before);
+            engine.machine.limits.max_work_units = maximum_work;
             assert_eq!(*engine.state(), state);
             assert_eq!(engine.usage().native_entries, 0);
             assert_eq!(engine.usage().cache_publications, 0);

@@ -484,13 +484,28 @@ struct PublicationKey {
     vector_mode: VectorMode,
 }
 
+// A validated resident hint is deliberately separate from the historical
+// publication producer. Exact byte reuse can serve another source key without
+// publishing bytes. Resident means the last successfully validated cache
+// publication/reuse, not a hardware entry: a later entry-counter or dispatch-
+// guard refusal retains this cache event. Neither hint nor recency grants rights.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ResidentHint {
+    key: PublicationKey,
+    last_use: u64,
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct PublicationSlot {
     length: Option<usize>,
     current: Option<PublicationKey>,
     previous_evicted: Option<PublicationKey>,
+    resident: Option<ResidentHint>,
 }
 const PUBLICATION_HISTORY_WORK: u64 = (2 * std::mem::size_of::<PublicationSlot>()) as u64;
+// Bounded two-candidate metadata lookup plus one successful resident update.
+// This is additional work, never credit against any prior execution charge.
+const RESIDENT_HINT_WORK: u64 = (3 * std::mem::size_of::<ResidentHint>()) as u64;
 
 impl PublicationSlot {
     // Called only after the native bytes, tail and cell have been independently
@@ -521,6 +536,24 @@ impl PublicationSlot {
         }
         self.current = Some(key);
         self.length = Some(length);
+    }
+
+    fn resident_matches(&self, key: PublicationKey) -> bool {
+        self.length.is_some() && self.resident.is_some_and(|hint| hint.key == key)
+    }
+
+    fn vacant_for(&self, key: PublicationKey) -> bool {
+        self.length.is_none()
+            || self.resident.is_none_or(|hint| {
+                hint.key.source != key.source || hint.key.vector_mode != key.vector_mode
+            })
+    }
+
+    fn touch(&mut self, key: PublicationKey, blocks: u64) {
+        self.resident = Some(ResidentHint {
+            key,
+            last_use: blocks,
+        });
     }
 }
 
@@ -875,11 +908,40 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         self.machine.vector_mode.features()
     }
 
-    /// Deterministic finite slot selection. This placement grants no execution
-    /// authority; source, ownership, operands and exact emitted bytes are checked.
+    /// Two-way finite placement hint, qualified by this source epoch and bridge
+    /// mode. Prefer an exact resident key, then an empty/stale way, then the
+    /// least recently validated use. Equal block stamps choose the primary way.
+    /// Selection mutates nothing and grants no execution authority; source,
+    /// ownership, operands and exact emitted bytes still require live checks.
     pub fn placement_for(&self, guest_pc: u64) -> CachePlacement {
-        let index = ((guest_pc ^ (guest_pc >> 8) ^ (guest_pc >> 16) ^ (guest_pc >> 32)) as usize)
+        let primary = ((guest_pc ^ (guest_pc >> 8) ^ (guest_pc >> 16) ^ (guest_pc >> 32)) as usize)
             & (self.machine.limits.cache_slots - 1);
+        if self.machine.limits.cache_slots == 1 {
+            return self.slot_placement(primary);
+        }
+        let secondary = primary ^ 1;
+        let key = PublicationKey {
+            source: self.source.source_plan().identity(),
+            guest_pc,
+            vector_mode: self.machine.vector_mode,
+        };
+        let first = &self.machine.published_slots[primary];
+        let second = &self.machine.published_slots[secondary];
+        let index = if first.resident_matches(key) {
+            primary
+        } else if second.resident_matches(key) {
+            secondary
+        } else if first.vacant_for(key) {
+            primary
+        } else if second.vacant_for(key) {
+            secondary
+        } else if first.resident.map_or(0, |hint| hint.last_use)
+            <= second.resident.map_or(0, |hint| hint.last_use)
+        {
+            primary
+        } else {
+            secondary
+        };
         self.slot_placement(index)
     }
 
@@ -1826,6 +1888,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         let page_start = base_offset & !page_mask;
         let page_end = (base_offset + stride + page_mask) & !page_mask;
         let page_bytes = page_end - page_start;
+        let key = PublicationKey {
+            source: block.source_plan().identity(),
+            guest_pc: block.guest_pc(),
+            vector_mode: self.machine.vector_mode,
+        };
         if self
             .machine
             .cache
@@ -1838,12 +1905,20 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 .cache
                 .matches(base_offset + cell_offset, &trailer.to_le_bytes())?
         {
-            self.machine.usage.cache_reuses = self
+            let reuses = self
                 .machine
                 .usage
                 .cache_reuses
                 .checked_add(1)
                 .ok_or(NativeDispatchError::Budget("cache reuse observations"))?;
+            charge(
+                &mut self.machine.usage.work_units,
+                RESIDENT_HINT_WORK,
+                self.machine.limits.max_work_units,
+                "cache resident hint",
+            )?;
+            self.machine.usage.cache_reuses = reuses;
+            self.machine.published_slots[slot].touch(key, self.machine.usage.blocks);
             return Ok(true);
         }
         let publications = self.machine.usage.cache_publications.checked_add(1).ok_or(
@@ -1853,7 +1928,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         // before invalidating old executable state or performing any writes.
         charge(
             &mut self.machine.usage.work_units,
-            PUBLICATION_HISTORY_WORK,
+            PUBLICATION_HISTORY_WORK + RESIDENT_HINT_WORK,
             self.machine.limits.max_work_units,
             "cache publication history",
         )?;
@@ -1880,15 +1955,8 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         self.machine
             .cache
             .seal_executable_range(page_start, page_bytes)?;
-        self.machine.published_slots[slot].commit(
-            PublicationKey {
-                source: block.source_plan().identity(),
-                guest_pc: block.guest_pc(),
-                vector_mode: self.machine.vector_mode,
-            },
-            offset + 6,
-            &mut self.machine.usage,
-        );
+        self.machine.published_slots[slot].commit(key, offset + 6, &mut self.machine.usage);
+        self.machine.published_slots[slot].touch(key, self.machine.usage.blocks);
         self.machine.usage.cache_publications = publications;
         Ok(true)
     }

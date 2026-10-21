@@ -60,6 +60,9 @@ pub(super) struct PlanCache<'view, 'plan, 'image> {
     policy: TranslationPolicy,
     limits: BlockLimits,
     slots: Vec<Option<MaterializedBlockPlan<'view, 'plan, 'image>>>,
+    // A replacement hint only. Source, policy and epoch are fixed by Self;
+    // every hit still compares the complete live window and placement.
+    recency: [u64; SLOTS],
     retained_bytes: u64,
     max_bytes: u64,
     initialized_windows: initialized_windows::Memo<'view, 'plan, 'image>,
@@ -72,6 +75,9 @@ mod observation_tests;
 #[cfg(test)]
 #[path = "plan_cache/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "plan_cache/two_way_tests.rs"]
+mod two_way_tests;
 
 impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
     pub(super) fn new(
@@ -83,6 +89,7 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
     ) -> Result<Self, NativeSessionError> {
         let bytes = (SLOTS as u64)
             .checked_mul(std::mem::size_of::<Option<MaterializedBlockPlan<'_, '_, '_>>>() as u64)
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<[u64; SLOTS]>() as u64))
             .ok_or(NativeSessionError::Budget("plan cache allocation"))?;
         charge(work, bytes, work_limit, "admission work")?;
         let mut slots = Vec::new();
@@ -103,6 +110,7 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             policy,
             limits,
             slots,
+            recency: [0; SLOTS],
             retained_bytes: 0,
             max_bytes: MAX_PLAN_BYTES,
             initialized_windows,
@@ -122,12 +130,14 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
         self.initialized_windows.get(pc, maximum)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare(
         &mut self,
         module: usize,
         pc: u64,
         live: &[u8],
         placement: CachePlacement,
+        stamp: u64,
         work: &mut u64,
         work_limit: u64,
     ) -> Result<
@@ -141,12 +151,34 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
         charge(work, live.len() as u64 + 8, work_limit, "admission work")?;
         self.initialized_windows
             .yield_to_plans(self.retained_bytes, 0, self.max_bytes);
-        let index = ((pc ^ (pc >> 8) ^ (pc >> 16) ^ (pc >> 32)) as usize) & (SLOTS - 1);
-        let hit = self.slots[index].as_ref().is_some_and(|plan| {
-            plan.guest_pc() == pc
-                && plan.module().index() == module
-                && plan.placement() == placement
-                && plan.relocated_source_bytes() == live
+        let primary = ((pc ^ (pc >> 8) ^ (pc >> 16) ^ (pc >> 32)) as usize) & (SLOTS - 1);
+        let pair = [primary, primary ^ 1];
+        let exact = pair.into_iter().find(|&index| {
+            self.slots[index].as_ref().is_some_and(|plan| {
+                plan.guest_pc() == pc
+                    && plan.module().index() == module
+                    && plan.placement() == placement
+                    && plan.relocated_source_bytes() == live
+            })
+        });
+        let hit = exact.is_some();
+        let index = exact.unwrap_or_else(|| {
+            // Supersede a changed placement/window of the same logical key
+            // before using a second way. A plan is never retargeted in place.
+            pair.into_iter()
+                .find(|&index| {
+                    self.slots[index].as_ref().is_some_and(|plan| {
+                        plan.guest_pc() == pc && plan.module().index() == module
+                    })
+                })
+                .or_else(|| pair.into_iter().find(|&index| self.slots[index].is_none()))
+                .unwrap_or_else(|| {
+                    if self.recency[primary] <= self.recency[primary ^ 1] {
+                        primary
+                    } else {
+                        primary ^ 1
+                    }
+                })
         });
         if !hit {
             // Replanning changed bytes retains the canonical overlay check: a
@@ -183,9 +215,10 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             if remaining > self.max_bytes - bytes {
                 charge(work, SLOTS as u64, work_limit, "admission work")?;
                 let mut removed = 0_u64;
-                for slot in &mut self.slots {
+                for (index, slot) in self.slots.iter_mut().enumerate() {
                     removed += u64::from(slot.is_some()); // At most SLOTS.
                     *slot = None;
+                    self.recency[index] = 0;
                 }
                 self.retained_bytes = 0;
                 purged = Some(removed);
@@ -200,6 +233,9 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             self.observations
                 .committed(replacement, purged, self.retained_bytes);
         }
+        // The caller's already checked block counter is only a retention hint.
+        // No new clock, overflow path or guest admission authority is created.
+        self.recency[index] = stamp;
         Ok((
             self.slots[index]
                 .as_ref()

@@ -117,7 +117,9 @@ fn byte_reuse_repairs_and_saturated_observations_never_rename_or_authorize_a_slo
         assert!(engine.publish(&arena.pause().unwrap(), &a).unwrap());
         let first = engine.machine.published_slots[0];
         assert!(engine.publish(&arena.pause().unwrap(), &b).unwrap());
-        assert!(engine.machine.published_slots[0] == first);
+        assert!(engine.machine.published_slots[0].current == first.current);
+        assert!(engine.machine.published_slots[0].previous_evicted == first.previous_evicted);
+        assert_eq!(engine.machine.published_slots[0].length, first.length);
         assert_eq!(engine.usage().cache_publications, 1);
         assert_eq!(engine.usage().cache_reuses, 1);
         assert!(engine.publish(&arena.pause().unwrap(), &c).unwrap());
@@ -372,7 +374,8 @@ fn refused_current_source_rights_placement_and_work_leave_committed_history_unch
                 }
                 2 => {
                     engine.machine.limits.max_work_units =
-                        engine.usage().work_units + PUBLICATION_HISTORY_WORK - 1
+                        engine.usage().work_units + PUBLICATION_HISTORY_WORK + RESIDENT_HINT_WORK
+                            - 1
                 }
                 4 => arena.protect(page, PAGE, NativePermissions::READ).unwrap(),
                 _ => {}
@@ -438,10 +441,13 @@ fn publication_history_capacity_and_fixed_work_are_admitted_without_slot_growth(
                 engine.placement(),
             );
             assert!(engine.publish(&arena.pause().unwrap(), &plan).unwrap());
-            assert_eq!(engine.usage().work_units - work, PUBLICATION_HISTORY_WORK);
+            assert_eq!(
+                engine.usage().work_units - work,
+                PUBLICATION_HISTORY_WORK + RESIDENT_HINT_WORK
+            );
             let work = engine.usage().work_units;
             assert!(engine.publish(&arena.pause().unwrap(), &plan).unwrap());
-            assert_eq!(engine.usage().work_units, work); // Reuse adds no history work.
+            assert_eq!(engine.usage().work_units - work, RESIDENT_HINT_WORK); // Reuse does not charge historical publication work.
         }
         let limits = NativeDispatchLimits {
             cache_slots: 4096,
@@ -452,10 +458,10 @@ fn publication_history_capacity_and_fixed_work_are_admitted_without_slot_growth(
             NativeBlockStepper::new(source, &mut arena.pause().unwrap(), state, stack, &limits)
                 .unwrap();
         assert_eq!(engine.machine.published_slots.capacity(), 4096);
-        assert!(std::mem::size_of::<PublicationSlot>() <= 80);
+        assert!(std::mem::size_of::<PublicationSlot>() <= 128);
         assert!(
             engine.machine.published_slots.capacity() * std::mem::size_of::<PublicationSlot>()
-                <= 320 * 1024
+                <= 512 * 1024
         );
         drop(engine);
         let limits = NativeDispatchLimits {

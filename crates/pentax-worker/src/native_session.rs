@@ -1045,6 +1045,7 @@ fn execute_epoch<'plan, 'image>(
                 engine.state().guest_pc,
                 window,
                 engine.placement_for(engine.state().guest_pc),
+                engine.usage().blocks,
                 &mut state.admission_work,
                 limits.max_admission_work,
             );

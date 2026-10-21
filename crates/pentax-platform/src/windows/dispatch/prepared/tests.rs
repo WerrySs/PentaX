@@ -123,6 +123,8 @@ mod thread_exit_tests;
 mod threads;
 #[path = "tests/timestamp_counter.rs"]
 mod timestamp_counter_tests;
+#[path = "tests/two_way_cache.rs"]
+mod two_way_cache_tests;
 #[path = "tests/unpack_vectors.rs"]
 mod unpack_vectors;
 #[path = "tests/vector_masks.rs"]
