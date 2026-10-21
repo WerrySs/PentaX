@@ -20,6 +20,76 @@ fn access(address: u64, size: u64, kind: MemoryAccessKind) -> DeclaredMemoryAcce
 }
 
 #[test]
+fn native_admission_summary_matches_final_emission_and_analyzer_empty_success() {
+    for (code, emitted, memory_free, atomic) in [
+        (vec![0xb8, 1, 0, 0, 0, 0x31, 0xc9, 0xc3], 2, true, false),
+        (vec![0x48, 0x8b, 0x00, 0xc3], 1, false, false),
+        (vec![0x50, 0xc3], 1, false, false),
+        (vec![0xf0, 0x48, 0x01, 0x08, 0xc3], 1, false, true),
+        // The nonemitted AVX instruction contributes feature visits, but cannot
+        // require AVX in the actual NOP-only native body.
+        (vec![0x90, 0xc5, 0xf0, 0x5e, 0xc2, 0xc3], 1, true, false),
+        (vec![0xc3], 0, true, false),
+    ] {
+        let bytes = image(&code);
+        let source = link(&[(&bytes, BIAS)]);
+        let mut plan = make(&source);
+        let summary = plan.native_admission();
+        assert_eq!(summary.emitted_instructions(), emitted, "{code:x?}");
+        assert_eq!(summary.is_memory_free(), memory_free, "{code:x?}");
+        assert_eq!(summary.has_atomic_memory(), atomic, "{code:x?}");
+        assert!(!summary.requires_streaming_profile());
+        let visits = plan
+            .instructions()
+            .iter()
+            .map(|record| record.instruction().cpuid_features().len() as u64)
+            .sum::<u64>();
+        assert_eq!(summary.feature_visits(), visits);
+        let mut required = [0; 4];
+        let mut analyzer = MemoryAccessAnalyzer::default();
+        for record in plan
+            .instructions()
+            .iter()
+            .filter(|record| record.emitted_len() != 0)
+        {
+            for feature in record.instruction().cpuid_features() {
+                let bit = *feature as usize;
+                required[bit / 64] |= 1 << (bit % 64);
+            }
+            if memory_free {
+                for registers in [[0; 16], [u64::MAX; 16]] {
+                    assert!(
+                        analyzer
+                            .analyze(record, &registers)
+                            .unwrap()
+                            .accesses()
+                            .is_empty()
+                    );
+                }
+            }
+        }
+        assert!(summary.features_supported_by(&required));
+        for (word, requirements) in required.iter().enumerate() {
+            for bit in 0..64 {
+                if requirements & (1 << bit) != 0 {
+                    let mut missing = required;
+                    missing[word] &= !(1 << bit);
+                    assert!(!summary.features_supported_by(&missing));
+                }
+            }
+        }
+        // Internal corruption/future unrepresentable decoder features fail
+        // closed even with every representable capability supplied.
+        plan.admission.unrepresentable_feature = true;
+        assert!(
+            !plan
+                .native_admission()
+                .features_supported_by(&[u64::MAX; 4])
+        );
+    }
+}
+
+#[test]
 fn locked_rmw_and_implicit_exchange_keep_prefixes_and_exact_read_write_footprints() {
     for size in [1, 2, 4, 8] {
         let mut prefix = vec![0xf0];

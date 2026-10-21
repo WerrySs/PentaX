@@ -106,9 +106,9 @@ jobs:
       - name: Test native YMM admission and context preservation
         run: >-
           cargo test --locked -p pentax-platform --lib ymm_bridge::tests:: -- --test-threads=1
-      - name: Test native YMM publication and budget boundaries
+      - name: Test native YMM and immutable admission publication boundaries
         run: >-
-          cargo test --locked -p pentax-platform --lib tests::native_ymm_tests:: -- --test-threads=1
+          cargo test --locked -p pentax-platform --lib -- tests::native_ymm_tests:: tests::native_cache:: --test-threads=1
       - name: Test signed packed-qword comparison state and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::qword_comparisons:: -- --test-threads=1

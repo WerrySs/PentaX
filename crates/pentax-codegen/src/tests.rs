@@ -600,6 +600,15 @@ fn allocation_work_and_aggregate_limits_are_precharged_and_inclusive() {
     let source = link(&[(&bytes, BIAS)]);
     let ordinary = make(&source);
     let usage = ordinary.usage();
+    let admission = ordinary.native_admission();
+    let construction_work = std::mem::size_of::<NativeAdmissionSummary>() as u64
+        + 32 * ordinary.instructions().len() as u64
+        + admission.feature_visits();
+    assert_eq!(
+        usage.work_units,
+        admission.dispatch_work_units() + construction_work
+    );
+    assert!(usage.allocation_bytes >= std::mem::size_of::<NativeAdmissionSummary>() as u64);
     let mut exact = BlockLimits {
         max_allocation_bytes: usage.allocation_bytes,
         max_work_units: usage.work_units,

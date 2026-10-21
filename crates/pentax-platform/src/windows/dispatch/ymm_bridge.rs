@@ -71,6 +71,35 @@ impl VectorMode {
         }
     }
 
+    /// Same closed capability predicate as supports(), memoized independently
+    /// for each immutable entry/trailer mode. No guest CPUID words participate.
+    pub(super) fn supports_admission(
+        self,
+        summary: &pentax_codegen::NativeAdmissionSummary,
+    ) -> bool {
+        static SSE2: OnceLock<[u64; 4]> = OnceLock::new();
+        static AVX: OnceLock<[u64; 4]> = OnceLock::new();
+        static AVX2: OnceLock<[u64; 4]> = OnceLock::new();
+        let cache = match self {
+            Self::Sse2 => &SSE2,
+            Self::Avx { avx2: false } => &AVX,
+            Self::Avx { avx2: true } => &AVX2,
+        };
+        let available = cache.get_or_init(|| {
+            let mut words = [0; 4];
+            for feature in CpuidFeature::values() {
+                let bit = feature as usize;
+                if self.supports(feature)
+                    && let Some(word) = words.get_mut(bit / 64)
+                {
+                    *word |= 1_u64 << (bit % 64);
+                }
+            }
+            words
+        });
+        summary.features_supported_by(available)
+    }
+
     pub(super) fn trailer(self) -> u64 {
         match self {
             Self::Sse2 => pentax_block_trailer as *const () as u64,

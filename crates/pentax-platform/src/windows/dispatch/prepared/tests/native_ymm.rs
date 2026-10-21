@@ -68,13 +68,52 @@ fn requested_native_vectors_refuse_legacy_bridge_and_unadmitted_avx2_before_publ
             if avx2 {
                 // Original test metadata only; never enter this synthetic mode.
                 // AVX1 cannot satisfy a decoded AVX2 requirement.
+                engine.machine.vector_mode = VectorMode::Avx { avx2: true };
+                assert!(
+                    engine
+                        .machine
+                        .vector_mode
+                        .supports_admission(planned.native_admission())
+                );
+                assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
+                assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
+                let before = engine.usage();
                 engine.machine.vector_mode = VectorMode::Avx { avx2: false };
+                assert!(
+                    !engine
+                        .machine
+                        .vector_mode
+                        .supports_admission(planned.native_admission())
+                );
                 assert_eq!(
                     engine.publish(&arena.pause().unwrap(), &planned),
                     Err(NativeDispatchError::InvalidState)
                 );
-                assert_eq!(engine.usage().cache_publications, 0);
+                assert_eq!(engine.usage(), before);
                 assert_eq!(*engine.state(), state);
+                let diagnostic = pentax_codegen::plan_block(
+                    source.source_plan(),
+                    0,
+                    state.guest_pc,
+                    engine.placement(),
+                    &planned.policy(),
+                    &BlockLimits::default(),
+                )
+                .unwrap();
+                // The fast mask miss must preserve the diagnostic's original
+                // first unsupported decoded-feature label, before source work.
+                assert!(matches!(
+                    super::super::super::publish_block_with_mode(
+                        &mut engine.machine.cache,
+                        arena,
+                        &diagnostic,
+                        state.guest_pc,
+                        VectorMode::Avx { avx2: false },
+                    ),
+                    Err(PlatformError::UnsupportedHostFeature {
+                        feature: "unsupported-feature"
+                    })
+                ));
             }
             if !avx2 && admitted_mode.features().is_some() {
                 engine.machine.vector_mode = admitted_mode;

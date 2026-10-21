@@ -438,13 +438,15 @@ impl Driver {
             );
         }
         if function == Function::AgcCreateShader {
-            return self.shaders.create(
+            let result = self.shaders.create(
                 memory,
                 args,
                 self.limits.max_shader_mappings,
                 &mut self.usage.preparation_work,
                 self.limits.max_preparation_work,
             );
+            self.function_profile.record_shader_create(&result);
+            return result;
         }
         if function == Function::AgcGetIsTrinityMode {
             self.usage.preparation_work = add(

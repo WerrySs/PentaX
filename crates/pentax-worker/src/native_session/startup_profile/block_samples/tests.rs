@@ -334,6 +334,9 @@ fn optional_work_record_and_counter_limits_disable_without_publication_and_final
         assert!(progress.protocol_fields().contains(&format!("{name}=none")));
     }
     for name in [
+        "graphics_shader_create_ok",
+        "graphics_shader_create_rejected",
+        "graphics_shader_create_failed",
         "scheduling_pending_equeue_waits",
         "video_vblank_subscriptions",
         "video_registered_buffers",

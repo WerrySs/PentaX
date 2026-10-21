@@ -366,6 +366,58 @@ fn shader_physical_aliases_are_explicit_refusals_and_read_only_outputs_do_not_pu
 }
 
 #[test]
+fn driver_shader_outcomes_distinguish_normal_rejection_from_typed_refusal() {
+    use crate::gpu::driver::{Driver, Function, Limits};
+    let (mut space, base) = owner();
+    let mut memory = space.pause().unwrap();
+    let mut driver = Driver::new(Limits {
+        max_calls: 3,
+        ..Default::default()
+    });
+    let args = seed(&mut memory, base, base + 0x400, 0, 96);
+    assert_eq!(
+        driver.submit(&mut memory, Function::AgcCreateShader, args),
+        Ok(0)
+    );
+    assert_eq!(word(&memory, args[0]), args[1]);
+    let args = seed(&mut memory, base, base + 0x400, 0, 96);
+    memory
+        .write(base + 0x600, &0x555_u32.to_le_bytes())
+        .unwrap();
+    assert_eq!(
+        driver.submit(&mut memory, Function::AgcCreateShader, args),
+        Ok(INVALID_PROGRAM)
+    );
+    assert_eq!(word(&memory, args[0]), 0x5a5a_5a5a_5a5a_5a5a);
+    let args = seed(&mut memory, base, base + 0x400, 0, 96);
+    memory.write(args[1], &0_u32.to_le_bytes()).unwrap();
+    assert_eq!(
+        driver.submit(&mut memory, Function::AgcCreateShader, args),
+        Err(Failure::Shader(ShaderFailure::Header))
+    );
+    assert_eq!(
+        driver.function_profile().shader_create_outcomes(),
+        (1, 1, 1)
+    );
+    assert_eq!(
+        driver.function_profile().count(Function::AgcCreateShader),
+        3
+    );
+    assert_eq!(
+        driver.submit(&mut memory, Function::AgcCreateShader, args),
+        Err(Failure::Limit)
+    );
+    assert_eq!(
+        driver.function_profile().shader_create_outcomes(),
+        (1, 1, 1)
+    );
+    assert_eq!(
+        driver.function_profile().count(Function::AgcCreateShader),
+        3
+    );
+}
+
+#[test]
 fn registered_shader_extent_is_consumed_by_actual_compute_preparation_and_gpu_writeback() {
     use crate::gpu::driver::{Driver, Function};
     let (mut space, base) = owner();

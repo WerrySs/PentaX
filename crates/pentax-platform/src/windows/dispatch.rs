@@ -929,27 +929,37 @@ fn publish_block_with_mode(
     }
     // 1. Host CPUID/OS support must satisfy the declared emission policy for
     //    every instruction actually emitted into the cache.
-    for record in plan.instructions() {
-        if record.emitted_len() == 0 {
-            continue;
-        }
-        if matches!(
-            record.instruction().code(),
-            pentax_codegen::Code::VEX_Vmovntdq_m128_xmm
-                | pentax_codegen::Code::VEX_Vmovntdq_m256_ymm
-        ) && !plan.policy().requests_native_streaming_stores()
-        {
-            return Err(PlatformError::UnsupportedHostFeature {
-                feature: "native streaming store profile",
-            });
-        }
-        for feature in record.instruction().cpuid_features() {
-            if !mode.supports(*feature) {
+    // Fast successful admission uses only fixed immutable words. On failure,
+    // retain the original ordered walk and its exact first error identity.
+    if (plan.native_admission().requires_streaming_profile()
+        && !plan.policy().requests_native_streaming_stores())
+        || !mode.supports_admission(plan.native_admission())
+    {
+        for record in plan.instructions() {
+            if record.emitted_len() == 0 {
+                continue;
+            }
+            if matches!(
+                record.instruction().code(),
+                pentax_codegen::Code::VEX_Vmovntdq_m128_xmm
+                    | pentax_codegen::Code::VEX_Vmovntdq_m256_ymm
+            ) && !plan.policy().requests_native_streaming_stores()
+            {
                 return Err(PlatformError::UnsupportedHostFeature {
-                    feature: feature_name(*feature),
+                    feature: "native streaming store profile",
                 });
             }
+            for feature in record.instruction().cpuid_features() {
+                if !mode.supports(*feature) {
+                    return Err(PlatformError::UnsupportedHostFeature {
+                        feature: feature_name(*feature),
+                    });
+                }
+            }
         }
+        return Err(PlatformError::UnsupportedHostFeature {
+            feature: "unsupported-feature",
+        });
     }
 
     // 2. Verify the actual paused source bytes against the retained relocated

@@ -1360,10 +1360,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         if block.emits_non_temporal_store()
             || block.emits_vector_memory_move()
             || block.emits_scalar_float_memory()
-            || block
-                .instructions()
-                .iter()
-                .any(|record| record.emitted_len() != 0 && record.has_atomic_memory())
+            || block.native_admission().has_atomic_memory()
         {
             self.preflight_ordinary_memory(memory, block)?;
         }
@@ -1386,12 +1383,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             self.machine.limits.max_work_units,
             "memory analysis",
         )?;
+        if block.native_admission().is_memory_free() {
+            return Ok(());
+        }
         let mut written_registers = 0_u16;
-        let emitted = block
-            .instructions()
-            .iter()
-            .filter(|record| record.emitted_len() != 0)
-            .count();
+        let emitted = block.native_admission().emitted_instructions();
         for (instruction_index, record) in block
             .instructions()
             .iter()
@@ -1468,13 +1464,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             .machine
             .usage
             .native_instructions
-            .checked_add(
-                block
-                    .instructions()
-                    .iter()
-                    .filter(|record| record.emitted_len() != 0)
-                    .count() as u64,
-            )
+            .checked_add(block.native_admission().emitted_instructions())
             .ok_or(NativeDispatchError::Budget("native instructions"))?;
         if (native_instructions != self.machine.usage.native_instructions)
             != (block.bytes().len() > 2)
@@ -1627,24 +1617,17 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             self.machine.limits.max_emitted_bytes,
             "emitted bytes",
         )?;
-        // At most three complete target scans occur (CALL target, return site,
-        // final target). CPUID feature lists have a decoder-fixed finite size;
-        // count their exact visits, after the already bounded record count.
-        let mut feature_visits = 0_u64;
+        // Preserve the original record and feature-visit charges even though
+        // their immutable totals were computed once during plan construction.
         charge(
             &mut self.machine.usage.work_units,
             block.instructions().len() as u64,
             self.machine.limits.max_work_units,
             "work",
         )?;
-        for record in block.instructions() {
-            feature_visits = feature_visits
-                .checked_add(record.instruction().cpuid_features().len() as u64)
-                .ok_or(NativeDispatchError::Budget("work"))?;
-        }
         let work = block
-            .usage()
-            .work_units
+            .native_admission()
+            .dispatch_work_units()
             .checked_add(
                 self.machine
                     .target_visits
@@ -1656,7 +1639,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             // this deterministic work-unit policy.
             .and_then(|v| v.checked_add(native_bytes.checked_mul(6)?))
             .and_then(|v| v.checked_add(block.usage().source_bytes.checked_mul(3)?))
-            .and_then(|v| v.checked_add(feature_visits))
+            .and_then(|v| v.checked_add(block.native_admission().feature_visits()))
             .and_then(|v| v.checked_add(16))
             .ok_or(NativeDispatchError::Budget("work"))?;
         charge(
@@ -1733,26 +1716,14 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         if block.placement() != self.slot_placement(slot) {
             return Err(NativeDispatchError::EmissionMismatch);
         }
-        for record in block.instructions() {
-            if record.emitted_len() != 0
-                && matches!(
-                    record.instruction().code(),
-                    pentax_codegen::Code::VEX_Vmovntdq_m128_xmm
-                        | pentax_codegen::Code::VEX_Vmovntdq_m256_ymm
-                )
-                && !block.policy().requests_native_streaming_stores()
-            {
-                return Err(NativeDispatchError::InvalidState);
-            }
-            if record.emitted_len() != 0
-                && record
-                    .instruction()
-                    .cpuid_features()
-                    .iter()
-                    .any(|feature| !self.machine.vector_mode.supports(*feature))
-            {
-                return Err(NativeDispatchError::InvalidState);
-            }
+        if (block.native_admission().requires_streaming_profile()
+            && !block.policy().requests_native_streaming_stores())
+            || !self
+                .machine
+                .vector_mode
+                .supports_admission(block.native_admission())
+        {
+            return Err(NativeDispatchError::InvalidState);
         }
         let end_pc = if block.exit().instruction().is_some() {
             block.exit().next_guest_pc()

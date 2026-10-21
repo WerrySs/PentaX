@@ -71,16 +71,33 @@ catalogue!(
 pub struct FunctionProfile {
     counts: [u64; FUNCTIONS.len()],
     last: Option<Function>,
+    shader_create: [u64; 3],
 }
 impl Default for FunctionProfile {
     fn default() -> Self {
         Self {
             counts: [0; FUNCTIONS.len()],
             last: None,
+            shader_create: [0; 3],
         }
     }
 }
 impl FunctionProfile {
+    pub(super) fn record_shader_create(&mut self, result: &Result<u64, super::Failure>) {
+        let index = match result {
+            Ok(0) => 0,
+            Ok(_) => 1,
+            Err(_) => 2,
+        };
+        self.shader_create[index] = self.shader_create[index].saturating_add(1);
+    }
+    /// Completed CreateShader helper outcomes: zero status, guest rejection,
+    /// and typed host-side refusal. None proves that the shader can render.
+    /// Calls refused before driver admission are absent from all three counts.
+    pub fn shader_create_outcomes(&self) -> (u64, u64, u64) {
+        let [ok, rejected, failed] = self.shader_create;
+        (ok, rejected, failed)
+    }
     pub(super) fn record(&mut self, function: Function) {
         let counter = &mut self.counts[function.profile_index()];
         *counter = counter.saturating_add(1);

@@ -3,6 +3,131 @@
 use super::*;
 
 #[test]
+fn native_admission_summary_preserves_dispatch_work_and_live_source_checks() {
+    with_source(
+        Some(&[0xb8, 1, 0, 0, 0, 0x31, 0xc9, 0xc3]),
+        |source, arena, stack, state| {
+            let mut engine = NativeBlockStepper::new(
+                source,
+                &mut arena.pause().unwrap(),
+                state,
+                stack,
+                &Default::default(),
+            )
+            .unwrap();
+            let planned = block(
+                source,
+                &arena.pause().unwrap(),
+                state.guest_pc,
+                engine.placement(),
+            );
+            let summary = planned.native_admission();
+            assert_eq!(summary.emitted_instructions(), 2);
+            assert!(summary.is_memory_free());
+            let records = planned.instructions().len() as u64;
+            let feature_visits = planned
+                .instructions()
+                .iter()
+                .map(|record| record.instruction().cpuid_features().len() as u64)
+                .sum::<u64>();
+            assert_eq!(summary.feature_visits(), feature_visits);
+            assert_eq!(
+                planned.usage().work_units - summary.dispatch_work_units(),
+                std::mem::size_of::<pentax_codegen::NativeAdmissionSummary>() as u64
+                    + 32 * records
+                    + feature_visits
+            );
+            // Independent old dispatch formula: stack/guards, records, prior plan
+            // work, target scans, publication bytes, source visits and features.
+            let guard_work = stack.guards.map_or(0, |[low, high]| {
+                low.size / NATIVE_GUEST_PAGE + high.size / NATIVE_GUEST_PAGE
+            });
+            let expected = stack.stack.size.div_ceil(NATIVE_GUEST_PAGE)
+                + 1
+                + guard_work
+                + records
+                + summary.dispatch_work_units()
+                + engine.machine.target_visits * 3
+                + (planned.bytes().len() as u64 + 12) * 6
+                + planned.usage().source_bytes * 3
+                + feature_visits
+                + 16;
+            for _ in 0..2 {
+                let before = engine.usage();
+                engine
+                    .preflight_block(&arena.pause().unwrap(), &planned)
+                    .unwrap();
+                assert_eq!(engine.usage().work_units - before.work_units, expected);
+                let before = engine.usage();
+                engine
+                    .preflight_ordinary_memory(&arena.pause().unwrap(), &planned)
+                    .unwrap();
+                assert_eq!(engine.usage().work_units - before.work_units, records * 128);
+                assert_eq!(
+                    engine.usage().memory_access_checks,
+                    before.memory_access_checks
+                );
+                assert_eq!(
+                    engine.usage().memory_bytes_checked,
+                    before.memory_bytes_checked
+                );
+            }
+            engine.machine.limits.max_work_units = engine.usage().work_units + records * 128 - 1;
+            let before = engine.usage();
+            assert_eq!(
+                engine.preflight_ordinary_memory(&arena.pause().unwrap(), &planned),
+                Err(NativeDispatchError::Budget("memory analysis"))
+            );
+            assert_eq!(engine.usage(), before);
+            assert_eq!(*engine.state(), state);
+            assert_eq!(engine.usage().native_entries, 0);
+            assert_eq!(engine.usage().cache_publications, 0);
+            assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
+            assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
+            let before = engine.usage();
+            let page = source.source_plan().modules()[0].load_bias();
+            arena
+                .protect(page, PAGE, NativePermissions::new(true, true, true))
+                .unwrap();
+            assert_eq!(
+                engine.publish(&arena.pause().unwrap(), &planned),
+                Err(NativeDispatchError::WritableSource)
+            );
+            arena
+                .protect(page, PAGE, NativePermissions::READ_WRITE)
+                .unwrap();
+            arena
+                .pause()
+                .unwrap()
+                .write(state.guest_pc, &[0x90])
+                .unwrap();
+            arena
+                .protect(page, PAGE, NativePermissions::READ_EXECUTE)
+                .unwrap();
+            assert_eq!(
+                engine.publish(&arena.pause().unwrap(), &planned),
+                Err(NativeDispatchError::SourceMismatch)
+            );
+            assert_eq!(engine.usage(), before);
+            arena
+                .protect(page, PAGE, NativePermissions::READ_WRITE)
+                .unwrap();
+            arena
+                .pause()
+                .unwrap()
+                .write(state.guest_pc, &[0xb8])
+                .unwrap();
+            arena
+                .protect(page, PAGE, NativePermissions::READ_EXECUTE)
+                .unwrap();
+            assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
+            assert_eq!(engine.usage().cache_publications, before.cache_publications);
+            assert_eq!(engine.usage().cache_reuses, before.cache_reuses + 1);
+        },
+    );
+}
+
+#[test]
 fn native_cache_checks_source_and_emission_across_scratch_boundaries() {
     let mut code = [0xb8, 1, 0, 0, 0].repeat(53);
     code.push(0xc3);
@@ -212,6 +337,14 @@ fn native_cache_refuses_non_slot_placements_and_rechecks_live_source_on_hits() {
         }
         assert_eq!(engine.usage().cache_publications, 0);
         let planned = block(source, &arena.pause().unwrap(), state.guest_pc, placement);
+        assert_eq!(
+            planned.native_admission().emitted_instructions(),
+            planned
+                .instructions()
+                .iter()
+                .filter(|record| record.emitted_len() != 0)
+                .count() as u64
+        );
         assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
         assert!(engine.publish(&arena.pause().unwrap(), &planned).unwrap());
         let page = source.source_plan().modules()[0].load_bias();

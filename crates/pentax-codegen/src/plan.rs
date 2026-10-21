@@ -312,6 +312,7 @@ pub(crate) fn plan_window<'plan, 'image>(
     }
     accounting.charge(2)?;
     bytes.extend_from_slice(&[0x0f, 0x0b]);
+    let admission = summarize_admission(&records, &mut accounting)?;
     let usage = BlockUsage {
         source_bytes: window.original.len() as u64,
         decoded_instructions: decoded,
@@ -333,8 +334,78 @@ pub(crate) fn plan_window<'plan, 'image>(
         emits_non_temporal_store,
         emits_vector_memory_move,
         emits_scalar_float_memory,
+        admission,
         usage,
     })
+}
+
+fn summarize_admission(
+    records: &[InstructionRecord],
+    accounting: &mut Accounting,
+) -> Result<NativeAdmissionSummary, CodegenError> {
+    let dispatch_work_units = accounting.work;
+    let stored = std::mem::size_of::<NativeAdmissionSummary>() as u64;
+    accounting.allocated = accounting
+        .allocated
+        .checked_add(stored)
+        .filter(|total| *total <= accounting.limits.max_allocation_bytes)
+        .ok_or(CodegenError::Budget {
+            kind: Budget::AllocationBytes,
+            limit: accounting.limits.max_allocation_bytes,
+        })?;
+    // Admit each fixed decoded record observation before the construction walk.
+    // Feature-list visits are separately charged before their entries are read.
+    accounting.charge(stored)?;
+    accounting.charge(
+        (records.len() as u64)
+            .checked_mul(32)
+            .ok_or(CodegenError::InvalidAddress)?,
+    )?;
+    let mut summary = NativeAdmissionSummary {
+        emitted_instructions: 0,
+        feature_visits: 0,
+        required_features: [0; 4],
+        dispatch_work_units,
+        unrepresentable_feature: false,
+        memory_free: true,
+        atomic_memory: false,
+        streaming_profile: false,
+    };
+    for record in records {
+        let features = record.instruction.cpuid_features();
+        accounting.charge(features.len() as u64)?;
+        summary.feature_visits = summary
+            .feature_visits
+            .checked_add(features.len() as u64)
+            .ok_or(CodegenError::InvalidAddress)?;
+        if record.emitted_len == 0 {
+            continue;
+        }
+        summary.emitted_instructions += 1;
+        for feature in features {
+            let bit = *feature as usize;
+            if let Some(word) = summary.required_features.get_mut(bit / 64) {
+                *word |= 1_u64 << (bit % 64);
+            } else {
+                summary.unrepresentable_feature = true;
+            }
+        }
+        let atomic = record.has_atomic_memory();
+        summary.atomic_memory |= atomic;
+        summary.streaming_profile |= matches!(
+            record.instruction.code(),
+            Code::VEX_Vmovntdq_m128_xmm | Code::VEX_Vmovntdq_m256_ymm
+        );
+        // Match analyze's empty-access guards before bypassing it. Reject any
+        // address dependency too, preserving its sequence-isolation refusal.
+        summary.memory_free &= !atomic
+            && (!potential_memory(&record.instruction)
+                || matches!(record.instruction.mnemonic(), Mnemonic::Lea | Mnemonic::Nop))
+            && record
+                .immutable_memory_summary()
+                .is_some_and(|(memory, dependencies)| !memory && dependencies.address == 0);
+    }
+    Ok(summary)
 }
 
 fn lea_constant(instruction: &Instruction, target: u64) -> Result<Instruction, CodegenError> {

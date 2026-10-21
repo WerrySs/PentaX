@@ -71,6 +71,11 @@ impl Observations {
             "\tgraphics_function_last={}",
             self.graphics_functions.last()
         );
+        let (ok, rejected, failed) = self.graphics_functions.shader_create_outcomes();
+        let _ = write!(
+            fields,
+            "\tgraphics_shader_create_ok={ok}\tgraphics_shader_create_rejected={rejected}\tgraphics_shader_create_failed={failed}"
+        );
         fields
     }
 }

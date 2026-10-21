@@ -298,6 +298,9 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
     pub const fn usage(&self) -> BlockUsage {
         self.inner.usage()
     }
+    pub const fn native_admission(&self) -> &NativeAdmissionSummary {
+        self.inner.native_admission()
+    }
     /// Pure comparison only; the future unsafe consumer must independently
     /// establish the exact prepared owner, typed proof and live source bytes.
     pub fn attest_emission(&self, address: u64, bytes: &[u8]) -> bool {

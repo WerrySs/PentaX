@@ -23,7 +23,8 @@ pub struct BlockLimits {
     pub max_instructions: u64,
     /// Includes the final two-byte UD2.
     pub max_output_bytes: u64,
-    /// Reported capacities of per-plan Vec buffers, including encoder scratch.
+    /// Reported capacities of per-plan Vec buffers, encoder scratch and the
+    /// fixed immutable admission summary.
     /// Dependency-global tables/allocator bookkeeping are outside this bound.
     pub max_allocation_bytes: u64,
     pub max_work_units: u64,
@@ -238,6 +239,54 @@ pub struct BlockUsage {
     pub work_units: u64,
 }
 
+/// Fixed decoded facts, never live source, operand or host-feature authority.
+/// Constructed only from the final retained records; no separate cache exists.
+#[derive(Debug)]
+pub struct NativeAdmissionSummary {
+    pub(crate) emitted_instructions: u64,
+    pub(crate) feature_visits: u64,
+    pub(crate) required_features: [u64; 4],
+    pub(crate) dispatch_work_units: u64,
+    pub(crate) unrepresentable_feature: bool,
+    pub(crate) memory_free: bool,
+    pub(crate) atomic_memory: bool,
+    pub(crate) streaming_profile: bool,
+}
+impl NativeAdmissionSummary {
+    pub const fn emitted_instructions(&self) -> u64 {
+        self.emitted_instructions
+    }
+    /// Original all-record feature-list visits, including the nonemitted exit.
+    pub const fn feature_visits(&self) -> u64 {
+        self.feature_visits
+    }
+    /// Prior dispatch charge, excluding this summary's one-time construction.
+    pub const fn dispatch_work_units(&self) -> u64 {
+        self.dispatch_work_units
+    }
+    /// The caller supplies independently admitted host capabilities. Unknown
+    /// feature indices fail closed instead of truncating the required set.
+    pub fn features_supported_by(&self, available: &[u64; 4]) -> bool {
+        !self.unrepresentable_feature
+            && self
+                .required_features
+                .iter()
+                .zip(available)
+                .all(|(need, have)| *need & !*have == 0)
+    }
+    /// Every emitted analyzer would succeed with no accesses or address
+    /// dependencies. Unknown templates and potential-memory forms are excluded.
+    pub const fn is_memory_free(&self) -> bool {
+        self.memory_free
+    }
+    pub const fn has_atomic_memory(&self) -> bool {
+        self.atomic_memory
+    }
+    pub const fn requires_streaming_profile(&self) -> bool {
+        self.streaming_profile
+    }
+}
+
 /// Immutable bytes, owned source snapshots, source/module identity and policy.
 /// There is no constructor from detached exit tables, byte buffers or addresses.
 pub struct BlockPlan<'plan, 'image> {
@@ -254,6 +303,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) emits_non_temporal_store: bool,
     pub(crate) emits_vector_memory_move: bool,
     pub(crate) emits_scalar_float_memory: bool,
+    pub(crate) admission: NativeAdmissionSummary,
     pub(crate) usage: BlockUsage,
 }
 impl fmt::Debug for BlockPlan<'_, '_> {
@@ -317,6 +367,9 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage
+    }
+    pub const fn native_admission(&self) -> &NativeAdmissionSummary {
+        &self.admission
     }
     /// Only the owned final instruction boundary is an attested exit. An
     /// incidental 0F0B in data/immediates has no dispatch authority.

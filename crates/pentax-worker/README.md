@@ -690,6 +690,14 @@ ties; the last label is historical admission, not an in-flight function, fault
 attribution or successful GPU execution. No arguments, registry identities or
 guest text enter this profile.
 
+`graphics_shader_create_ok`, `graphics_shader_create_rejected` and
+`graphics_shader_create_failed` separately count admitted CreateShader calls
+that return zero, return a nonzero guest status, or stop with a typed failure.
+They are final-only saturating counters, recorded after the helper returns.
+Calls refused before driver admission do not count. A zero helper status is
+neither GPU compilation nor a rendered frame; other graphics APIs can return
+valid nonzero sizes or pointers and are not classified by this rule.
+
 The periodic completed-block observer also reports
 `sample_self_target_branches`, `sample_self_target_native_register_blocks` and
 `sample_self_target_native_register_instructions`. These describe sampled plans
@@ -720,6 +728,16 @@ page span. The source remains logically
 immutable and is checked against the current declaration on every step. Stack,
 CPU, host features and current operand rights are also rechecked on every reuse.
 Counters distinguish successful publications, exact reuses and hardware entries.
+
+Each immutable block also retains a fixed native-admission summary, computed
+from its final instruction records within the planning allocation and work
+limits. Reuse reads cached instruction counts and required feature bits instead
+of walking the same records again. A conservative proof of an emitted body with
+no memory accesses can also skip repeated footprint analysis. Unknown templates,
+atomics and potential memory forms keep the full analysis path. These facts do
+not cache runtime addresses or permission checks. The existing per-step work
+charges are preserved separately from the added construction work; source,
+owner, stack, host mode and actual memory operands retain their live checks.
 
 An attested plan containing only the exit sentinel resolves directly through
 the existing modeled control/vector/string/segment path without publishing code
