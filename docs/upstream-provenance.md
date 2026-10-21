@@ -1806,3 +1806,24 @@ newly native instructions from mediated operations; historical memory byte
 counts remain exact. The ignored baseline comparison needs two independently
 selected artifacts and does not assert faster execution. Source review and
 fixture definitions alone establish neither a measured title gain nor a frame.
+
+## Native non-temporal vector stores
+
+The independently implemented two-form VMOVNTDQ extension follows
+[Intel Volume 2B](https://cdrdv2-public.intel.com/835752/253667-sdm-vol-2b.pdf),
+MOVNTDQ pages 4-96..98: VEX.128/256, AVX requirements for both widths, memory-only
+destinations, 16/32-byte alignment and unchanged source vector state. The pinned
+decoder checks reserved encoding fields. The same volume's MFENCE page 4-22
+and SFENCE page 4-624 distinguish ordering before later loads from ordering
+stores alone. The runtime uses a conditional host MFENCE, with compiler memory
+effects, before returning actual emitted non-temporal effects to Rust. Existing
+legacy MOVNTDQ/MOVNTPS/MOVNTPD stores receive that boundary and explicit alignment
+validation as well. No guest fence instruction is inserted into source bytes.
+
+Exact opcode policy, numerical footprints, original native programs, canary
+oracles, all-source vector checks and bounded measurement inputs are original
+PentaX work. No emulator implementation or commercial byte pattern is copied.
+The source-interval memo retains only immutable initialized executable metadata;
+it never retains guest operands or live memory permissions. Counter differences
+identify actual native admission, while timing and sampled plans do not prove
+commercial boot, a frame or playable performance.

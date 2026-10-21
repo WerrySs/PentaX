@@ -75,6 +75,8 @@ mod native_cache;
 mod native_packed_float_memory_tests;
 #[path = "tests/native_packed_float.rs"]
 mod native_packed_float_tests;
+#[path = "tests/native_streaming_stores.rs"]
+mod native_streaming_stores_tests;
 #[path = "tests/native_vector_register_bits.rs"]
 mod native_vector_register_bits_tests;
 #[path = "tests/native_ymm.rs"]
@@ -101,6 +103,8 @@ mod shuffle_vectors;
 mod streaming_loads;
 #[path = "tests/strings.rs"]
 mod strings;
+#[path = "tests/target_source_memo.rs"]
+mod target_source_memo_tests;
 #[path = "tests/thread_exit.rs"]
 mod thread_exit_tests;
 #[path = "tests/threads.rs"]

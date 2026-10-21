@@ -22,6 +22,7 @@ use pentax_codegen::{
     CachePlacement, ControlTarget, ExitKind, MaterializedBlockPlan, MaterializedSource,
     MemoryAccessAnalyzer, MemoryAccessError, MemoryAccessKind,
 };
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Owned guest x87 environment and physical R0..R7 bits. Status TOP selects
@@ -518,6 +519,9 @@ struct CallObservation {
 pub struct NativeBlockStepper<'view, 'plan, 'image> {
     source: &'view MaterializedSource<'plan, 'image>,
     machine: NativeBlockMachine,
+    // Immutable initialized source metadata only. This is deliberately absent
+    // from NativeBlockMachine: every reattachment starts without a memo.
+    target_interval: Cell<Option<TargetInterval>>,
 }
 impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
     /// Reattach the SAME machine to its immutable source, or to a checked append
@@ -634,6 +638,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         Ok(Self {
             source,
             machine: slot.take().ok_or(NativeDispatchError::WrongPhase)?,
+            target_interval: Cell::new(None),
         })
     }
     /// Allocate a private RW cache and validate source/stack metadata. This safe
@@ -762,6 +767,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             .map_err(|_| NativeDispatchError::Budget("executor identity"))?;
         Ok(Self {
             source,
+            target_interval: Cell::new(None),
             machine: NativeBlockMachine {
                 owner: memory.owner_id(),
                 executor,
@@ -938,7 +944,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         if u64::from_le_bytes(bytes) != self.machine.stack.return_marker {
             return Err(NativeDispatchError::InvalidStack);
         }
-        check_target(self.source, memory, state.guest_pc)?;
+        self.check_target(memory, state.guest_pc)?;
         if !matches!(
             memory.preflight_write(state.guest_pc, 1),
             Err(NativeMemoryError::PermissionDenied(_))
@@ -1011,7 +1017,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             &mut self.machine.usage,
             &self.machine.limits,
         )?;
-        check_target(self.source, memory, entry)?;
+        self.check_target(memory, entry)?;
         if !matches!(
             memory.preflight_write(entry, 1),
             Err(NativeMemoryError::PermissionDenied(_))
@@ -1204,7 +1210,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             &mut self.machine.usage,
             &self.machine.limits,
         )?;
-        check_target(self.source, memory, saved.token.next_pc)?;
+        self.check_target(memory, saved.token.next_pc)?;
         let mut marker = [0; 8];
         memory.read(saved.stack.return_slot, &mut marker)?;
         if u64::from_le_bytes(marker) != saved.stack.return_marker {
@@ -1255,8 +1261,8 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<NativeBlockStop, NativeDispatchError> {
         self.preflight_block(memory, block)?;
-        // Even manual stepping cannot bypass checked atomic backing, rights
-        // and natural alignment. Codegen isolates these regardless of policy.
+        // Even manual stepping cannot bypass checked atomic/non-temporal
+        // backing, rights and alignment. Address dependencies remain checked.
         self.preflight_atomic_memory(memory, block)?;
         // SAFETY: This entry retains the caller's complete ordinary-memory and
         // preparation obligations documented above.
@@ -1350,10 +1356,11 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             self.machine.limits.max_work_units,
             "atomic classification",
         )?;
-        if block
-            .instructions()
-            .iter()
-            .any(|record| record.emitted_len() != 0 && record.has_atomic_memory())
+        if block.emits_non_temporal_store()
+            || block
+                .instructions()
+                .iter()
+                .any(|record| record.emitted_len() != 0 && record.has_atomic_memory())
         {
             self.preflight_ordinary_memory(memory, block)?;
         }
@@ -1482,6 +1489,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             )?;
         }
         if self.publish(memory, block)? {
+            let streaming = block.emits_non_temporal_store();
             let entries = self
                 .machine
                 .usage
@@ -1511,6 +1519,9 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             unsafe {
                 *CONTEXT.0.get() = context;
                 self.machine.vector_mode.enter();
+                if streaming {
+                    super::complete_non_temporal_stores();
+                }
                 context = *CONTEXT.0.get();
             }
             self.machine.usage.native_entries = entries;
@@ -1543,6 +1554,26 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             });
         }
         Ok(result)
+    }
+
+    fn check_target(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+        target: u64,
+    ) -> Result<(), NativeDispatchError> {
+        if target >= NATIVE_ADDRESS_LIMIT {
+            return Err(NativeDispatchError::InvalidTarget(target));
+        }
+        let interval = match self.target_interval.get() {
+            Some(interval) if interval.contains(target) => interval,
+            _ => initialized_target_interval(self.source, target)?,
+        };
+        // The memo proves only immutable source membership. Every target,
+        // including a different byte in the same interval, checks this owner's
+        // current logical-X backing. Failed scans/fetches publish no new memo.
+        memory.preflight_fetch_source(target, 1)?;
+        self.target_interval.set(Some(interval));
+        Ok(())
     }
 
     fn preflight_block(
@@ -1671,10 +1702,12 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         memory: &PausedNativeMemory<'_>,
         block: &MaterializedBlockPlan<'_, 'plan, 'image>,
     ) -> Result<bool, NativeDispatchError> {
-        if (block.policy().requests_native_packed_float_memory()
+        if ((block.policy().requests_native_packed_float_memory()
+            || block.policy().requests_native_streaming_stores())
             && !block.policy().requests_native_ymm_registers())
             || ((block.policy().requests_native_ymm_registers()
-                || block.policy().requests_native_packed_float_memory())
+                || block.policy().requests_native_packed_float_memory()
+                || block.policy().requests_native_streaming_stores())
                 && self.machine.vector_mode.features().is_none())
         {
             return Err(NativeDispatchError::InvalidState);
@@ -1694,6 +1727,16 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             return Err(NativeDispatchError::EmissionMismatch);
         }
         for record in block.instructions() {
+            if record.emitted_len() != 0
+                && matches!(
+                    record.instruction().code(),
+                    pentax_codegen::Code::VEX_Vmovntdq_m128_xmm
+                        | pentax_codegen::Code::VEX_Vmovntdq_m256_ymm
+                )
+                && !block.policy().requests_native_streaming_stores()
+            {
+                return Err(NativeDispatchError::InvalidState);
+            }
             if record.emitted_len() != 0
                 && record
                     .instruction()
@@ -1877,8 +1920,8 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             ExitKind::Jump { target } => self.target(memory, target)?,
             ExitKind::Call { target, return_pc } => {
                 let target = self.target(memory, target)?;
-                check_target(self.source, memory, target)?;
-                check_target(self.source, memory, return_pc)?;
+                self.check_target(memory, target)?;
+                self.check_target(memory, return_pc)?;
                 let rsp = self.machine.state.gpr[RSP]
                     .checked_sub(8)
                     .ok_or(NativeDispatchError::InvalidStack)?;
@@ -1911,7 +1954,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                         value: self.machine.state.gpr[RAX],
                     });
                 }
-                check_target(self.source, memory, target)?;
+                self.check_target(memory, target)?;
                 self.machine.state.gpr[RSP] = next_rsp;
                 target
             }
@@ -1942,7 +1985,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                     vector_args,
                     rflags: self.machine.state.rflags,
                 };
-                check_target(self.source, memory, token.next_pc)?;
+                self.check_target(memory, token.next_pc)?;
                 self.machine.phase = Phase::Syscall(token);
                 return Ok(NativeBlockStop::PreSyscall(token));
             }
@@ -1957,7 +2000,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 });
             }
         };
-        check_target(self.source, memory, target)?;
+        self.check_target(memory, target)?;
         self.machine.state.guest_pc = target;
         self.machine.phase = Phase::Ready;
         Ok(NativeBlockStop::Resume { guest_pc: target })
@@ -2154,25 +2197,76 @@ fn check_target(
     memory: &PausedNativeMemory<'_>,
     target: u64,
 ) -> Result<(), NativeDispatchError> {
+    initialized_target_interval(source, target)?;
+    memory.preflight_fetch_source(target, 1)?;
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TargetInterval {
+    start: u64,
+    end: u64,
+}
+impl TargetInterval {
+    fn contains(self, target: u64) -> bool {
+        self.start <= target && target < self.end
+    }
+}
+
+struct TargetSegment {
+    bias: u64,
+    vaddr: u64,
+    initialized_bytes: u64,
+    eligible: bool,
+}
+
+fn initialized_target_interval(
+    source: &MaterializedSource<'_, '_>,
+    target: u64,
+) -> Result<TargetInterval, NativeDispatchError> {
+    // Preserve the original scanner's lazy module/segment order. In
+    // particular, an earlier eligible overflow still precedes a later match;
+    // later malformed intervals are not visited after an earlier match.
+    scan_target_segments(
+        target,
+        source.source_plan().modules().iter().flat_map(|module| {
+            module
+                .runtime_plan()
+                .segments
+                .iter()
+                .map(move |segment| TargetSegment {
+                    bias: module.load_bias(),
+                    vaddr: segment.vaddr,
+                    initialized_bytes: segment.file_bytes.len() as u64,
+                    eligible: segment.flags.executable() && !segment.flags.writable(),
+                })
+        }),
+    )
+}
+
+fn scan_target_segments(
+    target: u64,
+    segments: impl IntoIterator<Item = TargetSegment>,
+) -> Result<TargetInterval, NativeDispatchError> {
     if target >= NATIVE_ADDRESS_LIMIT {
         return Err(NativeDispatchError::InvalidTarget(target));
     }
-    for module in source.source_plan().modules() {
-        for segment in &module.runtime_plan().segments {
-            if !segment.flags.executable() || segment.flags.writable() {
-                continue;
-            }
-            let start = segment
-                .vaddr
-                .checked_add(module.load_bias())
-                .ok_or(NativeDispatchError::InvalidTarget(target))?;
-            let end = start
-                .checked_add(segment.file_bytes.len() as u64)
-                .ok_or(NativeDispatchError::InvalidTarget(target))?;
-            if start <= target && target < end {
-                memory.preflight_fetch_source(target, 1)?;
-                return Ok(());
-            }
+    for segment in segments {
+        if !segment.eligible {
+            continue;
+        }
+        let start = segment
+            .vaddr
+            .checked_add(segment.bias)
+            .ok_or(NativeDispatchError::InvalidTarget(target))?;
+        let interval = TargetInterval {
+            start,
+            end: start
+                .checked_add(segment.initialized_bytes)
+                .ok_or(NativeDispatchError::InvalidTarget(target))?,
+        };
+        if interval.contains(target) {
+            return Ok(interval);
         }
     }
     Err(NativeDispatchError::InvalidTarget(target))

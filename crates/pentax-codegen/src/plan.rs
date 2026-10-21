@@ -92,6 +92,7 @@ pub(crate) fn plan_window<'plan, 'image>(
     let mut decoded = 0_u64;
     let mut memory_analyzer = MemoryAccessAnalyzer::default();
     let mut written_registers = 0_u16;
+    let mut emits_non_temporal_store = false;
     let exit;
     loop {
         if records.len() as u64 == limits.max_instructions || position == window.relocated.len() {
@@ -284,6 +285,7 @@ pub(crate) fn plan_window<'plan, 'image>(
             memory_analyzer.prepare(&instruction)
         };
         bytes.extend_from_slice(&encoded);
+        emits_non_temporal_store |= crate::policy::non_temporal_store_width(&instruction).is_some();
         encoded.clear();
         encoder.set_buffer(encoded);
         records.push(InstructionRecord {
@@ -323,6 +325,7 @@ pub(crate) fn plan_window<'plan, 'image>(
         exit,
         placement,
         policy: *policy,
+        emits_non_temporal_store,
         usage,
     })
 }

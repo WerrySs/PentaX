@@ -597,6 +597,23 @@ owner/source/stack/operand validation and native publication. Existing dispatch
 work charges remain conservative on hits. Aggregate hit/miss counters reveal
 reuse without exposing guest addresses or instructions.
 
+Within one borrowed source declaration, the stepper retains one successfully
+checked initialized executable segment interval. Targets inside that immutable
+interval skip repeated module/segment scanning, but still enforce numeric limits
+and fetch-check the exact target byte against the current owner's executable
+backing on every use. Misses preserve the original lazy scanner and its error
+order. The memo carries no live permission or operand value, starts empty after
+construction or machine reattachment, and does not change conservative work
+charges, source-byte admission or guest execution limits.
+
+The worker requests the separate two-form native streaming-store profile only
+from its engine's admitted full-YMM mode. Exact owned write bounds and alignment
+are checked before entry. Actual emitted legacy and VEX non-temporal stores are
+ordered with a host MFENCE before Rust reads or subsequent service effects; this
+also retains a compiler memory barrier. There is no guest-limit increase or
+claim of atomic vector writes. The default software fallback remains available
+when the admitted native vector mode is absent.
+
 Prepared image execution uses a bounded 2 MiB native code cache with 4096 fixed
 512-byte slots, each including a private trailer cell. Guest PC selects a slot;
 the pure planner re-encodes for that exact address. A reuse requires previously

@@ -53,7 +53,7 @@ use crate::native_memory::{
 use crate::{OriginalFixtureResult, PlatformError};
 use pentax_codegen::{
     BlockLimits, BlockPlan, CachePlacement, ConditionCode, ControlTarget, CpuidFeature, ExitKind,
-    Register, TranslationPolicy, plan_block,
+    MemoryAccessAnalyzer, MemoryAccessKind, Register, TranslationPolicy, plan_block,
 };
 use pentax_linker::{ModuleInput, SymbolicLimits, SymbolicLinkPlan, plan_symbolic};
 use pentax_loader::open_executable;
@@ -911,10 +911,12 @@ fn publish_block_with_mode(
 ) -> Result<(), PlatformError> {
     // The closed diagnostic wrapper above always selects the SSE2 mode.
     // A declared vector request cannot override that immutable entry/tail pair.
-    if (plan.policy().requests_native_packed_float_memory()
+    if ((plan.policy().requests_native_packed_float_memory()
+        || plan.policy().requests_native_streaming_stores())
         && !plan.policy().requests_native_ymm_registers())
         || ((plan.policy().requests_native_ymm_registers()
-            || plan.policy().requests_native_packed_float_memory())
+            || plan.policy().requests_native_packed_float_memory()
+            || plan.policy().requests_native_streaming_stores())
             && mode.features().is_none())
     {
         return Err(PlatformError::UnsupportedHostFeature {
@@ -926,6 +928,16 @@ fn publish_block_with_mode(
     for record in plan.instructions() {
         if record.emitted_len() == 0 {
             continue;
+        }
+        if matches!(
+            record.instruction().code(),
+            pentax_codegen::Code::VEX_Vmovntdq_m128_xmm
+                | pentax_codegen::Code::VEX_Vmovntdq_m256_ymm
+        ) && !plan.policy().requests_native_streaming_stores()
+        {
+            return Err(PlatformError::UnsupportedHostFeature {
+                feature: "native streaming store profile",
+            });
         }
         for feature in record.instruction().cpuid_features() {
             if !mode.supports(*feature) {
@@ -1212,6 +1224,64 @@ impl Drop for DispatchGuard {
     }
 }
 
+/// Order actual emitted streaming writes before any subsequent Rust load.
+fn complete_non_temporal_stores() {
+    // SAFETY: MFENCE is part of the mandatory x86-64 SSE2 baseline. Its default
+    // inline-assembly memory effects also prevent compiler reordering across
+    // this boundary. Do not add nomem/readonly: subsequent Rust loads must wait
+    // for the actual guest stores, including legacy non-temporal instructions.
+    unsafe { std::arch::asm!("mfence", options(nostack, preserves_flags)) };
+}
+
+fn preflight_diagnostic_streaming_memory(
+    space: &mut NativeAddressSpace,
+    plan: &BlockPlan<'_, '_>,
+) -> Result<(), PlatformError> {
+    if !plan.emits_non_temporal_store() {
+        return Ok(());
+    }
+    // SAFETY: run_one_block's caller holds DispatchGuard. No bridge call is in
+    // flight; only current guest address registers are observed here.
+    let gpr = unsafe { (*CONTEXT.0.get()).gpr };
+    let memory = space.pause().map_err(native)?;
+    let mut analyzer = MemoryAccessAnalyzer::default();
+    let mut written = 0_u16;
+    for record in plan.instructions().iter().filter(|r| r.emitted_len() != 0) {
+        let accesses =
+            analyzer
+                .analyze(record, &gpr)
+                .map_err(|_| PlatformError::NativeDispatchFailed {
+                    stage: "streaming-store footprint",
+                })?;
+        let dependencies = accesses.register_dependencies();
+        if dependencies.address & written != 0 {
+            return Err(PlatformError::NativeDispatchFailed {
+                stage: "streaming-store address dependency",
+            });
+        }
+        written |= dependencies.written;
+        for access in accesses.accesses() {
+            if matches!(
+                access.kind,
+                MemoryAccessKind::Read | MemoryAccessKind::ReadWrite
+            ) {
+                memory
+                    .preflight_read(access.address, access.size)
+                    .map_err(native)?;
+            }
+            if matches!(
+                access.kind,
+                MemoryAccessKind::Write | MemoryAccessKind::ReadWrite
+            ) {
+                memory
+                    .preflight_write(access.address, access.size)
+                    .map_err(native)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Run one block: publish it, enter the bridge, and return the captured exit.
 /// On return the shared [`CONTEXT`] holds the post-block guest state.
 fn run_one_block(
@@ -1221,6 +1291,8 @@ fn run_one_block(
     guest_pc: u64,
 ) -> Result<(), PlatformError> {
     publish_block(cache, space, plan, guest_pc)?;
+    preflight_diagnostic_streaming_memory(space, plan)?;
+    let streaming = plan.emits_non_temporal_store();
     // SAFETY: We hold the exclusive DispatchGuard, so no other access to
     // CONTEXT races this. The cache body at CONTEXT.rip was attested above:
     // its ordinary bytes equal the planner's emission and its only added tail
@@ -1232,6 +1304,9 @@ fn run_one_block(
         let ctx = &mut *CONTEXT.0.get();
         ctx.rip = cache.address();
         pentax_block_enter();
+        if streaming {
+            complete_non_temporal_stores();
+        }
     }
     Ok(())
 }

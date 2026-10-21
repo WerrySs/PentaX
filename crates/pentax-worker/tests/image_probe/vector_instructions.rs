@@ -1286,8 +1286,16 @@ fn native_non_temporal_vector_stores_write_exact_width_and_preserve_the_source()
         let (status, fields, text) = probe(&input(&code, false));
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42");
-        assert_eq!(fields["vector_ops"], "3");
-        assert_eq!(fields["vector_bytes"], (64 + size).to_string());
+        assert_modeled_vector_operations(&fields, ["3", "2", "2"]);
+        assert_eq!(
+            fields["vector_bytes"],
+            if fields["native_ymm_mode"] == "sse2" {
+                64 + size
+            } else {
+                64
+            }
+            .to_string()
+        );
     }
 }
 

@@ -55,6 +55,7 @@ pub struct TranslationPolicy {
     split_partial_windows: bool,
     native_ymm_registers: bool,
     native_packed_float_memory: bool,
+    native_streaming_stores: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -65,6 +66,7 @@ impl TranslationPolicy {
             split_partial_windows: false,
             native_ymm_registers: false,
             native_packed_float_memory: false,
+            native_streaming_stores: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -90,6 +92,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_packed_float_memory(self) -> bool {
         self.native_packed_float_memory
+    }
+    /// Separately request only exact VEX.128/256 MOVNTDQ stores. The runtime
+    /// must prove full-YMM/AVX admission, live aligned writes and fence actual
+    /// emitted non-temporal bodies before exposing their effects.
+    pub const fn with_native_streaming_stores(mut self) -> Self {
+        self.native_streaming_stores = true;
+        self
+    }
+    pub const fn requests_native_streaming_stores(self) -> bool {
+        self.native_streaming_stores
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -214,9 +226,13 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_packed_float_memory()
         && native_packed_float_memory_width(instruction).is_some();
+    let vex_streaming = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_streaming_stores()
+        && native_streaming_store_width(instruction).is_some();
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
-        && (native_ymm_registers(instruction) || vex_memory);
+        && (native_ymm_registers(instruction) || vex_memory || vex_streaming);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -233,7 +249,8 @@ pub(crate) fn ordinary(
     }
     if vex_vector {
         // Exact gates prove either same-width registers only, or two such
-        // registers plus the separately requested ordinary64-bit read. No other
+        // registers plus the separately requested ordinary64-bit read, or one
+        // vector source plus a separately requested exact streaming write. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -284,6 +301,55 @@ pub(crate) fn ordinary(
         }
     }
     Ok(())
+}
+
+/// Exact ordinary64-bit write shape; never a live address/permission proof.
+pub(crate) fn native_streaming_store_width(instruction: &Instruction) -> Option<usize> {
+    let width = match instruction.code() {
+        Code::VEX_Vmovntdq_m128_xmm => 16,
+        Code::VEX_Vmovntdq_m256_ymm => 32,
+        _ => return None,
+    };
+    let source = instruction.op1_register();
+    if instruction.op_code().encoding() != EncodingKind::VEX
+        || instruction.code_size() != iced_x86::CodeSize::Code64
+        || instruction.op_count() != 2
+        || instruction.op0_kind() != OpKind::Memory
+        || instruction.op1_kind() != OpKind::Register
+        || source.size() != width
+        || !(if width == 16 {
+            source.is_xmm() && source <= Register::XMM15
+        } else {
+            source.is_ymm() && source <= Register::YMM15
+        })
+        || instruction.memory_size().size() != width
+        || instruction.is_vsib()
+        || prefixes(instruction).is_err()
+        || instruction.has_segment_prefix()
+    {
+        return None;
+    }
+    let base = instruction.memory_base();
+    let index = instruction.memory_index();
+    if !(base == Register::None || base == Register::RIP || base.is_gpr64())
+        || !(index == Register::None || index.is_gpr64())
+        || !matches!(instruction.memory_index_scale(), 1 | 2 | 4 | 8)
+        || (base == Register::None
+            && index == Register::None
+            && instruction.memory_displ_size() != 8)
+    {
+        return None;
+    }
+    Some(width)
+}
+
+/// Exact emitted NT stores need alignment and a runtime store-completion fence.
+/// Legacy authority is unchanged; other streaming/vector families stay closed.
+pub(crate) fn non_temporal_store_width(instruction: &Instruction) -> Option<usize> {
+    match instruction.code() {
+        Code::Movntdq_m128_xmm | Code::Movntps_m128_xmm | Code::Movntpd_m128_xmm => Some(16),
+        _ => native_streaming_store_width(instruction),
+    }
 }
 
 /// Exact decoded read shape shared with the immutable footprint evaluator.

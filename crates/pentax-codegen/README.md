@@ -214,6 +214,32 @@ counter checks. Concurrent bounded diagnostic drains are shared with the prior
 measurement helper. Timings include process startup/teardown; no title speedup
 or whole-run instruction-frequency inference is made.
 
+`with_native_streaming_stores()` separately requests exactly VEX.128/256
+VMOVNTDQ memory destinations, with XMM0..15/YMM0..15 sources and ordinary 64-bit
+addresses. The full-YMM request and independently admitted actual AVX are also
+mandatory; neither width requires AVX2. Source registers, including upper bits
+of a VEX.128 store's source, flags and MXCSR remain unchanged. Other vector
+writes, streaming families, EVEX, VSIB, segment overrides and addr32 stay closed.
+
+Every execution checks the complete owned writable 16/32-byte span and its
+architectural 16/32-byte alignment. The size exception permits only the exact
+unconditional VMOVNTDQ Write32 footprint. Existing legacy MOVNTDQ/MOVNTPS/MOVNTPD
+stores now receive explicit alignment checks too. Immutable plans retain one
+emitted-body flag; a merely decoded, nonemitted store does not set it. Both native
+return paths conditionally execute a host MFENCE before Rust reads or service
+publication, covering the admitted legacy stores as well. Its inline assembly
+retains compiler memory effects. This does not make a vector store atomic.
+
+The original `native_streaming_stores_publish_before_rust_reads_and_preserve_all_source_bits`
+consumer checks both widths and all sixteen source vectors, immediately reads
+the result through a mediated memory operation without a guest fence, and
+checks canaries, flags, status and service continuity. Newly native stores move
+from mediated vector counters to native instruction and checked memory counters.
+The ignored 50,000-iteration comparison requires independently verified
+`PENTAX_STREAMING_STORES_BASELINE_WORKER` and `PENTAX_TEST_WORKER` artifacts. Its
+elapsed times also include the executable-source interval memo and process
+startup/teardown; no isolated NT-store or game speedup is inferred.
+
 Consecutive admitted register operations can share the existing finite native
 block. Every live source/cache/owner/operand/stack check remains in place, with
 the existing 256-instruction/4096-byte default block limits. The complete joined

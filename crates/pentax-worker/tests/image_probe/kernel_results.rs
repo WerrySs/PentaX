@@ -73,6 +73,8 @@ mod multiply_add_words;
 mod native_packed_float;
 #[path = "native_packed_float_memory.rs"]
 mod native_packed_float_memory;
+#[path = "native_streaming_stores.rs"]
+mod native_streaming_stores;
 #[path = "native_vector_register_bits.rs"]
 mod native_vector_register_bits;
 #[path = "native_ymm.rs"]

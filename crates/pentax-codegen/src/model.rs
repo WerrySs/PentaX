@@ -243,6 +243,7 @@ pub struct BlockPlan<'plan, 'image> {
     pub(crate) exit: BlockExit,
     pub(crate) placement: CachePlacement,
     pub(crate) policy: TranslationPolicy,
+    pub(crate) emits_non_temporal_store: bool,
     pub(crate) usage: BlockUsage,
 }
 impl fmt::Debug for BlockPlan<'_, '_> {
@@ -287,6 +288,12 @@ impl<'plan, 'image> BlockPlan<'plan, 'image> {
     }
     pub const fn policy(&self) -> TranslationPolicy {
         self.policy
+    }
+    /// Immutable emitted-body classification only, never memory authority.
+    /// An actual native consumer must fence these stores before publishing
+    /// completion; a nonemitted terminating store does not set this flag.
+    pub const fn emits_non_temporal_store(&self) -> bool {
+        self.emits_non_temporal_store
     }
     pub const fn usage(&self) -> BlockUsage {
         self.usage

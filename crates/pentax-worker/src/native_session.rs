@@ -808,7 +808,8 @@ fn execute_epoch<'plan, 'image>(
     if native_ymm_features.is_some() {
         policy = policy
             .with_native_ymm_registers()
-            .with_native_packed_float_memory();
+            .with_native_packed_float_memory()
+            .with_native_streaming_stores();
     }
     let plans = plan_cache::PlanCache::new(
         source,

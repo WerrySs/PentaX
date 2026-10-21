@@ -135,6 +135,12 @@ jobs:
       - name: Test admitted vector register copy and bit operations
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_vector_register_bits_tests:: -- --test-threads=1
+      - name: Test immutable branch metadata with live target checks
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::target_source_memo_tests:: -- --test-threads=1
+      - name: Test aligned native streaming stores and pre-entry refusals
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::native_streaming_stores_tests:: -- --test-threads=1
       - name: Test original native packed floating-point continuations
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
@@ -150,6 +156,16 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_register_bits:: -- --test-threads=1
+      - name: Test streaming-store publication before mediated reads
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_streaming_stores:: -- --test-threads=1
+      - name: Test existing non-temporal store consumers
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe native_non_temporal_vector_stores_write_exact_width_and_preserve_the_source -- --test-threads=1
       - name: Test pair shuffles after register copy promotion
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

@@ -40,6 +40,7 @@ pub(super) fn classify(error: &D) -> &'static str {
             MemoryAccessError::TooManyAccesses => "footprint-access-count",
             MemoryAccessError::InvalidRange => "footprint-range",
             MemoryAccessError::UnalignedAtomic => "footprint-atomic-alignment",
+            MemoryAccessError::UnalignedNonTemporal => "footprint-nt-alignment",
         },
         D::MemoryIsolationRequired => "memory-isolation",
         D::UnsupportedSegmentInstruction => "segment-form",
@@ -95,6 +96,10 @@ mod tests {
             (
                 MemoryAccessError::UnalignedAtomic,
                 "footprint-atomic-alignment",
+            ),
+            (
+                MemoryAccessError::UnalignedNonTemporal,
+                "footprint-nt-alignment",
             ),
         ] {
             assert_eq!(

@@ -156,6 +156,8 @@ pub enum MemoryAccessError {
     InvalidRange,
     /// PentaX policy avoids split locks; this is not a guest alignment fault.
     UnalignedAtomic,
+    /// Architectural NT vector-store alignment, checked before native entry.
+    UnalignedNonTemporal,
 }
 impl std::fmt::Display for MemoryAccessError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -263,7 +265,11 @@ impl MemoryAccessAnalyzer {
                 && info.memory_count == 1
                 && used.access() == OpAccess::Read
                 && crate::policy::native_packed_float_memory_width(instruction) == Some(32);
-            if size == 0 || (size > 16 && !packed_read) {
+            let streaming_write = size == 32
+                && info.memory_count == 1
+                && used.access() == OpAccess::Write
+                && crate::policy::native_streaming_store_width(instruction) == Some(32);
+            if size == 0 || (size > 16 && !packed_read && !streaming_write) {
                 return Err(MemoryAccessError::UnsupportedSize);
             }
             let kind = match used.access() {
@@ -293,6 +299,17 @@ impl MemoryAccessAnalyzer {
                 }
                 if !address.is_multiple_of(size) {
                     return Err(MemoryAccessError::UnalignedAtomic);
+                }
+            }
+            if let Some(alignment) = crate::policy::non_temporal_store_width(instruction) {
+                if info.memory_count != 1
+                    || size != alignment as u64
+                    || kind != MemoryAccessKind::Write
+                {
+                    return Err(MemoryAccessError::UnsupportedAddress);
+                }
+                if !address.is_multiple_of(alignment as u64) {
+                    return Err(MemoryAccessError::UnalignedNonTemporal);
                 }
             }
             if address
