@@ -187,6 +187,7 @@ pub(super) struct NativeSessionProgress {
     pub libc_builtins: pentax_core::process::hle::LibcBuiltinUsage,
     pub libc_builtin_bound_entries: u64,
     pub private_samples_status: Option<&'static str>,
+    pub private_console_status: Option<&'static str>,
     window: frame_bridge::Observations,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
@@ -215,8 +216,13 @@ impl NativeSessionProgress {
             .map_or_else(String::new, |status| {
                 format!("\tprivate_samples_status={status}")
             });
+        let console = self
+            .private_console_status
+            .map_or_else(String::new, |status| {
+                format!("\tprivate_console_status={status}")
+            });
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}{console}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),

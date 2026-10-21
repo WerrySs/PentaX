@@ -1,5 +1,20 @@
 # Native diagnostic worker
 
+`probe-entry --private-console <fresh-file>` explicitly creates a new private
+binary file for guest-console output already retained by the kernel. It is
+written only after the execution runner returns, including a typed guest stop,
+and never consumes output or reads guest memory. The existing file cannot be
+replaced. Keep this potentially title-specific payload private; it is never
+copied to the worker's public stdout/stderr protocol.
+
+The file contains `PXCNSL01`, followed by three little-endian u32 byte lengths
+and the raw suffixes in stdout, stderr, stdin-compatibility order. Each suffix
+is at most 4,096 bytes; the complete file is at most 12,308 bytes. Bytes are not
+decoded, escaped or padded. An explicit request adds only final
+`private_console_status=written|unavailable|write-failed`. Preparation can leave
+the file unavailable, and a failed write can leave a partial file; neither
+replaces the guest result or grants execution/presentation authority.
+
 `probe-entry --private-samples <fresh-file>` explicitly creates a new host-only
 diagnostic file. It never replaces an existing file. After execution stops,
 it can contain at most 64 recent periodic samples as module-relative offsets,

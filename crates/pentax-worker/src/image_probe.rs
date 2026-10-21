@@ -20,6 +20,7 @@ use std::os::windows::fs::OpenOptionsExt;
 mod backing;
 mod data_files;
 mod dispatch_diagnostics;
+mod private_console;
 
 pub(super) enum ProbeError {
     Input(&'static str),
@@ -292,6 +293,7 @@ fn read_bounded(file: &mut File, declared: u64, remaining: u64) -> Result<Vec<u8
 
 struct Intake {
     private_samples: Option<File>,
+    private_console: Option<File>,
     save_directory: Option<File>,
     backing_directory: Option<backing::BackingDirectory>,
     system: pentax_kernel::SystemConfig,
@@ -310,7 +312,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(8)
+                .saturating_add(9)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -324,6 +326,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--present-window"
                     && pair[0] != "--libc-memory-builtins"
                     && pair[0] != "--private-samples"
+                    && pair[0] != "--private-console"
             })
             .count()
             > limits.max_images
@@ -348,6 +351,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--present-window"
                 && pair[0] != "--libc-memory-builtins"
                 && pair[0] != "--private-samples"
+                && pair[0] != "--private-console"
         })
         || args
             .chunks_exact(2)
@@ -390,6 +394,11 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         || args
             .chunks_exact(2)
             .filter(|pair| pair[0] == "--private-samples")
+            .count()
+            > 1
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--private-console")
             .count()
             > 1
         || args.chunks_exact(2).any(|pair| {
@@ -509,6 +518,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             || pair[0] == "--present-window"
             || pair[0] == "--libc-memory-builtins"
             || pair[0] == "--private-samples"
+            || pair[0] == "--private-console"
         {
             continue;
         }
@@ -622,8 +632,14 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             Ok(file)
         })
         .transpose()?;
+    let private_console = args
+        .chunks_exact(2)
+        .find(|pair| pair[0] == "--private-console")
+        .map(|pair| private_console::open(&pair[1]))
+        .transpose()?;
     Ok(Intake {
         private_samples,
+        private_console,
         save_directory,
         backing_directory,
         system,
@@ -642,9 +658,11 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
     let mut progress = NativeSessionProgress::default();
     let mut unavailable_functions = None;
     let mut private_samples_file = None;
+    let mut private_console_file = None;
     let result = (|| {
         let mut intake = intake(args, &limits)?;
         private_samples_file = intake.private_samples.take();
+        private_console_file = intake.private_console.take();
         let present_window = args
             .chunks_exact(2)
             .any(|pair| pair[0] == "--present-window" && pair[1] == "yes");
@@ -813,6 +831,16 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                     &execution,
                     &mut progress,
                 );
+                if let Some(file) = &mut private_console_file {
+                    // The guest has stopped. Borrow only the kernel's already
+                    // retained output; never consume it or read guest memory.
+                    progress.private_console_status =
+                        Some(if private_console::capture(file, session).is_ok() {
+                            "written"
+                        } else {
+                            "write-failed"
+                        });
+                }
                 // Observe once after execution, including a typed refusal.
                 // Scanning owner tables is outside the per-block hot path.
                 progress.kernel_handles = Some(session.kernel_handle_usage());
@@ -822,6 +850,10 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
         )
         .map_err(ProbeError::Admission)
     })();
+    if private_console_file.is_some() && progress.private_console_status.is_none() {
+        // Preparation may fail before a session can provide retained output.
+        progress.private_console_status = Some("unavailable");
+    }
     if let Some(mut file) = private_samples_file {
         // Optional output cannot replace the actual guest result or its typed
         // stop. No file I/O occurs while guest execution is active.
