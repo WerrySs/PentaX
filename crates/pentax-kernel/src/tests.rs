@@ -57,6 +57,8 @@ mod system_display;
 mod system_events;
 #[path = "tests/user.rs"]
 mod user;
+#[path = "tests/user_privacy.rs"]
+mod user_privacy;
 
 #[path = "tests/pthread_affinity.rs"]
 mod pthread_affinity;

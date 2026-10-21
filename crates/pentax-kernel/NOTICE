@@ -644,3 +644,28 @@ legacy path queues additional copies. PentaX modifications 2026: exact live
 port-generation subscriptions, allocation-free preadmitted trigger/close tokens,
 bounded default coalescing, and output-atomic delivery. Only actual consumer
 observations trigger these events; no host refresh or presentation is invented.
+
+The stateless WS1 user getter additionally adapts PUBLIC AnyPS5, by the AnyPS5
+contributors, revision 80565c59424190cd0f660f8097945443a0017c42:
+  core/libs/prx/libSceUserService/Export.cpp:173-179,
+    Git blob 7a4c11d33eabba6985932131bf1ddeec3466ad91
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/core/libs/prx/libSceUserService/Export.cpp
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/README.md
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/LICENSE
+The repository explicitly selects GPL-2.0-only; the retained project GPLv2 text
+applies. PentaX modifications,
+2026: replace the source's direct int32 pointer store with a precharged checked
+four-byte transaction, retaining its ignored signed user ID, normal null-output
+0x80960005 result, zero output and int32 zero return. Initialization, login
+events, configured user identity and host privacy state remain independent.
+
+The one libSceUserService module 1.1 / libSceUserServicePlatformPrivacyWs1 library 1 binding
+is an explicit PentaX compatibility identity. The public function name is
+sceUserServiceGetPlatformPrivacyWs1 and its NID is D-CzAxQL0XI. AnyPS5 supplies
+the two-argument body and ABI; no exact namespace registration is attributed to
+that source. PUBLIC KytyPS5/KytyPS5 f186b35706ddbc3faf5513f326e2335d224802f7
+src/loader/runtimeLinker.cpp:1237-1327 and src/loader/symbolDatabase.cpp:61-74
+show its NID/type fallback across scopes. PentaX retains only the single
+qualified FUNC identity, appends it after every existing marker, and keeps its
+resolver's exact module/library/version checks. It introduces no generic
+fallback, host query, new quota or fabricated guest result on backing failure.

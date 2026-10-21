@@ -367,11 +367,11 @@ host scheduling or access online accounts. Callback execution, title-secret setu
 and unreviewed network APIs remain unavailable. Exact NpManager/libSceNpManager
 spellings retain module 1.1/library 1 checks and prior marker indices.
 
-User services share one configured local guest profile. Global `[user]` settings
+Identity and accessibility user services share one configured local guest profile. Global `[user]` settings
 select its nonnegative 32-bit signed ID and 1 through 63-byte UTF-8 name; defaults
 are ID 1 and `PentaX`. Fixed validated name storage keeps startup limits copyable
 without allocating on runtime limit reads. Profile changes are refused after an
-observable user-service result, while repeated application of the same profile
+observable result from these services, while repeated application of the same profile
 is harmless. No host account lookup or online entitlement is involved.
 
 Both pinned initializers ignore caller arguments and retain an idempotent
@@ -390,9 +390,20 @@ checks retain each source function's order and specific int32 error code; fatal
 source null cases remain typed refusals. The 40-byte game-preset getter honors
 the requested partial clear while always writing its full eight-byte size header,
 preserving every other byte. Read/output/scratch/work admission is checked before
-publication. The unspecified platform-privacy stub is not registered. All reviewed
-UserService/libSceUserService scopes use exact module 1.1/library 1 versions and
+publication. Reviewed UserService/libSceUserService scopes use exact module 1.1/library 1 versions and
 preserve existing service markers.
+
+`sceUserServiceGetPlatformPrivacyWs1` implements the public AnyPS5 two-argument
+getter: the signed int32 user ID is ignored, null output returns the normal
+`0x80960005` source error, and nonnull output receives exactly four zero bytes.
+Checked full-span output admission precedes the store; invalid backing and
+resource limits remain typed refusals. The getter works independently of
+initialization and login delivery and does not freeze the configured profile.
+It reports the reference's local zero value without consulting host privacy or
+online accounts. Only `libSceUserService` module 1.1 with
+`libSceUserServicePlatformPrivacyWs1` library 1 and NID `D-CzAxQL0XI` is bound.
+This explicit PentaX compatibility identity retains exact namespace/version/type
+checks. Existing markers remain fixed and no general NID fallback is enabled.
 
 `AppContentInitialize` ignores its source-reserved input, clears an optional
 40-byte boot object and queues one entitlement-update notification on every

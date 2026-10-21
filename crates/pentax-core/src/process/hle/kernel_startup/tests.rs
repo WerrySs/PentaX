@@ -314,6 +314,7 @@ mod mutex_wait;
 mod process_parameters;
 mod rwlock_wait;
 mod thread_context;
+mod user_privacy;
 
 fn with_plan(
     limits: KernelStartupLimits,
@@ -406,7 +407,7 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
                 plan.kernel_bindings(),
                 plan.hle.provider_bindings()
             ),
-            (1316, 1, 1)
+            (1317, 1, 1)
         );
         assert_eq!(
             (

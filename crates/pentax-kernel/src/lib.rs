@@ -63,6 +63,7 @@ mod time;
 mod trophy2;
 mod uds;
 mod user;
+mod user_privacy;
 
 pub use application_heap::ApplicationHeapCallbacks;
 pub use budget::{Limits, Usage};
@@ -1124,6 +1125,7 @@ impl Kernel {
             | NpCheckReachability
             | NpPollAsync
             | NpCheckPremium => self.np.invoke(service, args, guest, &mut self.budget),
+            UserGetPlatformPrivacyWs1 => user_privacy::invoke(args, guest, &mut self.budget),
             UserInitialize
             | UserInitialize2
             | UserGetInitial

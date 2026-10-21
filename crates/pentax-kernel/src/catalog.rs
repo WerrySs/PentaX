@@ -622,6 +622,7 @@ pub enum Service {
     AudioOut2PortDestroy,
     AudioOut2PortGetState,
     AudioOut2PortSetAttributes,
+    UserGetPlatformPrivacyWs1,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1641,6 +1642,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < USER_PRIVACY_REGISTRATIONS.len() {
+        entries[output] = USER_PRIVACY_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1732,6 +1739,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + AUDIO_OUT2_LIFECYCLE_REGISTRATIONS.len()
             + POSIX_SELF_REGISTRATIONS.len()
             + POSIX_USLEEP_REGISTRATIONS.len()
+            + USER_PRIVACY_REGISTRATIONS.len()
     },
 >();
 
@@ -1787,6 +1795,10 @@ use posix_self::POSIX_SELF_REGISTRATIONS;
 #[path = "catalog/posix_usleep.rs"]
 mod posix_usleep;
 use posix_usleep::POSIX_USLEEP_REGISTRATIONS;
+
+#[path = "catalog/user_privacy.rs"]
+mod user_privacy;
+use user_privacy::USER_PRIVACY_REGISTRATIONS;
 
 // Pinned 209dffe libNet.cpp:1596..1737; only Initialize and List have a
 // separately observed full-prefix import. No mixed or inferred aliases.

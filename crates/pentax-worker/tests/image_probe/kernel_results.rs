@@ -84,6 +84,8 @@ mod usleep_wait;
 
 #[path = "thread_priority.rs"]
 mod thread_priority;
+#[path = "user_privacy_ws1.rs"]
+mod user_privacy_ws1;
 
 #[path = "system_notice.rs"]
 mod system_notice;

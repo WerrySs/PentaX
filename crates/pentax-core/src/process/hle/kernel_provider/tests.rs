@@ -28,6 +28,8 @@ mod audio_out2;
 mod posix_self;
 #[path = "posix_usleep_tests.rs"]
 mod posix_usleep;
+#[path = "user_privacy_tests.rs"]
+mod user_privacy;
 
 const OLD_REGISTRATIONS: usize = 862;
 const SCOPES: [(&[u8], &[u8]); 4] = [

@@ -94,7 +94,7 @@ const MODULES: [(&str, (u16, u16)); 68] = [
     ("AudioOut", (1, 1)),
     ("libSceAudioOut", (1, 1)),
 ];
-const LIBRARIES: [(&str, u16); 69] = [
+const LIBRARIES: [(&str, u16); 70] = [
     ("libkernel", 1),
     ("Posix", 1),
     ("libScePosix", 1),
@@ -164,6 +164,7 @@ const LIBRARIES: [(&str, u16); 69] = [
     ("libSceAcm", 1),
     ("AudioOut2", 1),
     ("libSceAudioOut2", 1),
+    ("libSceUserServicePlatformPrivacyWs1", 1),
 ];
 // Canonical selectors use one to three radix64 digits for their actual u16 ID.
 // Namespace count, marker count and source-image bytes remain separate limits.
@@ -180,7 +181,7 @@ pub(super) const MAX_IMAGE_BYTES: u64 =
 const MAX_MAPPED_BYTES: u64 = METADATA_RVA + MAX_METADATA_BYTES;
 const PROGRAM_HEADERS: usize = 4;
 const PROGRAM_HEADER_SIZE: usize = 56;
-// All 133 admitted namespace strings may be distinct and 255 bytes long;
+// All admitted namespace strings may be distinct and 255 bytes long;
 // each qualified NID can use two three-digit selectors and a trailing NUL.
 const MAX_STRINGS_BYTES: usize =
     1 + (MODULES.len() + LIBRARIES.len()) * 256 + (MAX_REGISTRATIONS + 2) * (NID_TOKEN_LEN + 9);

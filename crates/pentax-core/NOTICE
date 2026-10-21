@@ -409,3 +409,14 @@ body only logs and returns zero; this bounded PentaX registration does not infer
 a callback trigger, invocation ABI or event delivery. No guest/host callback
 pointer is dereferenced or executed. No external allocator or official callback
 ABI is inferred. Existing markers and immutable default addresses are unchanged.
+
+The generated kernel provider additionally carries one finite PentaX
+compatibility identity for sceUserServiceGetPlatformPrivacyWs1, D-CzAxQL0XI:
+libSceUserService module 1.1 / libSceUserServicePlatformPrivacyWs1 library 1,
+FUNC with two GP arguments. The kernel's checked four-byte body adapts PUBLIC
+AnyPS5 revision 80565c59424190cd0f660f8097945443a0017c42 Export.cpp, Git blob
+7a4c11d33eabba6985932131bf1ddeec3466ad91, under GPL-2.0-only; see pentax-kernel/NOTICE
+for its exact public sources and scope qualification. PentaX appends the marker
+and library descriptor without moving existing marker IDs, code sites or objects.
+Current source/owner/permissions and captured caller checks remain mandatory;
+no wildcard namespace or NID-only resolution is introduced.
