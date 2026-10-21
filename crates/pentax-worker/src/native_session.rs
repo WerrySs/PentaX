@@ -51,6 +51,8 @@ pub(super) struct NativeSessionLimits {
     pub progress_interval_blocks: u64,
     /// Explicitly selected supplied libc input, never a guessed module index.
     pub libc_memory_builtins: Option<usize>,
+    /// Explicit host-only diagnostic output, never enabled by guest input.
+    pub private_samples: bool,
 }
 impl Default for NativeSessionLimits {
     fn default() -> Self {
@@ -66,6 +68,7 @@ impl Default for NativeSessionLimits {
             report_progress: false,
             progress_interval_blocks: 2048,
             libc_memory_builtins: None,
+            private_samples: false,
         }
     }
 }
@@ -183,6 +186,7 @@ pub(super) struct NativeSessionProgress {
     pub audio_out2: Option<pentax_kernel::AudioOut2Usage>,
     pub libc_builtins: pentax_core::process::hle::LibcBuiltinUsage,
     pub libc_builtin_bound_entries: u64,
+    pub private_samples_status: Option<&'static str>,
     window: frame_bridge::Observations,
     stop_diagnostics: StopDiagnostics,
     dispatch_exit: Option<Mnemonic>,
@@ -200,10 +204,19 @@ enum NativeYmmMode {
 }
 
 impl NativeSessionProgress {
+    pub fn private_samples_bytes(&self) -> Option<&[u8]> {
+        self.profile.private_samples_bytes()
+    }
+
     /// Aggregate observations only: no guest addresses, identifiers or data.
     pub fn protocol_fields(&self) -> String {
+        let private = self
+            .private_samples_status
+            .map_or_else(String::new, |status| {
+                format!("\tprivate_samples_status={status}")
+            });
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
@@ -524,6 +537,9 @@ fn run_prepared_consumer_inner<'plan, 'image>(
     mut consumer: Option<&mut frame_bridge::FrameBridge<'_>>,
 ) -> Result<NativeSessionReport, NativeSessionError> {
     *progress = NativeSessionProgress::default();
+    if limits.private_samples {
+        progress.profile.enable_private_samples();
+    }
     let mut initial = initial;
     let mut main_thread = None;
     let source = proof.materialized_source();
@@ -630,6 +646,11 @@ fn run_prepared_consumer_inner<'plan, 'image>(
             progress,
             consumer.as_deref_mut(),
         );
+        // Normalize while the exact final epoch plan is still borrowed. An
+        // intermediate dynamic-module transition must not leave a stale file.
+        if limits.private_samples && !matches!(&outcome, Ok(Some(_))) {
+            progress.profile.capture_private_samples(active);
+        }
         progress.libc_builtins = session.libc_builtin_usage();
         // Preserve a terminal queue observation before propagating typed stops.
         // This bounded snapshot never probes readiness or changes scheduling.

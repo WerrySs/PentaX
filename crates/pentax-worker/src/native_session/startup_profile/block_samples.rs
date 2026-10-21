@@ -20,6 +20,8 @@ use pentax_codegen::{
 use pentax_linker::SourceIdentity;
 use std::fmt::{self, Write};
 
+mod private_samples;
+
 const CAPACITY: usize = 64;
 const EXIT_CAPACITY: usize = 64;
 const MAX_WORK: u64 = 64 * 1024 * 1024;
@@ -54,6 +56,7 @@ struct Key {
 #[derive(Clone, Copy)]
 struct Entry {
     key: Key,
+    is_main: bool,
     planned: Option<Code>,
     frequency: u8,
 }
@@ -76,6 +79,7 @@ struct SampleRecord<'a> {
 
 pub(in crate::native_session) struct PendingSample {
     key: Key,
+    is_main: bool,
     planned: Option<Code>,
     completed: u64,
     records: u64,
@@ -113,6 +117,8 @@ pub(in crate::native_session) struct BlockSamples {
     maximum_work: u64,
     disabled: bool,
     overflow: bool,
+    private_samples_requested: bool,
+    private_samples: Option<private_samples::PrivateSamples>,
 }
 
 impl Default for BlockSamples {
@@ -142,6 +148,8 @@ impl Default for BlockSamples {
             maximum_work: MAX_WORK,
             disabled: false,
             overflow: false,
+            private_samples_requested: false,
+            private_samples: None,
         }
     }
 }
@@ -183,6 +191,9 @@ impl BlockSamples {
     pub(super) fn begin_epoch(&mut self, epoch: SourceIdentity) {
         if self.epoch == Some(epoch) {
             return;
+        }
+        if let Some(samples) = &mut self.private_samples {
+            samples.clear();
         }
         if !self.admit(CAPACITY as u64) {
             // Logical invalidation needs no scan when observation is disabled.
@@ -360,6 +371,7 @@ impl BlockSamples {
         let exit = self.prepare_exit(planned)?;
         Some(PendingSample {
             key,
+            is_main,
             planned,
             completed,
             records,
@@ -410,6 +422,9 @@ impl BlockSamples {
 
     pub(super) fn complete(&mut self, pending: PendingSample) {
         // All visits/counter additions were admitted before guest dispatch.
+        if let Some(samples) = &mut self.private_samples {
+            samples.clear();
+        }
         let old = self.entries[self.cursor].take();
         if old.is_some_and(|entry| entry.frequency == 1) {
             self.distinct -= 1;
@@ -439,6 +454,7 @@ impl BlockSamples {
         }
         self.entries[self.cursor] = Some(Entry {
             key: pending.key,
+            is_main: pending.is_main,
             planned: pending.planned,
             frequency,
         });

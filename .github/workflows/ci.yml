@@ -114,6 +114,11 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
             cargo test --locked -p pentax-worker --test image_probe libc_memory_builtins:: -- --test-threads=1
+        - name: Test explicit private sample output with original code
+          env:
+            PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+          run: >-
+            cargo test --locked -p pentax-worker --test image_probe private_samples_opt_in_exports_completed_relative_rows_and_preserves_guest_outcomes -- --test-threads=1
       - name: Test signed packed-qword comparison state and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::qword_comparisons:: -- --test-threads=1
@@ -130,7 +135,7 @@ jobs:
           cargo test --locked -p pentax-worker --test image_probe kernel_results::timestamp_counter:: -- --test-threads=1
       - name: Test bounded final-only startup samples
         run: >-
-          cargo test --locked -p pentax-worker --bin pentax-worker native_session::startup_profile::block_samples::tests:: -- --test-threads=1
+          cargo test --locked -p pentax-worker --bin pentax-worker -- native_session::startup_profile::block_samples::tests:: native_session::startup_profile::block_samples::private_samples::tests:: --test-threads=1
       - name: Test admitted packed floating-point results and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_packed_float_tests:: -- --test-threads=1

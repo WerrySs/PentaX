@@ -69,6 +69,8 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
 mod posix;
 #[path = "posix_self.rs"]
 mod posix_self;
+#[path = "private_samples.rs"]
+mod private_samples;
 #[path = "usleep_wait.rs"]
 mod usleep_wait;
 

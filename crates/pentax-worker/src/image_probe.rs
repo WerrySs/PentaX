@@ -14,7 +14,7 @@ use pentax_core::process::hle::{
 use pentax_platform::native_dispatch::{NativeCpuState, NativeDispatchError, NativeStackFrame};
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::windows::fs::OpenOptionsExt;
 
 mod backing;
@@ -291,6 +291,7 @@ fn read_bounded(file: &mut File, declared: u64, remaining: u64) -> Result<Vec<u8
 }
 
 struct Intake {
+    private_samples: Option<File>,
     save_directory: Option<File>,
     backing_directory: Option<backing::BackingDirectory>,
     system: pentax_kernel::SystemConfig,
@@ -309,7 +310,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(7)
+                .saturating_add(8)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -322,6 +323,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--execution-profile"
                     && pair[0] != "--present-window"
                     && pair[0] != "--libc-memory-builtins"
+                    && pair[0] != "--private-samples"
             })
             .count()
             > limits.max_images
@@ -345,6 +347,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--execution-profile"
                 && pair[0] != "--present-window"
                 && pair[0] != "--libc-memory-builtins"
+                && pair[0] != "--private-samples"
         })
         || args
             .chunks_exact(2)
@@ -382,6 +385,11 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         || args
             .chunks_exact(2)
             .filter(|pair| pair[0] == "--libc-memory-builtins")
+            .count()
+            > 1
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--private-samples")
             .count()
             > 1
         || args.chunks_exact(2).any(|pair| {
@@ -500,6 +508,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             || pair[0] == "--execution-profile"
             || pair[0] == "--present-window"
             || pair[0] == "--libc-memory-builtins"
+            || pair[0] == "--private-samples"
         {
             continue;
         }
@@ -596,7 +605,25 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         .try_reserve_exact(opened.len())
         .map_err(|_| ProbeError::Input("input-allocation"))?;
     files.extend(opened.into_iter().map(|(file, _)| file));
+    let private_samples = args
+        .chunks_exact(2)
+        .find(|pair| pair[0] == "--private-samples")
+        .map(|pair| {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .share_mode(0)
+                .custom_flags(0x0020_0000) // FILE_FLAG_OPEN_REPARSE_POINT.
+                .open(&pair[1])
+                .map_err(|_| ProbeError::Input("private-samples-open"))?;
+            if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+                return Err(ProbeError::Input("private-samples-file"));
+            }
+            Ok(file)
+        })
+        .transpose()?;
     Ok(Intake {
+        private_samples,
         save_directory,
         backing_directory,
         system,
@@ -614,8 +641,10 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
     let mut limits = NativeImageLimits::default();
     let mut progress = NativeSessionProgress::default();
     let mut unavailable_functions = None;
+    let mut private_samples_file = None;
     let result = (|| {
         let mut intake = intake(args, &limits)?;
+        private_samples_file = intake.private_samples.take();
         let present_window = args
             .chunks_exact(2)
             .any(|pair| pair[0] == "--present-window" && pair[1] == "yes");
@@ -712,7 +741,10 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 }
                 crate::protocol("RUNNING\tmode=entry-probe")
                     .map_err(|_| NativeSessionError::OutputUnavailable)?;
-                let mut execution = NativeSessionLimits::default();
+                let mut execution = NativeSessionLimits {
+                    private_samples: private_samples_file.is_some(),
+                    ..Default::default()
+                };
                 if args
                     .chunks_exact(2)
                     .any(|pair| pair[0] == "--libc-memory-builtins" && pair[1] == "checked")
@@ -790,6 +822,18 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
         )
         .map_err(ProbeError::Admission)
     })();
+    if let Some(mut file) = private_samples_file {
+        // Optional output cannot replace the actual guest result or its typed
+        // stop. No file I/O occurs while guest execution is active.
+        let status = match progress.private_samples_bytes() {
+            Some(bytes) => match file.write_all(bytes) {
+                Ok(()) => "written",
+                Err(_) => "write-failed",
+            },
+            None => "unavailable",
+        };
+        progress.private_samples_status = Some(status);
+    }
     ProbeOutcome {
         result,
         progress,

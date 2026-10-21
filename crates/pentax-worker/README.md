@@ -1,5 +1,21 @@
 # Native diagnostic worker
 
+`probe-entry --private-samples <fresh-file>` explicitly creates a new host-only
+diagnostic file. It never replaces an existing file. After execution stops,
+it can contain at most 64 recent periodic samples as module-relative offsets,
+main/child roles and counts; it contains no paths, absolute PCs, input bytes or
+operands. Keep this title-specific artifact private. Default protocol output
+remains closed; only an explicit request adds `private_samples_status` with
+`written`, `unavailable` or `write-failed`. An output failure does not replace
+the actual guest result. Samples describe recent activity, not whole-run
+hotspots, branch outcomes, a wait condition, deadlock or a rendered frame.
+
+The little-endian binary starts with `PXSAMP01`, a u32 row count and u32 flags
+(bit 0: observer disabled; bit 1: observer overflow). Each 24-byte row contains
+a u32 module slot, u32 role (0 main, 1 child), u64 module-relative code offset
+and u64 recent count. The complete file is at most 1,552 bytes. Module slots
+refer to the exact captured source epoch, not filenames or execution authority.
+
 `probe-entry --libc-memory-builtins checked` explicitly selects the standard
 memory ABI of the module supplied with `--preload-libc` or `--preload-libc-as`.
 The default is `off`. Exact qualified memcpy, memmove and memset exports can use

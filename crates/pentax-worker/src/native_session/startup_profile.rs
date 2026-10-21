@@ -107,6 +107,19 @@ impl ServiceProfile {
 }
 
 impl StartupProfile {
+    /// Explicit local output capability only; never part of protocol fields.
+    pub fn enable_private_samples(&mut self) {
+        self.blocks.enable_private_samples();
+    }
+
+    pub fn capture_private_samples(&mut self, source: &pentax_linker::SymbolicLinkPlan<'_>) {
+        self.blocks.capture_private_samples(source);
+    }
+
+    pub fn private_samples_bytes(&self) -> Option<&[u8]> {
+        self.blocks.private_samples_bytes()
+    }
+
     pub fn begin_sample_epoch(&mut self, epoch: pentax_linker::SourceIdentity) {
         self.blocks.begin_epoch(epoch);
     }
