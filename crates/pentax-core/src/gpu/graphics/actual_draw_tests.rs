@@ -22,6 +22,9 @@ const GREEN: [u8; 4] = [0, 255, 0, 255];
 #[path = "eop_tests.rs"]
 mod eop_tests;
 
+#[path = "actual_draw_tests/indexed.rs"]
+mod indexed;
+
 fn unary(op: u32, dst: u32, src: u32) -> u32 {
     0x7e00_0000 | (dst << 17) | (op << 9) | src
 }

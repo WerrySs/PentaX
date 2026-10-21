@@ -2,12 +2,13 @@
 
 `graphics::plan_commands` admits complete flat PM4 streams into an immutable
 `CommandPlan`. Supported packets are type-2 padding, ordinary/header-only NOP,
-graphics `SET_CONTEXT_REG`, `SET_SH_REG`, `SET_UCONFIG_REG`, `NUM_INSTANCES` and
-`DRAW_INDEX_AUTO` with the exact auto-index initiator2. Each draw retains its
+graphics `SET_CONTEXT_REG`, `SET_SH_REG`, `SET_UCONFIG_REG`, `NUM_INSTANCES`,
+`DRAW_INDEX_AUTO` with the exact auto-index initiator2, and the exact indexed
+packets described below. Each draw retains its
 own known register snapshot and real vertex/instance counts. State-only streams
 are supported. Zero-count draws consume their command position without shader
 reads or a render product. Predicates, use-opaque counts, indirect buffers,
-indexed draws, barriers, completion writes and unknown registers are refused.
+indirect draws, barriers, completion writes and unknown registers are refused.
 No reset register value is invented. Final state is published by a queue owner
 only after execution; a failed plan returns no executable prefix.
 
@@ -40,8 +41,20 @@ exclude physical aliases of those spans and its captured command ranges.
 
 The first profile is deliberately finite:
 
-- Nonindexed triangle lists, explicit `NUM_INSTANCES` and zero known
+- Triangle lists, explicit `NUM_INSTANCES` and zero known
   `GE_INDX_OFFSET`; real counts are bounded, with no modulo truncation.
+- Indexed triangles use exact `INDEX_TYPE=0xc0002a00` with value0/1 for
+  little-endian U16/U32, and exact six-dword `DRAW_INDEX_2=0xc0042700` with
+  payload `[max_count, address_low, address_high, count, 0]`. The high address
+  field must fit the existing47-bit address profile, count must not exceed
+  max_count, and the actual nonempty source is naturally aligned to2/4 bytes.
+  Natural alignment is an explicit finite profile restriction. The final
+  flags word is exactly0; the source's additional0x20 option remains refused.
+  `GE_MULTI_PRIM_IB_RESET_EN` must be explicitly known0. Base vertex is0,
+  primitive restart is disabled and indirect/index8 profiles remain unsupported.
+  max_count bounds the element count, never the values stored in the index
+  buffer. VertexIndex values greater than or equal to count remain valid.
+  An admitted zero-count packet needs no index type or payload access.
 - Unmerged ES-to-vertex stage, GS program disabled, no geometry/tessellation,
   scratch or LDS. GS resource/user registers supply the source vertex profile.
   Source `VGT_SHADER_STAGES_EN` selects wave32/64; PS is explicitly wave32.
@@ -78,6 +91,18 @@ These constraints describe a real guest draw path toward rendering. They do
 not establish that a supplied commercial title fits this profile or that a
 frame has been rendered or presented. Original encoded PM4/VS/PS fixtures live
 only in tests; production contains no diagnostic triangle program.
+
+For indexed draws, preparation captures the complete checked count-times-width
+payload with GPU-read access before any GPU effects. `PreparedIndices` owns
+immutable bytes and retains the exact source range, type and count. Its actual
+vector capacity and copy work are admitted alongside compiled programs, LOAD,
+upload and readback, with no larger budget. The native core prepares afresh
+under one exclusive paused owner, rechecks the complete live index span and
+excludes physical aliases with the writable target. Index, command and shader
+inputs may share read-only backing. An old public prepared product cannot
+manufacture the core's same-pause completion or guest writeback authority.
+The backend validates U32 values against the actual enabled Vulkan feature
+and reported device limit; it does not infer a value bound from count.
 
 Default command bounds are64 streams,256KiB command bytes,65536 packets,
 64 retained draws,1048576 total vertices including instances,4MiB charged host
@@ -163,3 +188,15 @@ render executor; `src/graphics/host_gpu/renderer/renderDraw.cpp` (blob
 `vk.draw` emission. The source's broader caches, asynchronous machinery,
 environment switches and title overrides are outside this port. See the GPU
 NOTICE, root GPLv2 text and retained `LICENSES/Kyty-MIT.txt` grant.
+
+The indexed extension follows that same public7b revision:
+`pm4Handlers.cpp` (`CpOpDrawIndex`, `CpOpIndexType` and primitive-reset setter),
+`pm4.h` (`GE_MULTI_PRIM_IB_RESET_EN`), `gpu_defs.h` (index types), and
+`renderDraw.cpp` (`DrawIndex`, index width/upload and `drawIndexed`). The exact
+packet ordering and count bound are source contracts; flag0, natural alignment
+and known zero restart/base vertex describe this port's finite admission.
+Original U16/U32 fixtures distinguish a degenerate index buffer from a later
+fresh capture with different literal pixels, preserving tiled LOAD/padding.
+An original indexed Draw/R_FLIP fixture exercises the existing owned GPU-ready
+capture route without manufacturing display acknowledgement. These source
+fixtures do not establish a commercial frame or compatibility result.

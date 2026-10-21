@@ -56,6 +56,16 @@ fn counter(
 #[test]
 #[ignore = "requires a local Vulkan device and native process clock"]
 fn actual_encoded_draw_flip_cycles_capture_current_pixels_and_keep_display_status_pending() {
+    encoded_draw_flip_cycles(false);
+}
+
+#[test]
+#[ignore = "requires a local Vulkan device and native process clock"]
+fn actual_indexed_draw_flip_cycles_capture_current_pixels_and_keep_display_status_pending() {
+    encoded_draw_flip_cycles(true);
+}
+
+fn encoded_draw_flip_cycles(indexed: bool) {
     let (mut owner, base) = owner();
     let mut memory = owner.pause().unwrap();
     let mut driver = Driver::new(DriverLimits::default());
@@ -105,12 +115,44 @@ fn actual_encoded_draw_flip_cycles_capture_current_pixels_and_keep_display_statu
     memory
         .write(base + 0x9000, &bytes(&pixel_shader()))
         .unwrap();
-    let original = commands_with_layout(base + 0x8000, base + 0x9000, target, 0x0106_c000);
+    let mut original = commands_with_layout(base + 0x8000, base + 0x9000, target, 0x0106_c000);
+    if indexed {
+        // Original resources and shaders are unchanged: only the two AUTO
+        // packets become explicit source-indexed triangles in this variant.
+        memory.write(base + 0x6000, &[0, 0, 1, 0, 2, 0]).unwrap();
+        let mut replacement = Vec::new();
+        set(&mut replacement, 0x79, 0x24b, &[0]);
+        replacement.extend([0xc000_2a00, 0]);
+        let mut at = 0;
+        let mut draws = 0;
+        while at < original.len() {
+            let header = original[at];
+            let length = ((header >> 16) & 0x3fff) as usize + 2;
+            assert!(at + length <= original.len());
+            if header == 0xc001_2d00 {
+                assert_eq!(&original[at + 1..at + length], &[3, 2]);
+                replacement.extend([
+                    0xc004_2700,
+                    3,
+                    (base + 0x6000) as u32,
+                    ((base + 0x6000) >> 32) as u32,
+                    3,
+                    0,
+                ]);
+                draws += 1;
+            } else {
+                replacement.extend_from_slice(&original[at..at + length]);
+            }
+            at += length;
+        }
+        assert_eq!(draws, 2);
+        original = replacement;
+    }
     let split = original
         .iter()
-        .position(|word| *word == 0xc001_2d00)
+        .position(|word| *word == if indexed { 0xc004_2700 } else { 0xc001_2d00 })
         .unwrap()
-        + 3;
+        + if indexed { 6 } else { 3 };
     let start = base + 0x1000;
     let mut cursor = start;
     for (index, words) in [&original[..split], &original[split..]]
@@ -162,6 +204,9 @@ fn actual_encoded_draw_flip_cycles_capture_current_pixels_and_keep_display_statu
     assert_eq!(driver.usage().draws, 2);
     assert_eq!(driver.usage().memory_written_bytes, 64);
     assert_eq!(driver.usage().written_bytes, 131072);
+    if indexed {
+        assert_eq!(read(&memory, base + 0x6000, 6), [0, 0, 1, 0, 2, 0]);
+    }
     assert_eq!(kernel.usage().attempts, 0);
     let status = driver.video_flip_status(&memory, 1).unwrap().unwrap();
     assert_eq!(

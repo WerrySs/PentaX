@@ -288,6 +288,18 @@ full padded LOAD, allocation-free active-pixel reverse overlay preserving
 padding, shared host/work admission and actual-layout private draw receipts.
 Fenced draw writeback does not forge a VideoOut GPU-EOP/presentation receipt.
 
+The indexed triangle core route additionally follows the same PUBLIC7b
+pm4Handlers.cpp (blob19034daafbd6da20d11f634debbf666c1054eed7), gpu_defs.h
+(blob507ff702d41580c6a2ed200b9c2313dab2f5b02e) and renderDraw.cpp
+(blobfada73b93e4f7c45f3bae23a653916d9445c4fc8) DrawIndex contracts.
+Copyright(c)2021 InoriRus; GPL-2.0-only and the retained Kyty MIT grant apply.
+PentaX modifications2026: same-pause full index capture, fresh GPU-read admission,
+physical target-write alias exclusion and cumulative upload/work admission.
+Read-only index/command/shader inputs may share backing. Indexed draw completion
+uses the existing fenced tiled writeback and private current-draw receipt; no
+numeric prepared product or range grants GPU-ready/presentation authority.
+All shaders, packets, index buffers and literal pixel proofs are original.
+
 The finite ACM ContextCreate provider metadata additionally follows public
 KytyPS5/KytyPS5@f186b35706ddbc3faf5513f326e2335d224802f7,
 src/libs/libAudio.cpp, Git blob2069a82b636778b652d4d6f936a57c3e8dd040ed.

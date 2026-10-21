@@ -2,7 +2,8 @@
 // Copyright (c) 2021 InoriRus
 // Adapted 2026 for PentaX: paused-owner guest draw preparation and writeback.
 // Public KytyPS5/KytyPS5@7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3
-// graphicsRun.cpp DrawIndexAuto and renderDraw.cpp DrawAuto/EmitDrawPrimitives.
+// graphicsRun.cpp DrawIndexAuto/DrawIndex and renderDraw.cpp
+// DrawAuto/DrawIndex/EmitDrawPrimitives.
 
 //! Actual declared-layout guest draws. A draw completion is issued only after
 //! its Vulkan fence AND transactional writeback on the original paused owner.
@@ -142,7 +143,7 @@ pub(super) fn execute_draw_current<'borrow, 'owner>(
 }
 
 /// No Vulkan call happens until the entire destination and its disjointness
-/// from retained command sources are admitted. The exclusive pause lasts across
+/// from retained command/shader/index sources are admitted. The exclusive pause lasts across
 /// preparation, execution, fence and all-or-nothing guest publication.
 pub fn execute_draw(
     paused: &mut PausedNativeMemory<'_>,
@@ -232,6 +233,13 @@ pub(super) fn execute_draw_admitted(
         .min(remaining_pixels as u64);
     if (geometry.tight_bytes() as u64)
         .checked_mul(2)
+        .and_then(|n| {
+            n.checked_add(
+                prepared
+                    .indices()
+                    .map_or(0, |indices| indices.bytes().len() as u64),
+            )
+        })
         .is_none_or(|n| n > execution_limits.max_host_bytes)
     {
         return Err(Error::Limit);
@@ -245,7 +253,16 @@ pub(super) fn execute_draw_admitted(
         .checked_sub(preparation.work)
         .ok_or(Error::Limit)?;
     let shader_ranges = prepared.shader_ranges();
-    let work = preflight_target(paused, target, command_ranges, &shader_ranges, remaining)?;
+    let mut work = preflight_target(paused, target, command_ranges, &shader_ranges, remaining)?;
+    if let Some(indices) = prepared.indices() {
+        let index_work = preflight_indices(
+            paused,
+            indices.range(),
+            target,
+            remaining.checked_sub(work).ok_or(Error::Limit)?,
+        )?;
+        work = work.checked_add(index_work).ok_or(Error::Limit)?;
+    }
     // Reserve the completion serial before effects. No post-write allocation,
     // increment overflow or other fallible step can lose a committed receipt.
     let submission = NEXT_SUBMISSION
@@ -377,6 +394,39 @@ fn preflight_target(
             .map_err(Error::Memory)?;
         work = work.checked_add(charge).ok_or(Error::Limit)?;
     }
+    Ok(work)
+}
+
+fn preflight_indices(
+    paused: &PausedNativeMemory<'_>,
+    indices: CommandRange,
+    target: NativeRange,
+    maximum: u64,
+) -> Result<u64, Error> {
+    let last = indices
+        .address
+        .checked_add(indices.size.checked_sub(1).ok_or(Error::Limit)?)
+        .ok_or(Error::Limit)?;
+    let pages = last / NATIVE_GUEST_PAGE - indices.address / NATIVE_GUEST_PAGE + 1;
+    let mut work = pages
+        .checked_add(1)
+        .filter(|n| *n <= maximum)
+        .ok_or(Error::Limit)?;
+    paused
+        .preflight_gpu_read(indices.address, indices.size)
+        .map_err(Error::Memory)?;
+    let range = NativeRange {
+        address: indices.address,
+        size: indices.size,
+    };
+    let cost = paused
+        .preflight_disjoint_backing(
+            range,
+            target,
+            maximum.checked_sub(work).ok_or(Error::Limit)?,
+        )
+        .map_err(Error::Memory)?;
+    work = work.checked_add(cost).ok_or(Error::Limit)?;
     Ok(work)
 }
 

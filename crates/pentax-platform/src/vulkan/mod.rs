@@ -89,8 +89,10 @@ impl GraphicsReadback {
 }
 
 /// Upload the actual linear target, execute its prepared guest vertex/pixel
-/// shaders and return fenced pixels. This does not present a window or accept a
-/// tiled surface. Keep the original guest owner paused through writeback.
+/// shaders and return fenced pixels. An indexed product uploads its actual
+/// U16/U32 snapshot and uses a triangle-list indexed draw with no restart or
+/// base-vertex offset. This does not present a window or accept a tiled surface.
+/// Keep the original guest owner paused through writeback.
 pub fn run_graphics(
     prepared: &pentax_gpu::graphics::PreparedDraw,
     limits: &GpuLimits,

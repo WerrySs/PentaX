@@ -122,6 +122,9 @@ jobs:
       - name: Test native string-index state and dependent continuations
         run: >-
           cargo test --locked -p pentax-platform --lib -- native_string_index_tests:: packed_comparison_all_controls_and_lengths_match_hardware --test-threads=1 --nocapture
+      - name: Test indexed graphics host admission
+        run: >-
+          cargo test --locked -p pentax-platform --lib -- vulkan::graphics::tests:: vulkan::device::tests:: --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

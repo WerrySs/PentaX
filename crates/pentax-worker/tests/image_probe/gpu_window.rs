@@ -8,6 +8,7 @@ const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
 const PADDED_BYTES: u64 = 1920 * 1152 * 4;
 const STAGING: i32 = PADDED_BYTES as i32 + 0x4000;
+const INDICES: i32 = STAGING + 0x180;
 const COMMANDS: i32 = STAGING + 0x200;
 const ATTRIBUTE: i32 = 0x1e00;
 const TEMPLATE: i32 = 0x2000;
@@ -106,7 +107,7 @@ fn set(words: &mut Vec<u32>, opcode: u32, register: u32, values: &[u32]) -> usiz
     words.extend_from_slice(values);
     first
 }
-fn commands() -> (Vec<u32>, [(usize, i32, u8); 6]) {
+fn commands(indexed: bool) -> (Vec<u32>, Vec<(usize, i32, u8)>) {
     let mut words = Vec::new();
     for register in [
         0x80, 0x1b1, 0x1b3, 0x1b4, 0x1b8, 0x1c4, 0x1e0, 0x200, 0x203, 0x205, 0x207, 0x293, 0x2f8,
@@ -165,11 +166,21 @@ fn commands() -> (Vec<u32>, [(usize, i32, u8); 6]) {
     );
     set(&mut words, 0x79, 0x242, &[4]);
     set(&mut words, 0x79, 0x24a, &[0]);
-    words.extend([0xc000_2f00, 1, 0xc001_2d00, 3, 2]);
+    words.extend([0xc000_2f00, 1]);
+    let index_address = if indexed {
+        set(&mut words, 0x79, 0x24b, &[0]); // Explicitly disable primitive restart.
+        words.extend([0xc000_2a00, 0]); // Actual little-endian U16 indices.
+        let first = words.len();
+        words.extend([0xc004_2700, 3, 0, 0, 3, 0]);
+        Some(first + 2)
+    } else {
+        words.extend([0xc001_2d00, 3, 2]);
+        None
+    };
     // This exact tagged source packet requires the genuine CURRENT fenced
     // tiled draw receipt. It is not a CPU flip or a numeric completion bypass.
     words.extend([0xc004_105c, 1, 0, 1, 7, 0]);
-    let patches = [
+    let mut patches = vec![
         (target_low, 0, 8),
         (target_high, 0, 40),
         (vertex, STAGING, 8),
@@ -177,11 +188,14 @@ fn commands() -> (Vec<u32>, [(usize, i32, u8); 6]) {
         (pixel, STAGING + 0x100, 8),
         (pixel + 1, STAGING + 0x100, 40),
     ];
+    if let Some(low) = index_address {
+        patches.extend([(low, INDICES, 0), (low + 1, INDICES, 32)]);
+    }
     (words, patches)
 }
 
-fn original_gpu_window_image() -> Input {
-    let (words, patches) = commands();
+fn original_gpu_window_image(indexed: bool) -> Input {
+    let (words, patches) = commands(indexed);
     let mut p = Program::new();
     p.set(16, 0);
     p.ptr(7, 16);
@@ -252,6 +266,13 @@ fn original_gpu_window_image() -> Input {
     // is outside. No production detiler or expected host triangle supplies data.
     read(&mut p, 2_515_232, false, 0xff00_00ff);
     read(&mut p, 2_779_424, false, BASELINE as u32 as u64);
+    if indexed {
+        // [0,1,3] covers the upper-right half of the shader's rectangle.
+        // (720,540)=block65+0xb540 is outside this triangle and inside AUTO
+        // [0,1,2], so silently ignoring the real indices cannot pass.
+        read(&mut p, 4_306_240, false, BASELINE as u32 as u64);
+        read(&mut p, INDICES, true, 0x0000_0003_0001_0000);
+    }
     read(&mut p, 8_825_340, false, BASELINE as u32 as u64); // (1919,1079)
     read(&mut p, 7_870_208, false, BASELINE as u32 as u64); // Padding at(0,1080).
     read(&mut p, -8, true, GUARD);
@@ -372,6 +393,9 @@ fn original_gpu_window_image() -> Input {
     put(&mut input.bytes, ATTRIBUTE as usize, &attribute);
     let (vertex, pixel) = shaders();
     assert!(vertex.len() * 4 <= 0x100 && pixel.len() * 4 <= 0x100);
+    if indexed {
+        assert!(pixel.len() * 4 <= 0x80); // Keep the U16 source at +0x180 disjoint.
+    }
     assert!(0x200 + words.len() * 4 <= 0x1000);
     for (offset, stream) in [
         (0, vertex.as_slice()),
@@ -386,14 +410,21 @@ fn original_gpu_window_image() -> Input {
             );
         }
     }
+    if indexed {
+        // Six owned original U16 source bytes and two zero guard bytes in the
+        // template's unused gap. The guest copies this to GPU-readable memory.
+        put(
+            &mut input.bytes,
+            TEMPLATE as usize + 0x180,
+            &[0, 0, 1, 0, 3, 0, 0, 0],
+        );
+    }
     std::fs::write(&input.path, &input.bytes).unwrap();
     input
 }
 
-#[test]
-#[ignore = "requires an actual Vulkan device, visible primary monitor and real presentation completion"]
-fn original_native_gpu_draw_flip_is_presented_at_1080p_and_acknowledged_once() {
-    let input = original_gpu_window_image();
+fn check_gpu_window(indexed: bool) {
+    let input = original_gpu_window_image(indexed);
     let (status, fields, text) = probe_arguments(&[
         "--image".into(),
         input.path.as_os_str().to_owned(),
@@ -415,5 +446,20 @@ fn original_native_gpu_draw_flip_is_presented_at_1080p_and_acknowledged_once() {
     );
     let calls = fields["service_stops"].parse::<u64>().unwrap();
     assert!((9..=407).contains(&calls) && calls % 2 == 1, "{text}");
+}
+
+#[test]
+#[ignore = "requires an actual Vulkan device, visible primary monitor and real presentation completion"]
+fn original_native_gpu_draw_flip_is_presented_at_1080p_and_acknowledged_once() {
+    check_gpu_window(false);
     println!("local_gpu_presenter_composed_available=true local_gpu_presenter_composed_frames=1");
+}
+
+#[test]
+#[ignore = "requires an actual Vulkan device, visible primary monitor and real presentation completion"]
+fn original_native_indexed_gpu_draw_flip_is_presented_at_1080p_and_acknowledged_once() {
+    check_gpu_window(true);
+    println!(
+        "local_gpu_indexed_presenter_composed_available=true local_gpu_indexed_presenter_composed_frames=1"
+    );
 }

@@ -14,7 +14,7 @@ use super::{
     resources::{Buffer, Image, color_range},
 };
 use ash::vk;
-use pentax_gpu::graphics::PreparedDraw;
+use pentax_gpu::graphics::{IndexType, PreparedDraw};
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{CompiledShader, InputInterface, OutputInterface};
 
@@ -45,6 +45,78 @@ fn draw_work(
         .and_then(|v| pixel_work.and_then(|p| v.checked_add(p)))
         .and_then(|n| n.checked_mul(u64::from(instances)))
         .ok_or(VulkanError::Limit("graphics execution work"))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct IndexInput {
+    kind: vk::IndexType,
+    maximum: u32,
+}
+
+impl std::fmt::Debug for IndexInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("IndexInput")
+            .field("kind", &self.kind.as_raw())
+            .field("maximum", &self.maximum)
+            .finish()
+    }
+}
+
+// Validate and charge the complete owned snapshot before reading its values.
+// firstIndex/vertexOffset are both zero in this explicit profile; an index
+// value need not be less than indexCount (there are no vertex-buffer inputs).
+// https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdDrawIndexed.html
+fn index_input(
+    bytes: &[u8],
+    kind: IndexType,
+    count: u32,
+    vertices: u32,
+    first_vertex: u32,
+    budget: &mut Budget,
+) -> Result<IndexInput, VulkanError> {
+    let (width, kind) = match kind {
+        IndexType::U16 => (2usize, vk::IndexType::UINT16),
+        IndexType::U32 => (4usize, vk::IndexType::UINT32),
+    };
+    if count == 0
+        || count != vertices
+        || first_vertex != 0
+        || (count as usize).checked_mul(width) != Some(bytes.len())
+    {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics index extent",
+        ));
+    }
+    budget.work(bytes.len() as u64)?;
+    let maximum = if width == 2 {
+        bytes
+            .chunks_exact(2)
+            .map(|word| u32::from(u16::from_le_bytes([word[0], word[1]])))
+            .max()
+            .unwrap_or(0)
+    } else {
+        bytes
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+            .max()
+            .unwrap_or(0)
+    };
+    Ok(IndexInput { kind, maximum })
+}
+
+fn upload_bytes(target: usize, indices: usize, budget: &mut Budget) -> Result<(), VulkanError> {
+    let upload = (target as u64)
+        .checked_add(indices as u64)
+        .ok_or(VulkanError::Limit("graphics host bytes"))?;
+    budget.host(upload)?;
+    if upload
+        .checked_add(target as u64)
+        .is_none_or(|peak| peak > budget.limits.max_host_bytes)
+    {
+        return Err(VulkanError::Limit("graphics host bytes"));
+    }
+    Ok(())
 }
 
 fn interfaces(vertex: &CompiledShader, pixel: &CompiledShader) -> Result<(), VulkanError> {
@@ -146,6 +218,19 @@ pub(super) fn run(
     check_graphics_contract(prepared.pixel(), ShaderStage::Pixel)?;
     interfaces(prepared.vertex(), prepared.pixel())?;
     let push = push_data(prepared)?;
+    let indices = if let Some(indices) = prepared.indices() {
+        let input = index_input(
+            indices.bytes(),
+            indices.index_type(),
+            indices.count(),
+            prepared.vertex_count(),
+            prepared.first_vertex(),
+            &mut budget,
+        )?;
+        Some((indices, input))
+    } else {
+        None
+    };
     budget.shader(prepared.vertex().spirv().len())?;
     budget.shader(prepared.pixel().spirv().len())?;
     budget.work(draw_work(
@@ -157,19 +242,20 @@ pub(super) fn run(
     )?)?;
     // Retained upload and completed owned readback coexist through publication.
     // Buffer::read_completed charges the latter before its fallible allocation.
-    budget.host(length as u64)?;
-    if (length as u64)
-        .checked_mul(2)
-        .is_none_or(|n| n > limits.max_host_bytes)
-    {
-        return Err(VulkanError::Limit("graphics host bytes"));
-    }
+    upload_bytes(
+        length,
+        indices.map_or(0, |(indices, _)| indices.bytes().len()),
+        &mut budget,
+    )?;
     let device = Device::open(
         vk::ShaderStageFlags::empty(),
         vk::ShaderStageFlags::empty(),
         &mut budget,
     )?;
     let host = device.properties.limits;
+    if let Some((_, input)) = indices {
+        device.check_index_value(input.maximum)?;
+    }
     if prepared.width() > host.max_viewport_dimensions[0]
         || prepared.height() > host.max_viewport_dimensions[1]
         || prepared.width() > host.max_framebuffer_width
@@ -196,6 +282,18 @@ pub(super) fn run(
         vk::BufferUsageFlags::TRANSFER_DST,
         &mut budget,
     )?;
+    let index_buffer = if let Some((indices, _)) = indices {
+        let mut buffer = Buffer::new(
+            &device,
+            indices.bytes().len(),
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            &mut budget,
+        )?;
+        buffer.write(indices.bytes(), &mut budget)?;
+        Some(buffer)
+    } else {
+        None
+    };
     let pipeline = Pipeline::graphics_loaded(
         &device,
         prepared.vertex(),
@@ -206,15 +304,31 @@ pub(super) fn run(
     // The batch is declared last and drains uncertain submissions before any
     // pipeline, framebuffer, image or buffer owner can be destroyed.
     let batch = Batch::begin(&device, &mut budget)?;
-    budget.command(9)?;
-    let upload_barrier = [vk::BufferMemoryBarrier::default()
+    budget.command(if index_buffer.is_some() { 10 } else { 9 })?;
+    let mut upload_barriers = [vk::BufferMemoryBarrier::default(); 2];
+    upload_barriers[0] = vk::BufferMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::HOST_WRITE)
         .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .buffer(upload.raw)
         .offset(0)
-        .size(length as u64)];
+        .size(length as u64);
+    let mut upload_stages = vk::PipelineStageFlags::TRANSFER;
+    let upload_count = if let Some(buffer) = &index_buffer {
+        upload_barriers[1] = vk::BufferMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::HOST_WRITE)
+            .dst_access_mask(vk::AccessFlags::INDEX_READ)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .buffer(buffer.raw)
+            .offset(0)
+            .size(buffer.length() as u64);
+        upload_stages |= vk::PipelineStageFlags::VERTEX_INPUT;
+        2
+    } else {
+        1
+    };
     let initial = [vk::ImageMemoryBarrier::default()
         .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
         .old_layout(vk::ImageLayout::UNDEFINED)
@@ -268,10 +382,10 @@ pub(super) fn run(
         device.raw.cmd_pipeline_barrier(
             batch.raw,
             vk::PipelineStageFlags::HOST,
-            vk::PipelineStageFlags::TRANSFER,
+            upload_stages,
             vk::DependencyFlags::empty(),
             &[],
-            &upload_barrier,
+            &upload_barriers[..upload_count],
             &initial,
         );
         device.raw.cmd_copy_buffer_to_image(
@@ -303,13 +417,32 @@ pub(super) fn run(
             0,
             &push,
         );
-        device.raw.cmd_draw(
-            batch.raw,
-            prepared.vertex_count(),
-            prepared.instance_count(),
-            prepared.first_vertex(),
-            prepared.first_instance(),
-        );
+        if let (Some(buffer), Some((indices, input))) = (&index_buffer, indices) {
+            // Dedicated fully bound INDEX_BUFFER, offset0 obeys either element
+            // alignment. HOST_WRITE visibility precedes index fetch; restart
+            // stays disabled in the fixed triangle-list pipeline. The complete
+            // index extent and actual enabled device range were checked above.
+            // https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindIndexBuffer.html
+            device
+                .raw
+                .cmd_bind_index_buffer(batch.raw, buffer.raw, 0, input.kind);
+            device.raw.cmd_draw_indexed(
+                batch.raw,
+                indices.count(),
+                prepared.instance_count(),
+                0,
+                0,
+                prepared.first_instance(),
+            );
+        } else {
+            device.raw.cmd_draw(
+                batch.raw,
+                prepared.vertex_count(),
+                prepared.instance_count(),
+                prepared.first_vertex(),
+                prepared.first_instance(),
+            );
+        }
         device.raw.cmd_end_render_pass(batch.raw);
         // Render-pass final layout and external dependency make color writes
         // visible to the transfer, including pixels preserved by LOAD.
@@ -350,6 +483,87 @@ mod tests {
         // Two triangles per instance: each can cover all ten pixels.
         assert_eq!(draw_work(6, 2, 10, 4, 5), Ok((24 + 100) * 2));
         assert!(draw_work(u32::MAX, u32::MAX, u64::MAX, 1, 1).is_err());
+    }
+
+    #[test]
+    fn index_snapshots_preserve_unsigned_values_and_refuse_incomplete_or_unadmitted_scans() {
+        let mut budget = Budget::new(GpuLimits::default());
+        let short = [0, 0x80, 0xff, 0xff, 1, 0];
+        let input = index_input(&short, IndexType::U16, 3, 3, 0, &mut budget).unwrap();
+        assert_eq!(input.kind.as_raw(), vk::IndexType::UINT16.as_raw());
+        assert_eq!(input.maximum, 65_535); // Legal value above the three indices.
+        let wide = [0, 0, 0, 0x80, 0xff, 0xff, 0xff, 0xff, 0, 0, 1, 0];
+        let input = index_input(&wide, IndexType::U32, 3, 3, 0, &mut budget).unwrap();
+        assert_eq!(input.kind.as_raw(), vk::IndexType::UINT32.as_raw());
+        assert_eq!(input.maximum, u32::MAX); // No host range is inferred here.
+        assert_eq!(budget.usage.work, 18);
+
+        for (bytes, kind, count, vertices, first) in [
+            (&short[..5], IndexType::U16, 3, 3, 0),
+            (&wide[..11], IndexType::U32, 3, 3, 0),
+            (&short[..], IndexType::U16, 3, 2, 0),
+            (&short[..], IndexType::U16, 3, 3, 1),
+            (&[][..], IndexType::U32, 0, 0, 0),
+        ] {
+            assert_eq!(
+                index_input(bytes, kind, count, vertices, first, &mut budget),
+                Err(VulkanError::InvalidCompilerContract(
+                    "graphics index extent"
+                ))
+            );
+            assert_eq!(budget.usage.work, 18);
+        }
+        let mut refused = Budget::new(GpuLimits {
+            max_work: 5,
+            ..GpuLimits::default()
+        });
+        assert_eq!(
+            index_input(&short, IndexType::U16, 3, 3, 0, &mut refused),
+            Err(VulkanError::Limit("work"))
+        );
+        assert_eq!(refused.usage.work, 0);
+    }
+
+    #[test]
+    fn index_upload_and_completed_target_share_the_finite_host_ceiling() {
+        let mut fits = Budget::new(GpuLimits {
+            max_host_bytes: 20,
+            ..GpuLimits::default()
+        });
+        upload_bytes(8, 4, &mut fits).unwrap();
+        assert_eq!(fits.usage.host_bytes, 12);
+        let readback = fits.buffer(8).unwrap();
+        assert_eq!(readback.len(), 8);
+        assert_eq!(fits.usage.host_bytes, 20);
+        let mut refused = Budget::new(GpuLimits {
+            max_host_bytes: 19,
+            ..GpuLimits::default()
+        });
+        assert_eq!(
+            upload_bytes(8, 4, &mut refused),
+            Err(VulkanError::Limit("graphics host bytes"))
+        );
+        assert!(upload_bytes(usize::MAX, 1, &mut Budget::new(GpuLimits::default())).is_err());
+        // Preserve the old non-indexed refusal order: reject the upload first,
+        // then its simultaneous completed target, without a device allocation.
+        let mut upload_refused = Budget::new(GpuLimits {
+            max_host_bytes: 7,
+            ..GpuLimits::default()
+        });
+        assert_eq!(
+            upload_bytes(8, 0, &mut upload_refused),
+            Err(VulkanError::Limit("host bytes"))
+        );
+        assert_eq!(upload_refused.usage.host_bytes, 0);
+        let mut readback_refused = Budget::new(GpuLimits {
+            max_host_bytes: 15,
+            ..GpuLimits::default()
+        });
+        assert_eq!(
+            upload_bytes(8, 0, &mut readback_refused),
+            Err(VulkanError::Limit("graphics host bytes"))
+        );
+        assert_eq!(readback_refused.usage.host_bytes, 8);
     }
 
     #[test]

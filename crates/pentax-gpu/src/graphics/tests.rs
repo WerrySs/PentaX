@@ -5,6 +5,7 @@ use super::*;
 use std::cell::{Cell, RefCell};
 
 mod flips;
+mod indexed;
 mod staging;
 mod tiled;
 

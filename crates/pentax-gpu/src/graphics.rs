@@ -3,7 +3,7 @@
 // Modified 2026 for PentaX: bounded owned graphics command/state preparation.
 // Source contracts and deliberate limits are documented in graphics/README.md.
 
-//! Nonindexed guest draw preparation without GPU effects or host pointers.
+//! Guest triangle draw preparation without GPU effects or host pointers.
 //! A command plan is not execution authority. The runtime must retain the same
 //! owner, admit actual GPU permissions and publish completed readback atomically.
 
@@ -143,6 +143,53 @@ pub struct DecodedTarget {
     pub work: u64,
 }
 
+/// Exact source index element representations. No endian or restart flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexType {
+    U16,
+    U32,
+}
+impl IndexType {
+    pub const fn byte_width(self) -> usize {
+        match self {
+            Self::U16 => 2,
+            Self::U32 => 4,
+        }
+    }
+}
+
+/// Immutable owned index payload from one fully admitted draw. Its range is
+/// metadata, not guest ownership, permission or completion authority.
+pub struct PreparedIndices {
+    range: CommandRange,
+    index_type: IndexType,
+    count: u32,
+    bytes: Vec<u8>,
+}
+impl PreparedIndices {
+    pub fn range(&self) -> CommandRange {
+        self.range
+    }
+    pub fn index_type(&self) -> IndexType {
+        self.index_type
+    }
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+impl fmt::Debug for PreparedIndices {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreparedIndices")
+            .field("index_type", &self.index_type)
+            .field("count", &self.count)
+            .field("capacity", &self.bytes.capacity())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Real compiler products and retained target contents, never a canned shader.
 /// Private fields prohibit substituting unrelated SPIR-V or target snapshots.
 pub struct PreparedDraw {
@@ -159,6 +206,7 @@ pub struct PreparedDraw {
     vertex_count: u32,
     instance_count: u32,
     shader_ranges: [CommandRange; 2],
+    indices: Option<PreparedIndices>,
     usage: Usage,
 }
 impl fmt::Debug for PreparedDraw {
@@ -205,6 +253,11 @@ impl PreparedDraw {
     }
     pub fn vertex_count(&self) -> u32 {
         self.vertex_count
+    }
+    /// Indexed draws count index elements as the conservative vertex-work
+    /// upper bound; the backend must use the separate actual index payload.
+    pub fn indices(&self) -> Option<&PreparedIndices> {
+        self.indices.as_ref()
     }
     pub fn first_vertex(&self) -> u32 {
         0

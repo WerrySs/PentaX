@@ -59,7 +59,7 @@ PentaX modifications: complete flat command admission before resource reads,
 private bounded known-state snapshots, explicit missing/unsupported state,
 bounded actual shader decoding/compilation, manifest-checked stage pushes,
 immutable original target contents and source extents for native alias checks.
-The initial profile is nonindexed triangle lists with one linear RGBA8 target
+The initial profile was nonindexed triangle lists with one linear RGBA8 target
 and no descriptors/depth/blend/MSAA; its exact limitations are documented in
 src/graphics/README.md. These pure products grant no guest or GPU authority.
 
@@ -84,3 +84,20 @@ above continue to apply. PentaX modifications2026 retain only the exact tagged
 six-dword source packet, bounded action indices and fresh draw/flip ordering.
 Pure plans grant no native owner, GPU completion or display authority. All
 packet fixtures remain original PentaX inputs.
+
+The bounded indexed triangle extension additionally adapts the same PUBLIC
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp,
+    blob19034daafbd6da20d11f634debbf666c1054eed7
+    CpOpDrawIndex, CpOpIndexType and primitive-reset register handling
+  src/graphics/guest_gpu/pm4.h,
+    blob186c8844ce8a6575b72172dd43c83e949d3dfb81
+  src/graphics/guest_gpu/gpu_defs.h,
+    blob507ff702d41580c6a2ed200b9c2313dab2f5b02e
+  src/graphics/host_gpu/renderer/renderDraw.cpp,
+    blobfada73b93e4f7c45f3bae23a653916d9445c4fc8
+Copyright(c)2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX modifications2026: exact U16/U32 packet admission,
+explicit zero restart/base vertex, bounded full owned index snapshots and
+actual-capacity/work accounting. Pure products grant no guest/native authority;
+all packet, shader and index-data fixtures remain original PentaX inputs.

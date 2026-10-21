@@ -2,7 +2,7 @@
 // Copyright (c) 2021 InoriRus
 // Modified 2026 for PentaX: bounded complete flat draw admission and snapshots.
 
-use super::{Error, GraphicsState};
+use super::{Error, GraphicsState, IndexType};
 use crate::{Header, RegisterSpace};
 use std::{fmt, mem::size_of};
 
@@ -69,11 +69,18 @@ pub enum Action {
     Flip(Flip),
 }
 
-/// Private immutable snapshot from one actual DRAW_INDEX_AUTO packet.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct IndexSource {
+    pub address: u64,
+    pub index_type: IndexType,
+}
+
+/// Private immutable snapshot from one actual AUTO or indexed draw packet.
 pub struct Draw {
     pub(super) state: GraphicsState,
     pub(super) vertex_count: u32,
     pub(super) instance_count: u32,
+    pub(super) indices: Option<IndexSource>,
 }
 impl Draw {
     pub fn vertex_count(&self) -> u32 {
@@ -130,7 +137,7 @@ fn work(usage: &mut CommandUsage, limits: &CommandLimits, count: u64) -> Result<
 }
 
 /// Admit all supplied flat streams before shader/resource reads or effects.
-/// Unknown register writes, predicates, IBs, barriers and indexed/indirect draws
+/// Unknown register writes, predicates, IBs, barriers and indirect draws
 /// are explicit refusals. The caller publishes final_state only after execution
 /// of the entire admitted plan succeeds; no partial prefix is returned.
 pub fn plan_commands(
@@ -291,6 +298,13 @@ pub fn plan_commands(
                     }
                 }
                 0x2f if length == 2 => state.instances = Some(word(at + 1)),
+                0x2a if header.raw() == 0xc000_2a00 => {
+                    state.index_type = Some(match word(at + 1) {
+                        0 => IndexType::U16,
+                        1 => IndexType::U32,
+                        _ => return Err(fail("index type profile")),
+                    });
+                }
                 0x2d if length == 3 => {
                     // AUTO_INDEX source only. USE_OPAQUE/streamout draw counts
                     // cannot be replaced with the encoded count or guessed.
@@ -329,10 +343,69 @@ pub fn plan_commands(
                             state,
                             vertex_count,
                             instance_count,
+                            indices: None,
                         });
                     }
                 }
-                _ => return Err(fail("command outside flat nonindexed graphics profile")),
+                0x27 if header.raw() == 0xc004_2700 => {
+                    let maximum = word(at + 1);
+                    let high = word(at + 3);
+                    let count = word(at + 4);
+                    if high >= 0x8000 || count > maximum || word(at + 5) != 0 {
+                        return Err(fail("indexed draw profile"));
+                    }
+                    let address = u64::from(word(at + 2)) | (u64::from(high) << 32);
+                    let instances = state
+                        .instances
+                        .ok_or(Error::Unsupported("unknown NUM_INSTANCES"))?;
+                    usage.draw_packets = usage
+                        .draw_packets
+                        .checked_add(1)
+                        .ok_or(Error::Limit("draw packets"))?;
+                    if count == 0 || instances == 0 {
+                        usage.zero_draws = usage
+                            .zero_draws
+                            .checked_add(1)
+                            .ok_or(Error::Limit("zero draws"))?;
+                    } else {
+                        let index_type = state
+                            .index_type
+                            .ok_or(Error::Unsupported("unknown INDEX_TYPE"))?;
+                        let size = u64::from(count)
+                            .checked_mul(index_type.byte_width() as u64)
+                            .ok_or(Error::Limit("index bytes"))?;
+                        if address == 0
+                            || !address.is_multiple_of(index_type.byte_width() as u64)
+                            || address.checked_add(size).is_none_or(|end| end > 1 << 47)
+                        {
+                            return Err(fail("index extent"));
+                        }
+                        if draws.len() >= limits.max_draws {
+                            return Err(Error::Limit("draw count"));
+                        }
+                        let vertices = u64::from(count)
+                            .checked_mul(u64::from(instances))
+                            .ok_or(Error::Limit("draw vertices"))?;
+                        usage.vertices = usage
+                            .vertices
+                            .checked_add(vertices)
+                            .filter(|n| *n <= limits.max_vertices)
+                            .ok_or(Error::Limit("draw vertices"))?;
+                        work(&mut usage, limits, size_of::<Draw>() as u64)?;
+                        actions.push(Action::Draw(draws.len()));
+                        fresh_draw = true;
+                        draws.push(Draw {
+                            state,
+                            vertex_count: count,
+                            instance_count: instances,
+                            indices: Some(IndexSource {
+                                address,
+                                index_type,
+                            }),
+                        });
+                    }
+                }
+                _ => return Err(fail("command outside flat graphics profile")),
             }
             at = end;
         }

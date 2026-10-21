@@ -41,7 +41,22 @@ pub(super) struct Device {
     pub family: u32,
     pub properties: vk::PhysicalDeviceProperties,
     pub memory: vk::PhysicalDeviceMemoryProperties,
+    full_draw_index_uint32: bool,
     _thread: PhantomData<Rc<()>>,
+}
+
+// The reported fallback limit is still meaningful without the optional full
+// range feature. Never infer full 32-bit indices from a buffer's element type.
+// https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFeatures.html
+// https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceLimits.html
+fn check_index_value(full: bool, limit: u32, maximum: u32) -> Result<(), VulkanError> {
+    if (full && limit != u32::MAX) || (!full && limit < 0x00ff_ffff) {
+        return Err(VulkanError::Unsupported("indexed draw device limits"));
+    }
+    if maximum > limit {
+        return Err(VulkanError::Unsupported("index value exceeds device limit"));
+    }
+    Ok(())
 }
 
 impl Device {
@@ -146,6 +161,11 @@ impl Device {
             {
                 continue;
             }
+            budget.work(1)?;
+            // SAFETY: Fixed core feature output for this retained physical
+            // device. Only a supported fullDrawIndexUint32 bit may be enabled.
+            let supported = unsafe { instance.raw.get_physical_device_features(physical) };
+            let full_draw_index_uint32 = supported.full_draw_index_uint32 != vk::FALSE;
             if !subgroup_stages.is_empty()
                 && (subgroup.subgroup_size != 32
                     || !subgroup.supported_stages.contains(subgroup_stages)
@@ -196,13 +216,13 @@ impl Device {
                     && q.queue_flags
                         .contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE)
             }) {
-                selected = Some((physical, index as u32, properties));
+                selected = Some((physical, index as u32, properties, full_draw_index_uint32));
                 break;
             }
         }
-        let (physical, family, properties) = selected.ok_or(VulkanError::Unsupported(
-            "graphics+compute queue and float32 preservation",
-        ))?;
+        let (physical, family, properties, full_draw_index_uint32) = selected.ok_or(
+            VulkanError::Unsupported("graphics+compute queue and float32 preservation"),
+        )?;
         if properties.limits.max_push_constants_size < 128
             || properties.limits.max_compute_work_group_size[0] < 8
             || properties.limits.max_compute_work_group_invocations < 8
@@ -213,10 +233,15 @@ impl Device {
         let queues = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(family)
             .queue_priorities(&priorities)];
-        let info = vk::DeviceCreateInfo::default().queue_create_infos(&queues);
+        let features =
+            vk::PhysicalDeviceFeatures::default().full_draw_index_uint32(full_draw_index_uint32);
+        let info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queues)
+            .enabled_features(&features);
         budget.object()?;
-        // SAFETY: Selected nonempty queue family, one queue, no optional device
-        // features/extensions, live create-info borrows and unique new device.
+        // SAFETY: Selected nonempty queue family and one queue. The only
+        // optional feature is the just-queried fullDrawIndexUint32 support;
+        // all other features/extensions remain disabled. Borrows remain live.
         let raw = result(
             unsafe { instance.raw.create_device(physical, &info, None) },
             "vkCreateDevice",
@@ -237,8 +262,17 @@ impl Device {
             family,
             properties,
             memory,
+            full_draw_index_uint32,
             _thread: PhantomData,
         })
+    }
+
+    pub fn check_index_value(&self, maximum: u32) -> Result<(), VulkanError> {
+        check_index_value(
+            self.full_draw_index_uint32,
+            self.properties.limits.max_draw_indexed_index_value,
+            maximum,
+        )
     }
 
     pub fn memory_type(
@@ -295,5 +329,26 @@ impl Drop for Device {
         // Batch completed or proved device loss before permitting its children
         // to drop; an unproven cleanup instead terminates the isolated worker.
         unsafe { self.raw.destroy_device(None) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexed_values_obey_the_enabled_feature_and_actual_reported_limit() {
+        // A uint32 buffer can hold values above a device's supported range.
+        // Its byte width does not authorize those values on a fallback host.
+        assert_eq!(check_index_value(false, 0x00ff_ffff, 0x00ff_ffff), Ok(()));
+        assert_eq!(
+            check_index_value(false, 0x00ff_ffff, 0x0100_0000),
+            Err(VulkanError::Unsupported("index value exceeds device limit"))
+        );
+        assert_eq!(check_index_value(false, 0x1234_5678, 0x1234_5678), Ok(()));
+        assert!(check_index_value(false, 0x1234_5678, 0x1234_5679).is_err());
+        assert_eq!(check_index_value(true, u32::MAX, u32::MAX), Ok(()));
+        assert!(check_index_value(true, 0x00ff_ffff, 0).is_err());
+        assert!(check_index_value(false, 0x00ff_fffe, 0).is_err());
     }
 }

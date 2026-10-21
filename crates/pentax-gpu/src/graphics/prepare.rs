@@ -3,8 +3,8 @@
 // Modified 2026 for PentaX: explicit register/profile admission and owned resources.
 
 use super::{
-    Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw, RegisterSpace,
-    TargetDecodeLimits, TargetGeometry, TargetLayout, Usage,
+    Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw,
+    PreparedIndices, RegisterSpace, TargetDecodeLimits, TargetGeometry, TargetLayout, Usage,
 };
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
@@ -61,6 +61,9 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
     }
     if state.get(RegisterSpace::Uconfig, 0x24a)? != 0 {
         return Err(Error::Unsupported("draw-state vertex/instance offsets"));
+    }
+    if draw.indices.is_some() && state.get(RegisterSpace::Uconfig, 0x24b)? != 0 {
+        return Err(Error::Unsupported("indexed primitive restart"));
     }
     let vertices = u64::from(draw.vertex_count)
         .checked_mul(u64::from(draw.instance_count))
@@ -502,6 +505,54 @@ pub fn prepare_draw_with_target(
     drop(vertex_program);
     drop(pixel_program);
     budget.release(program_bytes)?;
+    let indices = if let Some(source) = draw.indices {
+        let size = usize::try_from(draw.vertex_count)
+            .ok()
+            .and_then(|count| count.checked_mul(source.index_type.byte_width()))
+            .filter(|size| *size != 0)
+            .ok_or(Error::Limit("index bytes"))?;
+        let end = source
+            .address
+            .checked_add(size as u64)
+            .filter(|end| *end <= 1 << 47)
+            .ok_or(Error::Unsupported("index extent"))?;
+        if source.address == 0
+            || !source
+                .address
+                .is_multiple_of(source.index_type.byte_width() as u64)
+        {
+            return Err(Error::Unsupported("index alignment"));
+        }
+        if source.address < target_end && config.address < end {
+            return Err(Error::Unsupported("render target overlaps index source"));
+        }
+        budget.work(
+            (size as u64)
+                .checked_mul(2)
+                .ok_or(Error::Limit("index work"))?,
+        )?;
+        budget.host(size)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::Allocation)?;
+        budget.host(bytes.capacity() - size)?;
+        bytes.resize(size, 0);
+        memory
+            .snapshot_buffer(source.address, &mut bytes, true, false)
+            .map_err(Error::Memory)?;
+        Some(PreparedIndices {
+            range: crate::compute::CommandRange {
+                address: source.address,
+                size: size as u64,
+            },
+            index_type: source.index_type,
+            count: draw.vertex_count,
+            bytes,
+        })
+    } else {
+        None
+    };
     budget.host(config.bytes)?;
     budget.work(config.bytes as u64)?;
     let mut input = Vec::new();
@@ -572,6 +623,7 @@ pub fn prepare_draw_with_target(
         vertex_count: draw.vertex_count,
         instance_count: draw.instance_count,
         shader_ranges,
+        indices,
         usage: budget.usage,
     })
 }

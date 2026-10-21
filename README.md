@@ -40,9 +40,9 @@ system-service contracts and reusable runtime components.
 | CPU execution | A bounded Windows x86-64 native worker with mediated instructions, checked memory access and explicit unsupported operations. |
 | System services | Stateful kernel/libc subsets, read-only game-data mounts and selected module-initialization paths. |
 | Memory | Owned guest mappings, shared physical backing, independent CPU/GPU access rights and bounded resource policies. |
-| Graphics | Shader compilation to SPIR-V, guest compute and bounded nonindexed triangle-list draws to linear or RenderTarget64KB RGBA8 targets, with LOAD preservation, fenced readback and atomic guest writeback. |
+| Graphics | Shader compilation to SPIR-V, guest compute and bounded triangle-list draws with automatic or explicit 16/32-bit indices to linear or RenderTarget64KB RGBA8 targets, with LOAD preservation, fenced readback and atomic guest writeback. |
 | Video output | Owned CPU/GPU flip queues, retained flip/vblank events and a supervised Vulkan window with exact presentation acknowledgement. |
-| Desktop | A native library with supervised Play/Stop startup sessions, global/per-title preferences, and keyboard, mouse and controller navigation. |
+| Desktop | A native library with supervised Play/Stop sessions, global/per-title preferences, and keyboard, mouse and controller navigation. |
 
 A verified original 1920×1080 native program draws through Vulkan into a tiled
 target, queues its GPU flip and presents one frame through the worker-owned

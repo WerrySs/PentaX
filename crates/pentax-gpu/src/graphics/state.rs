@@ -2,7 +2,7 @@
 // Copyright (c) 2021 InoriRus
 // Modified 2026 for PentaX: explicit finite known-state ownership, no reset guesses.
 
-use super::{Error, RegisterSpace};
+use super::{Error, IndexType, RegisterSpace};
 use std::fmt;
 
 /// Register values from admitted graphics queue history only. Every required
@@ -13,7 +13,9 @@ pub struct GraphicsState {
     sh: [Option<u32>; 0x100],
     primitive: Option<u32>,
     index_offset: Option<u32>,
+    primitive_restart: Option<u32>,
     pub(super) instances: Option<u32>,
+    pub(super) index_type: Option<IndexType>,
 }
 impl Default for GraphicsState {
     fn default() -> Self {
@@ -27,7 +29,9 @@ impl fmt::Debug for GraphicsState {
             .field("known_sh", &self.sh.iter().flatten().count())
             .field("known_primitive", &self.primitive.is_some())
             .field("known_index_offset", &self.index_offset.is_some())
+            .field("known_primitive_restart", &self.primitive_restart.is_some())
             .field("known_instances", &self.instances.is_some())
+            .field("index_type", &self.index_type)
             .finish()
     }
 }
@@ -38,7 +42,9 @@ impl GraphicsState {
             sh: [None; 0x100],
             primitive: None,
             index_offset: None,
+            primitive_restart: None,
             instances: None,
+            index_type: None,
         }
     }
     pub(super) fn get(&self, space: RegisterSpace, register: u32) -> Result<u32, Error> {
@@ -48,6 +54,7 @@ impl GraphicsState {
             RegisterSpace::Uconfig => match register {
                 0x242 => self.primitive,
                 0x24a => self.index_offset,
+                0x24b => self.primitive_restart,
                 _ => None,
             },
         };
@@ -76,6 +83,7 @@ impl GraphicsState {
             }
             RegisterSpace::Uconfig if register == 0x242 => self.primitive = Some(value),
             RegisterSpace::Uconfig if register == 0x24a => self.index_offset = Some(value),
+            RegisterSpace::Uconfig if register == 0x24b => self.primitive_restart = Some(value),
             _ => return Err(Error::Unsupported("graphics register")),
         }
         Ok(())
