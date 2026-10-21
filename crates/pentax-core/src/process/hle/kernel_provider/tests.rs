@@ -26,6 +26,8 @@ mod audio_out2;
 
 #[path = "configured_memory_tests.rs"]
 mod configured_memory;
+#[path = "pad_runtime_tests.rs"]
+mod pad_runtime;
 #[path = "posix_self_tests.rs"]
 mod posix_self;
 #[path = "posix_usleep_tests.rs"]

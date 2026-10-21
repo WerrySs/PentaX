@@ -318,13 +318,39 @@ SystemService/libSceSystemService spellings. Their appended registrations keep
 all earlier marker IDs stable. They do not query host monitor capabilities or
 establish HDR rendering support.
 
-Controller entry services retain the pinned PadInit/PadClose no-op contracts,
+Controller entry services retain the PadInit/PadClose normal zero results,
 configured user/port/index rules for PadOpen/PadGetHandle, exact int32 error
 words and the one-byte PadIsRemoteController output. Normal and reviewed
 libSce-prefixed identities have exact module1.1/library1 scopes. User-dependent
 calls retain the observed configured profile; work refusal occurs before that
 observation. These entries do not imply a connected device or delivered input.
-Actual snapshots, host-device integration, motion and haptics remain unfinished.
+PadInit initializes process-owned input once without observing the user.
+The seven runtime roles bind only exact libScePad module1.1 / libScePad library1.
+Handle1 is checked before null/count errors; normal SCE int32 errors remain
+zero-extended, while backing and quota failures are typed.
+
+PadRead serializes actual owned120-byte snapshots. The default is explicitly
+disconnected: neutral sticks, identity orientation, gravity along +Y and zero
+input/connection counts. An empty queue yields one current record; a fixed64
+queue retains real owner-supplied changes and returns only actual records.
+Successful whole-span output precedes dequeue. Shared I/O, scratch, byte and
+work bounds apply. All padding is zero; unchanged polls never invent input
+events or timestamps. First PadInit captures microseconds from the kernel's
+owned monotonic epoch, deliberately distinct from the optional native-counter
+ProcessTime origin. Repeated initialization preserves input, queue and time.
+Snapshot publication validates finite motion, bounded fields and monotonic time.
+
+ControllerInformation serializes28 bytes from an explicit static profile plus
+the actual snapshot's connection fields. Desired vibration2B, light-bar3B and
+trigger120B requests persist only after checked inputs and full validation.
+Trigger modes0..6 decode into the reference effect request; both modes are
+validated even if their mask is clear. TriggerEffectState retains the source's
+zero8B status rather than inventing a hardware receipt. Tilt stores the setting
+and advances a checked reset generation on every accepted setter, including
+repeated settings, so the supplying motion owner can reset its own filter.
+This resolved-input/device boundary provides no host controller discovery,
+desktop input bridge, motion fusion or physical rumble/light/trigger delivery.
+Accepted requests do not claim those effects.
 
 Hardware-model queries retain the pinned base-console profile: Trinity is false
 and operation mode/submode are2/0. They never infer capabilities from the host.

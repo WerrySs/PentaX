@@ -218,7 +218,7 @@ Ported sources:
   src/libs/libKernel.cpp: KernelIsTrinityMode base-console result and exact
     KernelGetOperationMode mode/submode words; PentaX replaces raw pointer
     stores with fault-atomic normalized spans preserving source alias order
-  src/libs/controller.cpp and libPad.cpp: source-no-op initialization/close,
+  src/libs/controller.cpp and libPad.cpp: original initialization/close results,
     configured user/port/index validation, numeric handle/error contracts and
     exact one-byte remote-controller query; PentaX does not infer a connected
     device, host input snapshot, motion/haptic effect or OS controller handle
@@ -683,3 +683,31 @@ validated resource policy, precharged checked eight-byte output and dedicated
 pre-effect flexible mapping admission. A private membership flag survives
 range splits and excludes direct, internal and imported image mappings.
 No available-memory API, host RAM query or metadata-driven pool setter is added.
+
+The seven Pad runtime roles additionally adapt PUBLIC AnyPS5, by the AnyPS5
+contributors, revision 80565c59424190cd0f660f8097945443a0017c42:
+  core/libs/prx/libScePad/Export.cpp:65-239,
+    Git blob 362519358fcefe0e36fd94cd1787e5599f047728
+  core/libs/prx/libScePad/src/PadState.cpp:113-345,
+    Git blob 5a6795f32edcbf4e950f5e3057151f85a00b8ff5
+  core/libs/SceTypes.hpp:918-1041,
+    Git blob 4f8d8e8fd7adffdbac002cb7b7d90574247d2023
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/core/libs/prx/libScePad/Export.cpp
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/core/libs/prx/libScePad/src/PadState.cpp
+  https://github.com/boykopovar/AnyPS5/blob/80565c59424190cd0f660f8097945443a0017c42/core/libs/SceTypes.hpp
+Its README explicitly selects GPL-2.0-only; the retained GPLv2 text applies.
+Canonical NIDs are independently present in PUBLIC KytyPS5 revision
+f186b35706ddbc3faf5513f326e2335d224802f7 src/libs/libPad.cpp:154-182,
+Git blob e817d6473b27338cba198b0e1d30977d6292f8ec. Its original InoriRus
+copyright and retained MIT grant continue to apply. Namespace facts only are
+corroborated by shadPS4 revision 8d50471b7dc141dd700b51276b8edd1f293bce26
+src/core/libraries/pad/pad.cpp:697-778 (GPL-2.0-or-later); no stub body is copied.
+PentaX modifications,2026: seven append-only exact libScePad1.1/library1
+bindings, checked complete input/output transactions, process-owned resolved
+input and desired output, a fixed64-change queue and truthful disconnected
+default. Output failure retains queued input. Initialization uses the owned
+monotonic runtime epoch; polling does not create timestamps. Motion fusion is
+delegated to the supplying owner, whose checked tilt-reset generation records
+every accepted reset request. Desired trigger commands are decoded as in the
+reference; the zero status getter is not interpreted as hardware delivery.
+No host device, input capture, physical rumble or applied motion is fabricated.

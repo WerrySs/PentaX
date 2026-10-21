@@ -122,13 +122,13 @@ jobs:
       - name: Test native string-index state and dependent continuations
         run: >-
           cargo test --locked -p pentax-platform --lib -- native_string_index_tests:: packed_comparison_all_controls_and_lengths_match_hardware --test-threads=1 --nocapture
-      - name: Test configured memory, user privacy and graceful observations
+      - name: Test controller state, configured memory, privacy and observations
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
           PENTAX_TEST_CLI: ${{ github.workspace }}/target/release/pentax-cli.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe --
-          kernel_results::configured_flexible_memory:: kernel_results::user_privacy_ws1:: kernel_results::observation_stop::
+          kernel_results::pad_runtime:: kernel_results::pad:: kernel_results::configured_flexible_memory:: kernel_results::user_privacy_ws1:: kernel_results::observation_stop::
           --test-threads=1
       - name: Test indexed graphics host admission
         run: >-

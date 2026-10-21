@@ -752,3 +752,12 @@ These four roles append
 only their canonical and independently observed exact scope pairs; the distinct
 Initialize ABI remains unavailable. Neither a complete allocator lifecycle nor
 official firmware callback behavior is claimed.
+
+Seven additional Pad runtime markers append only the exact libScePad module1.1 /
+libScePad library1 profile. Existing sites, ordinals and object RVAs are retained.
+The kernel owns checked input snapshots and desired device requests; its
+disconnected default does not imply a physical controller. Actual native
+backing/current-rights checks cover full2/3/8/28/120-byte spans, and a failed
+PadRead output preserves queued input. The kernel's explicit owner API is the
+future device boundary; this provider adds no desktop/game-input bridge,
+motion fusion or hardware acknowledgement. See pentax-kernel/NOTICE.

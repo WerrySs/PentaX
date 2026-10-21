@@ -2,14 +2,14 @@
 use super::*;
 
 #[test]
-fn controller_entries_preserve_source_user_port_errors_and_noop_contracts() {
+fn controller_entries_preserve_source_user_port_errors_and_identity_contracts() {
     let mut k = kernel(Default::default());
     let mut g = TestGuest::new();
     let profile = UserConfig {
         id: 37,
         ..Default::default()
     };
-    // Init/close ignore every input and don't freeze an unobserved user profile.
+    // Init/close ignore inputs and don't freeze an unobserved user profile.
     assert_eq!(
         call(&mut k, &mut g, Service::PadInit, &[u64::MAX; 6]),
         Ok(0)

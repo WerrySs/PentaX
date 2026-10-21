@@ -40,6 +40,8 @@ mod np;
 mod output;
 #[path = "tests/pad.rs"]
 mod pad;
+#[path = "tests/pad_runtime.rs"]
+mod pad_runtime;
 #[path = "tests/save.rs"]
 mod save;
 #[path = "tests/save_memory.rs"]

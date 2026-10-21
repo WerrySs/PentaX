@@ -204,6 +204,8 @@ mod np;
 mod output;
 #[path = "pad.rs"]
 mod pad;
+#[path = "pad_runtime.rs"]
+mod pad_runtime;
 #[path = "playgo.rs"]
 mod playgo;
 #[path = "raw_input.rs"]

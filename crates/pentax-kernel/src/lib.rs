@@ -35,6 +35,9 @@ mod np;
 mod np_webapi2;
 mod output;
 mod pad;
+pub use pad::{
+    PadControllerInformation, PadInputSnapshot, PadOutputState, PadTouch, PadTriggerRequest,
+};
 mod playgo;
 mod posix;
 mod pthread_attr;
@@ -489,6 +492,7 @@ pub struct Kernel {
     system_events: system_events::SystemEvents,
     event_queues: event_queue::EventQueues,
     user: user::UserState,
+    pad: pad::PadState,
     np: np::NpState,
     entitlements: entitlement::LocalEntitlements,
     acm: acm::AcmState,
@@ -527,6 +531,33 @@ pub struct Kernel {
 }
 
 impl Kernel {
+    /// Supply a real resolved input change. The fixed 64-change queue retains
+    /// the newest events. This discovers no host controller or hardware status.
+    pub fn publish_pad_snapshot(&mut self, snapshot: PadInputSnapshot) -> Result<(), Failure> {
+        self.pad.publish(snapshot, &mut self.budget)
+    }
+
+    /// Configure static characteristics before the first PadInit.
+    pub fn configure_pad_information(
+        &mut self,
+        information: PadControllerInformation,
+    ) -> Result<(), Failure> {
+        self.pad
+            .configure_information(information, &mut self.budget)
+    }
+
+    /// Desired output; acceptance does not acknowledge hardware application.
+    #[must_use]
+    pub const fn pad_output(&self) -> PadOutputState {
+        self.pad.output()
+    }
+
+    /// Microseconds from the process-owned device monotonic origin.
+    pub fn pad_monotonic_microseconds(&mut self) -> Result<u64, Failure> {
+        self.budget.work(1)?;
+        self.time.device_microseconds()
+    }
+
     pub fn new(
         limits: Limits,
         identity: ProcessIdentity,
@@ -547,6 +578,7 @@ impl Kernel {
             system_events: system_events::SystemEvents::new(limits)?,
             event_queues: event_queue::EventQueues::new(limits)?,
             user: user::UserState::default(),
+            pad: pad::PadState::default(),
             np: np::NpState::new(limits)?,
             entitlements: entitlement::LocalEntitlements::default(),
             acm: acm::AcmState::default(),
@@ -1076,14 +1108,33 @@ impl Kernel {
                 self.event_queues
                     .invoke(service, args, guest, &mut self.budget)
             }
-            PadInit | PadClose | PadOpen | PadGetHandle | PadIsRemote => {
+            PadInit => {
+                self.budget.work(1)?;
+                if !self.pad.initialized() {
+                    let timestamp = self.time.device_microseconds()?;
+                    self.pad.initialize(timestamp);
+                }
+                Ok(0)
+            }
+            PadClose
+            | PadOpen
+            | PadGetHandle
+            | PadIsRemote
+            | PadSetTiltCorrectionState
+            | PadGetTriggerEffectState
+            | PadSetVibration
+            | PadRead
+            | PadGetControllerInformation
+            | PadSetTriggerEffect
+            | PadSetLightBar => {
                 self.budget.work(1)?;
                 let user = if matches!(service, PadOpen | PadGetHandle) {
                     self.user.observed_id()
                 } else {
                     0
                 };
-                pad::invoke(service, args, user, guest, &mut self.budget)
+                self.pad
+                    .invoke(service, args, user, guest, &mut self.budget)
             }
             AmprConstruct | AmprAprConstruct | AmprAprDestruct | AmprDestruct | AmprSetBuffer
             | AmprReset | AmprClearBuffer | AmprGetType | AmprGetOffset | AmprGetNum

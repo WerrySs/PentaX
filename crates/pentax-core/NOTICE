@@ -431,3 +431,13 @@ and object RVAs. Compact capacity is explicit 64 MiB; runtime pagefile and
 file-backed profiles explicitly select 1 GiB alongside 12800 MiB direct
 capacity. Independent current backing/resource admission remains mandatory,
 and mappings never redefine the configured total.
+
+Seven append-only Pad runtime FUNC markers carry only the explicit libScePad
+module1.1/library1 profile. Their checked kernel implementations adapt PUBLIC
+AnyPS5 revision80565c59424190cd0f660f8097945443a0017c42 Export.cpp,
+PadState.cpp and SceTypes.hpp under GPL-2.0-only, with canonical NIDs from
+KytyPS5 f186b35706ddbc3faf5513f326e2335d224802f7 libPad.cpp; exact blobs,
+links, authorship and policy adaptations are retained in pentax-kernel/NOTICE.
+PentaX changes2026 retain exact source/owner/caller/permission admission and
+transactional whole-span outputs. There is no NID-only resolver, namespace
+cross-product, host input discovery or fabricated hardware effect.

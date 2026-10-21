@@ -139,6 +139,13 @@ pub(crate) struct TimeState {
 }
 
 impl TimeState {
+    /// Runtime-owned monotonic origin for resolved device snapshots. Unlike
+    /// ProcessTime this requires no guest/native counter adapter.
+    pub(crate) fn device_microseconds(&self) -> Result<u64, Failure> {
+        u64::try_from(self.epoch.elapsed().as_micros())
+            .map_err(|_| Failure::Limit("device monotonic time"))
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             epoch: Instant::now(),
