@@ -26,6 +26,7 @@ impl MemoryMapRefusal {
         }
     }
 }
+mod configured;
 mod pthread;
 mod ranges;
 mod release;
@@ -44,6 +45,9 @@ struct Mapping {
     protection: u32,
     physical: Option<u64>,
     internal: bool,
+    // Imported image pages also have no physical offset; pool membership must
+    // therefore be explicit rather than inferred from their other flags.
+    flexible: bool,
     pthread: Option<PthreadObjectKind>,
     _name: Vec<u8>,
 }
@@ -149,6 +153,7 @@ impl MemoryState {
             protection: 3,
             physical: None,
             internal: true,
+            flexible: false,
             pthread: None,
             _name: Vec::new(),
         });
@@ -232,6 +237,7 @@ impl MemoryState {
             protection: 3,
             physical: None,
             internal: true,
+            flexible: false,
             pthread: None,
             _name: Vec::new(),
         };
@@ -264,6 +270,9 @@ impl MemoryState {
         let a = args.0;
         match service {
             Service::DirectMemorySize => Ok(self.limits.direct_memory_bytes),
+            Service::ConfiguredFlexibleMemorySize => {
+                self.configured_flexible_size(a[0], guest, budget)
+            }
             Service::AllocateDirect => self.allocate(
                 a[0] as i64,
                 a[1] as i64,
@@ -534,6 +543,9 @@ impl MemoryState {
         budget.can_map(length)?;
         let hint = budget.u64(guest, output)?;
         let address = self.choose_address(hint, length, align, flags, budget)?;
+        if !direct {
+            self.can_map_flexible(length, budget)?;
+        }
         budget.work(length)?;
         let effect = if direct {
             MemoryEffect::MapDirect {
@@ -569,6 +581,7 @@ impl MemoryState {
             protection,
             physical: direct.then_some(extra),
             internal: false,
+            flexible: !direct,
             pthread: None,
             _name: name,
         });

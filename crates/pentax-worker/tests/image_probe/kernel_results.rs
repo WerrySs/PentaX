@@ -174,6 +174,8 @@ mod audio_out2;
 mod audio_out2_lifecycle;
 #[path = "calendar.rs"]
 mod calendar;
+#[path = "configured_flexible_memory.rs"]
+mod configured_flexible_memory;
 #[path = "content_init.rs"]
 mod content_init;
 #[path = "dialog.rs"]

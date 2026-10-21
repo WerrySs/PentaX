@@ -24,6 +24,8 @@ mod acm;
 #[path = "audio_out2_tests.rs"]
 mod audio_out2;
 
+#[path = "configured_memory_tests.rs"]
+mod configured_memory;
 #[path = "posix_self_tests.rs"]
 mod posix_self;
 #[path = "posix_usleep_tests.rs"]

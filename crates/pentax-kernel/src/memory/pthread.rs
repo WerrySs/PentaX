@@ -86,6 +86,7 @@ impl MemoryState {
             protection: 3,
             physical: None,
             internal: true,
+            flexible: false,
             pthread: Some(kind),
             _name: Vec::new(),
         });

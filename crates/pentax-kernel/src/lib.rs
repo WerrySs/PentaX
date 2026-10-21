@@ -1372,6 +1372,7 @@ impl Kernel {
             | AllocateMainDirect
             | ReleaseDirect
             | DirectMemorySize
+            | ConfiguredFlexibleMemorySize
             | MapDirect
             | MapFlexible
             | MapNamedFlexible

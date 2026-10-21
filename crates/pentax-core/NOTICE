@@ -420,3 +420,14 @@ for its exact public sources and scope qualification. PentaX appends the marker
 and library descriptor without moving existing marker IDs, code sites or objects.
 Current source/owner/permissions and captured caller checks remain mandatory;
 no wildcard namespace or NID-only resolution is introduced.
+
+The generated kernel provider additionally appends the exact canonical
+KernelConfiguredFlexibleMemorySize FUNC identity: n1-v6FgU7MQ, libkernel
+module 1.1/library 1, one SysV output argument. Its checked eight-byte kernel
+body and configured-pool policy adapt KytyPS5 revision
+f186b35706ddbc3faf5513f326e2335d224802f7 memory.cpp and libKernel.cpp as
+detailed in pentax-kernel/NOTICE. PentaX retains all existing marker ordinals
+and object RVAs. Compact capacity is explicit 64 MiB; runtime pagefile and
+file-backed profiles explicitly select 1 GiB alongside 12800 MiB direct
+capacity. Independent current backing/resource admission remains mandatory,
+and mappings never redefine the configured total.

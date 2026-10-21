@@ -396,6 +396,17 @@ window policy. Additional reservation headroom is bounded by the selected host
 memory allowance; no pages are
 committed merely by selecting this policy. Compact defaults stay unchanged.
 
+The kernel's configured flexible pool is an explicit immutable policy value:
+64 MiB in the compact profile and 1 GiB in either runtime backing profile,
+alongside the runtime 12800 MiB direct pool. The exact
+`KernelConfiguredFlexibleMemorySize` binding writes that value as eight bytes
+through the current owned backing; null returns the source kernel int32 EINVAL.
+Flexible mappings share the dedicated capacity while retaining independent
+aggregate and host admission. Image protection imports, direct aliases and
+internal runtime mappings do not consume it. Mapping and unmapping change live
+occupancy, never the configured value. Actual backing can still refuse and this
+query does not report free or available memory.
+
 Runtime backing/mapped-alias admission derives from a volatile host snapshot.
 It retains half of scarce physical availability or a 6 GiB initial margin,
 and independently half of scarce commitment or a 2 GiB margin. The result rounds

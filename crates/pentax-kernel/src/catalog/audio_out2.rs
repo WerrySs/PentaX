@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn audio_out2_appends_only_four_stateless_roles_under_two_exact_identities() {
-        assert_eq!(REGISTRATIONS.len(), 1317);
+        assert_eq!(REGISTRATIONS.len(), 1318);
         assert_eq!(
             Service::AudioOut2Initialize as usize,
             Service::AcmContextCreate as usize + 1

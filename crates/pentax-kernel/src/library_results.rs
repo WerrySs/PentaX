@@ -49,6 +49,7 @@ fn error_domain(service: Service) -> Option<ErrorDomain> {
         | Getdents
         | AllocateDirect
         | AllocateMainDirect
+        | ConfiguredFlexibleMemorySize
         | ReleaseDirect
         | MapDirect
         | MapNamedDirect

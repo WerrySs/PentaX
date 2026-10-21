@@ -982,7 +982,7 @@ This getter does not decode a complete firmware process-parameter ABI.
 | Subsystem | Implemented behavior | Explicit boundaries |
 | --- | --- | --- |
 | Direct memory | Bounded first-fit physical ranges, source alignment/search validation, alias-preserving direct maps across allocated pieces, and whole/partial release that withdraws every affected alias subrange | The unchecked source wrapper's unowned-release no-op, pools, GPU/backend effects or flag profiles unsupported by the adapter remain explicit failures |
-| Flexible memory | Zeroed mappings, source name/protection/alignment checks, fixed/no-overwrite profile, whole or subrange unmap/protect, and optional transactional range/protection query outputs | No replacement of existing fixed maps, memory pools or unsupported compatibility/cache behavior; unmap retains the aligned 16 KiB admission profile |
+| Flexible memory | Explicit configured pool, zeroed mappings, source name/protection/alignment checks, fixed/no-overwrite profile, whole or subrange unmap/protect, and optional transactional range/protection query outputs | No replacement of existing fixed maps or unsupported compatibility/cache behavior; unmap retains the aligned 16 KiB admission profile |
 | Files | Explicit read-only capability mounts; open/close/read/pread/seek/stat/fstat/reachability, real positional host reads, separate logical descriptor cursors, 120-byte source FileStat codec | No ambient host-path fallback, writable/device/archive/socket service or directory pread. Actual directory roots expose bounded source-packed enumeration/read/seek/status; inventories remain explicit regular-file sets |
 | Semaphores | Owned counts/attributes, FIFO/priority cooperative waits, reserved grants, deadlines/remaining time and signal/cancel/delete/poll | Blocking requires the runtime continuation interface; negative signal count and creation options remain unsupported |
 | Event flags | Owned patterns, AND/OR, clear-none/all/bits, transactional pattern/time outputs, cooperative waits and cancel/delete cohort drains | Poll during an active drain is typed Unsupported; raw calls cannot block; unknown source-abort mode encodings remain Unsupported |
@@ -996,6 +996,25 @@ guest address. The explicit process identity replaces the source's constant
 PID 100 with owned configured state; the initial TID is not evidence of a
 started native guest thread. Opaque sync handle tags/serials and configured
 capacities are PentaX policies, not firmware pointer or memory-size facts.
+
+`KernelConfiguredFlexibleMemorySize` has one exact libkernel module 1.1 /
+libkernel library 1 registration, NID `n1-v6FgU7MQ`. Its one argument is an
+eight-byte guest output: null returns the normal kernel int32 EINVAL value
+`0x80020016`; otherwise one checked transaction writes the immutable configured
+capacity and returns zero. Backing, policy and work failures remain typed stops.
+`Limits::flexible_memory_bytes` defaults to 64 MiB for compact fixtures; the
+explicit runtime memory profile selects the pinned 1 GiB pool alongside
+12800 MiB of direct memory. Configuration must be nonzero, aligned to 16 KiB
+and below the pinned 13824 MiB total. These are configured capacities, not host
+RAM, free memory, available bytes or a promise that backing admission succeeds.
+
+Actual flexible and named-flexible maps additionally share that pool. Admission
+charges a bounded census of current owned mapping extents before any backing or
+output mutation. Protection splits preserve explicit membership and unmapping
+releases its mapped extent. Direct aliases, internal runtime pages and adopted
+image-protection records remain outside the pool. Mapping, protection and unmap
+never change the configured value. Existing aggregate, host, virtual-address,
+handle, scratch and work limits remain independent and can refuse earlier.
 Physical allocation preserves the source's zero-alignment rule: the search
 start is unchanged even when it is not page aligned. Explicit physical
 alignment and virtual mapping alignment retain their separate checks.

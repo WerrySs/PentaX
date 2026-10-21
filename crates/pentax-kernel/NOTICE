@@ -669,3 +669,17 @@ show its NID/type fallback across scopes. PentaX retains only the single
 qualified FUNC identity, appends it after every existing marker, and keeps its
 resolver's exact module/library/version checks. It introduces no generic
 fallback, host query, new quota or fabricated guest result on backing failure.
+
+KernelConfiguredFlexibleMemorySize additionally adapts PUBLIC KytyPS5/KytyPS5
+revision f186b35706ddbc3faf5513f326e2335d224802f7, src/kernel/memory.cpp
+Git blob 2edeb10972ac49606980c2719dd1be79ad7a146c, lines 3507-3518, and the
+exact libkernel module 1.1/library 1 registration in src/libs/libKernel.cpp:2961.
+FlexibleMemory::Size, Initialize and Set in memory.cpp:683,920-927,984-990
+retain a configured capacity independent of mappings; the default is 1 GiB and
+the direct pool subtracts it from 13824 MiB. Copyright (c) 2021 InoriRus;
+GPL-2.0-only and the retained Kyty MIT grant continue to apply.
+PentaX modifications, 2026: immutable explicit compact/runtime capacities,
+validated resource policy, precharged checked eight-byte output and dedicated
+pre-effect flexible mapping admission. A private membership flag survives
+range splits and excludes direct, internal and imported image mappings.
+No available-memory API, host RAM query or metadata-driven pool setter is added.

@@ -29,6 +29,9 @@ pub struct Limits {
     pub max_apr_submissions: usize,
     pub max_mapped_bytes: u64,
     pub direct_memory_bytes: u64,
+    /// Immutable guest flexible-pool capacity, independent of live mapped bytes
+    /// and the host's backing/commitment allowance. Actual flexible maps share it.
+    pub flexible_memory_bytes: u64,
     pub virtual_base: u64,
     pub virtual_bytes: u64,
     /// Optional exclusive search ceiling for nonfixed mappings. The initial
@@ -63,6 +66,7 @@ impl Default for Limits {
             max_apr_submissions: 65_536,
             max_mapped_bytes: 64 * 1024 * 1024,
             direct_memory_bytes: 64 * 1024 * 1024,
+            flexible_memory_bytes: 64 * 1024 * 1024,
             virtual_base: 0x1_0000_0000,
             virtual_bytes: 256 * 1024 * 1024,
             nonfixed_virtual_end: None,
@@ -123,6 +127,9 @@ impl Budget {
             || limits.virtual_bytes & 0x3fff != 0
             || limits.direct_memory_bytes & 0x3fff != 0
             || limits.direct_memory_bytes > i64::MAX as u64
+            || limits.flexible_memory_bytes == 0
+            || limits.flexible_memory_bytes & 0x3fff != 0
+            || limits.flexible_memory_bytes >= 13_824 * 1024 * 1024
             || limits.virtual_base == 0
             || limits.nonfixed_virtual_end.is_some_and(|end| {
                 end & 0x3fff != 0

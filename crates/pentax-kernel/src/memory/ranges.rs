@@ -217,6 +217,7 @@ impl MemoryState {
                 protection,
                 physical: None,
                 internal: false,
+                flexible: false,
                 pthread: None,
                 _name: Vec::new(),
             });
@@ -269,6 +270,7 @@ impl Mapping {
             protection,
             physical,
             internal: self.internal,
+            flexible: self.flexible,
             pthread: self.pthread,
             _name: name,
         })
@@ -278,6 +280,7 @@ impl Mapping {
             && self.start + self.length == right.start
             && self.protection == right.protection
             && self.internal == right.internal
+            && self.flexible == right.flexible
             && self.pthread == right.pthread
             && self._name == right._name
             && match (self.physical, right.physical) {

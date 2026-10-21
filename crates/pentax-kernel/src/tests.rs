@@ -47,6 +47,8 @@ mod save_memory;
 #[path = "tests/sysmodule.rs"]
 mod sysmodule;
 
+#[path = "tests/configured_memory.rs"]
+mod configured_memory;
 #[path = "tests/share.rs"]
 mod share;
 #[path = "tests/system.rs"]

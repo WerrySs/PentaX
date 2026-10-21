@@ -53,6 +53,7 @@ impl NativeImageLimits {
         // Pinned source 209dffe: 13824 MiB total minus default 1024 MiB flexible.
         // Addressable guest capacity does not authorize equal host commitment.
         self.startup.kernel.direct_memory_bytes = 12_800 * MIB;
+        self.startup.kernel.flexible_memory_bytes = GIB;
         // Address headroom for direct aliases and flexible mappings. This is a
         // PentaX virtual-window policy, not a claim about firmware layout.
         self.kernel_window_bytes = 32 * GIB;
@@ -133,6 +134,7 @@ mod tests {
                 .unwrap();
             let backing = limits.file_backing.as_ref().unwrap();
             assert_eq!(backing.capacity_bytes, 12_800 * MIB);
+            assert_eq!(limits.startup.kernel.flexible_memory_bytes, GIB);
             assert_eq!(backing.private_commit_limit_bytes, private);
             assert_eq!(limits.native.session.resident_limit, 14 * GIB);
             assert_eq!(limits.native.session.mapped_limit, 14 * GIB);
@@ -144,6 +146,7 @@ mod tests {
             assert!(restored.file_backing.is_none());
             assert!(restored.defer_physical_commit);
             assert_eq!(restored.native.session.resident_limit, private);
+            assert_eq!(restored.startup.kernel.flexible_memory_bytes, GIB);
         }
         assert_eq!(
             NativeImageLimits::default()
@@ -193,6 +196,8 @@ mod tests {
             assert!(runtime.defer_physical_commit);
             assert!(!compact.defer_physical_commit);
             assert_eq!(runtime.startup.kernel.direct_memory_bytes, 12_800 * MIB);
+            assert_eq!(runtime.startup.kernel.flexible_memory_bytes, GIB);
+            assert_eq!(compact.startup.kernel.flexible_memory_bytes, 64 * MIB);
             assert_eq!(
                 runtime.startup.kernel.max_mapped_bytes + 512 * MIB,
                 expected
