@@ -75,6 +75,16 @@ pub struct KernelStartupLimits {
     pub user: pentax_kernel::UserConfig,
     pub max_kernel_provider_bytes: u64,
     pub max_provider_work: u64,
+    /// Optional work bound for one JSON body or qualified module lookup,
+    /// independent of the cumulative provider ledger. None retains the
+    /// diagnostic profile's original shared allowance.
+    pub max_provider_call_work: Option<u64>,
+    /// Optional retained published-stop metadata capacity, in bytes. None
+    /// preserves the original bound inherited from max_provider_work.
+    pub max_provider_metadata_bytes: Option<u64>,
+    /// Optional independent cumulative native-request ledger. None retains
+    /// the original checked sum of kernel and required-libc attempt limits.
+    pub max_native_service_requests: Option<u64>,
 }
 
 impl Default for KernelStartupLimits {
@@ -86,7 +96,26 @@ impl Default for KernelStartupLimits {
             user: pentax_kernel::UserConfig::default(),
             max_kernel_provider_bytes: MAX_IMAGE_BYTES,
             max_provider_work: 16 * 1024 * 1024,
+            max_provider_call_work: None,
+            max_provider_metadata_bytes: None,
+            max_native_service_requests: None,
         }
+    }
+}
+
+impl KernelStartupLimits {
+    fn provider_call_maximum(&self, used: u64) -> Result<u64, KernelStartupError> {
+        match self.max_provider_call_work {
+            Some(work) => used
+                .checked_add(work)
+                .map(|maximum| maximum.min(self.max_provider_work))
+                .ok_or(KernelStartupError::Budget("provider call work")),
+            None => Ok(self.max_provider_work),
+        }
+    }
+
+    fn provider_call_remaining(&self, used: u64) -> Result<u64, KernelStartupError> {
+        Ok(self.provider_call_maximum(used)?.saturating_sub(used))
     }
 }
 
@@ -907,7 +936,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             lookup_limits: Some(pentax_linker::ModuleLookupLimits {
                 symbolic: self.plan.limits.startup.hle.linking,
                 max_name_bytes: self.plan.limits.kernel.max_name_bytes,
-                max_work: self.plan.limits.max_provider_work,
+                max_work: self.plan.limits.provider_call_maximum(self.provider_work)?,
             }),
             lookup_work: Some(&mut self.provider_work),
             loaded_modules: Some(&mut self.loaded_modules),

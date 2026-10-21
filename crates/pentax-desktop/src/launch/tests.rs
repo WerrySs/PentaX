@@ -77,13 +77,17 @@ fn launch_plan_selects_only_named_sources_and_keeps_title_storage_and_preference
     );
     assert_eq!(
         value(&plan, "--execution-profile"),
-        Some(std::ffi::OsStr::new("long-startup"))
+        Some(std::ffi::OsStr::new("interactive"))
     );
     assert_eq!(
         value(&plan, "--memory-profile"),
         Some(std::ffi::OsStr::new("runtime"))
     );
     let root = game.canonicalize().unwrap();
+    assert_eq!(
+        value(&plan, "--libc-memory-builtins"),
+        Some(std::ffi::OsStr::new("checked"))
+    );
     assert_eq!(
         value(&plan, "--data-directory"),
         Some(binding("/app0", &root).as_os_str())
@@ -146,6 +150,8 @@ fn launch_refuses_storage_overlap_before_creation_and_uses_stable_full_digest_ke
     ));
     assert!(!nested.exists());
     let key = title_key(&image, None).unwrap();
+    let no_libc = Plan::prepare(&entry, &temporary.0.join("preferences")).unwrap();
+    assert_eq!(value(&no_libc, "--libc-memory-builtins"), None);
     assert_eq!(key.len(), 70);
     assert_eq!(key, title_key(&image, None).unwrap());
     assert_ne!(

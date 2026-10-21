@@ -61,6 +61,14 @@ impl PublishedUnavailable {
         let bytes = slots
             .checked_mul(std::mem::size_of::<Site>())
             .ok_or(KernelStartupError::Budget("published stop allocation"))?;
+        let maximum_bytes = limits
+            .max_provider_metadata_bytes
+            .unwrap_or(limits.max_provider_work);
+        // Preserve the diagnostic profile's original charged refusal order.
+        // An independent interactive byte cap is admitted before allocation.
+        if limits.max_provider_metadata_bytes.is_some() && bytes as u64 > maximum_bytes {
+            return Err(KernelStartupError::Budget("published stop allocation"));
+        }
         let admission = (count as u64)
             .checked_mul(super::super::public_names::DIAGNOSTIC_WORK)
             .and_then(|value| value.checked_add((slots as u64).checked_mul(128)?))
@@ -74,7 +82,7 @@ impl PublishedUnavailable {
         if sites
             .capacity()
             .checked_mul(std::mem::size_of::<Site>())
-            .is_none_or(|actual| actual as u64 > limits.max_provider_work)
+            .is_none_or(|actual| actual as u64 > maximum_bytes)
         {
             return Err(KernelStartupError::Budget("published stop allocation"));
         }
@@ -552,6 +560,19 @@ mod tests {
             Err(KernelStartupError::Budget(_))
         ));
         assert!(origin.validate_source(&source, &mut 0, 0).is_err());
+        let mut lifetime = limits();
+        lifetime.max_provider_work = u64::MAX;
+        lifetime.max_provider_metadata_bytes =
+            Some(((factory.function_count() + 1) * std::mem::size_of::<Site>()) as u64 - 1);
+        let mut refused_work = 0;
+        assert!(matches!(
+            PublishedUnavailable::prepare(&factory, 1, bias, &lifetime, &mut refused_work),
+            Err(KernelStartupError::Budget("published stop allocation"))
+        ));
+        assert_eq!(refused_work, 0); // Requested capacity refused before reserve.
+        lifetime.max_provider_metadata_bytes = Some(limits().max_provider_work);
+        let bounded = PublishedUnavailable::prepare(&factory, 1, bias, &lifetime, &mut 0).unwrap();
+        assert_eq!(bounded.function_count(), origin.function_count());
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]

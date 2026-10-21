@@ -232,6 +232,10 @@ pub(super) fn stop(
         &mut session.provider_work,
         session.plan.limits.max_provider_work,
     )?;
+    let maximum = session
+        .plan
+        .limits
+        .provider_call_maximum(session.provider_work)?;
     // Attribute only a failure inside the already admitted public body. Keep
     // every source/owner/site/ID/continuation/live-byte refusal above unlabeled,
     // and leave successful JSON calls in their existing other-provider bucket.
@@ -250,11 +254,7 @@ pub(super) fn stop(
             // object, including padding. Its constructor explicitly accepts
             // null and returns self; no host-owned Node representation is used.
             if request.args[0] != 0 {
-                charge(
-                    &mut session.provider_work,
-                    32,
-                    session.plan.limits.max_provider_work,
-                )?;
+                charge(&mut session.provider_work, 32, maximum)?;
                 paused.write(request.args[0], &[0; 32]).map_err(|e| {
                     KernelStartupError::Kernel(pentax_kernel::Failure::Guest(
                         super::super::kernel_adapter::error(e, true),
@@ -267,11 +267,7 @@ pub(super) fn stop(
             // AnyPS5's observed SysV void constructor writes only the first word.
             // Whole-span write preflight precedes every effect; no object-size,
             // alignment, allocation method or RTTI contract is fabricated.
-            charge(
-                &mut session.provider_work,
-                8,
-                session.plan.limits.max_provider_work,
-            )?;
+            charge(&mut session.provider_work, 8, maximum)?;
             require(request.args[0] != 0, "null JSON constructor object")?;
             paused
                 .write(
@@ -314,7 +310,7 @@ pub(super) fn stop(
                 &mut session.kernel,
                 call,
                 &mut session.provider_work,
-                session.plan.limits.max_provider_work,
+                maximum,
             )
         }
     })();

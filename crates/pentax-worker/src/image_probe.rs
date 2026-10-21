@@ -20,6 +20,7 @@ use std::os::windows::fs::OpenOptionsExt;
 mod backing;
 mod data_files;
 mod dispatch_diagnostics;
+mod interactive;
 mod private_console;
 
 pub(super) enum ProbeError {
@@ -377,6 +378,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[1] != "startup"
                 && pair[1] != "extended-startup"
                 && pair[1] != "long-startup"
+                && pair[1] != "interactive"
         })
         || args
             .chunks_exact(2)
@@ -682,9 +684,13 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
             }
             .map_err(|error| ProbeError::Input(error.code()))?;
         }
-        let long_startup = args
+        let interactive = args
             .chunks_exact(2)
-            .any(|pair| pair[0] == "--execution-profile" && pair[1] == "long-startup");
+            .any(|pair| pair[0] == "--execution-profile" && pair[1] == "interactive");
+        let long_startup = interactive
+            || args
+                .chunks_exact(2)
+                .any(|pair| pair[0] == "--execution-profile" && pair[1] == "long-startup");
         let extended_startup = long_startup
             || args
                 .chunks_exact(2)
@@ -718,6 +724,9 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
             // Compute, cumulative driver work, memory and time caps stay fixed.
             limits.graphics.graphics.max_work = 256 * 1024 * 1024;
             limits.graphics.graphics_backend_work = Some(64 * 1024 * 1024 * 1024);
+        }
+        if interactive {
+            interactive::configure_image(&mut limits);
         }
         limits.startup_libc = intake.startup_libc;
         limits.startup.system = intake.system;
@@ -760,6 +769,7 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                 crate::protocol("RUNNING\tmode=entry-probe")
                     .map_err(|_| NativeSessionError::OutputUnavailable)?;
                 let mut execution = NativeSessionLimits {
+                    interactive,
                     private_samples: private_samples_file.is_some(),
                     ..Default::default()
                 };
@@ -797,6 +807,9 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                     execution.max_total_window_bytes *= 5;
                     execution.max_admission_work *= 5;
                     execution.progress_interval_blocks *= 4;
+                }
+                if interactive {
+                    interactive::configure_execution(&mut execution);
                 }
                 execution.report_progress = true;
                 // Finite native slots retain exact attested code between steps.

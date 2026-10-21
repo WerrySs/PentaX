@@ -2,6 +2,7 @@
 //! Original bounded diagnostics and actual private-job process trees.
 use super::*;
 use std::{
+    io::Write,
     os::windows::process::CommandExt,
     process::{Command, Stdio},
     time::Duration,
@@ -51,7 +52,7 @@ fn actual_private_diagnostic_pipe_preserves_partial_chunks_and_discards_excess_o
     let mut reader = Reader {
         handle: read,
         captured: 0,
-        maximum: 5,
+        maximum: Some(5),
         eof: false,
     };
     let mut output = [0xa5; 4];
@@ -92,6 +93,8 @@ fn actual_private_diagnostic_pipe_preserves_partial_chunks_and_discards_excess_o
 const STREAM_CHILD: &str = "supervised_process::windows::tests::original_stream_payload";
 const TREE_CHILD: &str = "supervised_process::windows::tests::original_tree_payload";
 const GRANDCHILD: &str = "supervised_process::windows::tests::original_grandchild_payload";
+const INTERACTIVE_CHILD: &str =
+    "supervised_process::windows::tests::original_interactive_stream_payload";
 
 fn args(name: &str) -> Vec<OsString> {
     [
@@ -114,7 +117,7 @@ fn actual_job_drains_root_output_and_cancellation_reaps_a_running_descendant_bef
     let _guard = PROCESS_TEST.lock().unwrap();
     let executable = std::env::current_exe().unwrap();
     let limits = Limits {
-        run_timeout: Duration::from_secs(10),
+        run_timeout: Some(Duration::from_secs(10)),
         ..Default::default()
     };
     // Private original-fixture constructor only: the public API still accepts
@@ -176,66 +179,134 @@ fn actual_job_drains_root_output_and_cancellation_reaps_a_running_descendant_bef
 }
 
 #[test]
+fn interactive_job_streams_past_the_finite_output_cap_and_still_cancels_to_actual_eof() {
+    let _guard = PROCESS_TEST.lock().unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let mut process =
+        SupervisedProcess::spawn(&executable, &args(INTERACTIVE_CHILD), Limits::interactive())
+            .unwrap();
+    // Only the elapsed clock is modeled; the process, reads, cancellation,
+    // private-job count and both EOF observations are actual OS operations.
+    process.inner.as_mut().unwrap().started = Instant::now()
+        .checked_sub(Duration::from_secs(7200))
+        .unwrap();
+    let mut out = [0; PUMP_BYTES];
+    let mut err = [0; PUMP_BYTES];
+    let mut stderr = [0; 512];
+    let mut stderr_len: usize = 0;
+    let mut stdout_len = 0_usize;
+    let mut cancelled = false;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = if cancelled {
+            process.shutdown_poll(&mut out, &mut err)
+        } else {
+            process.poll(&mut out, &mut err)
+        }
+        .unwrap();
+        assert!(status.stdout_len <= PUMP_BYTES && status.stderr_len <= PUMP_BYTES);
+        stdout_len = stdout_len.checked_add(status.stdout_len).unwrap();
+        let end = stderr_len.checked_add(status.stderr_len).unwrap();
+        assert!(end <= stderr.len());
+        stderr[stderr_len..end].copy_from_slice(&err[..status.stderr_len]);
+        stderr_len = end;
+        if !cancelled
+            && stdout_len >= 20 * PUMP_BYTES
+            && contains(&stderr[..stderr_len], b"original-interactive-output-ready")
+        {
+            assert!(stdout_len > super::super::OUTPUT_CAP);
+            assert_eq!(status.state, State::Running);
+            process.request_cancel().unwrap();
+            cancelled = true;
+        }
+        if let State::Exited(code) = status.state {
+            assert!(cancelled);
+            assert_eq!(code, 1);
+            assert!(process.inner.is_none());
+            assert_eq!(process.poll(&mut out, &mut err).unwrap(), Status::CLOSED);
+            assert_eq!(ACTIVE.load(Ordering::Acquire), 0);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "interactive original payload did not drain and cancel"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
 fn finished_root_with_retained_diagnostic_writer_has_finite_grace_without_forged_eof() {
     let _guard = PROCESS_TEST.lock().unwrap();
     let executable = std::env::current_exe().unwrap();
-    let limits = Limits::default();
-    let mut process = SupervisedProcess::spawn(&executable, &args(STREAM_CHILD), limits).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
+    for limits in [Limits::default(), Limits::interactive()] {
+        let mut process =
+            SupervisedProcess::spawn(&executable, &args(STREAM_CHILD), limits).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let inner = process.inner.as_mut().unwrap();
+            if inner.exit().unwrap().is_some() && inner.descendants().unwrap() == 0 {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let inner = process.inner.as_mut().unwrap();
-        if inner.exit().unwrap().is_some() && inner.descendants().unwrap() == 0 {
-            break;
+        let mut out = [0; PUMP_BYTES];
+        let mut err = [0; PUMP_BYTES];
+        for _ in 0..32 {
+            inner.stderr.read(&mut err, true).unwrap();
+            if inner.stderr.eof {
+                break;
+            }
         }
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let inner = process.inner.as_mut().unwrap();
-    let mut out = [0; PUMP_BYTES];
-    let mut err = [0; PUMP_BYTES];
-    for _ in 0..32 {
-        inner.stderr.read(&mut err, true).unwrap();
-        if inner.stderr.eof {
-            break;
+        assert!(inner.stderr.eof);
+        // Keep one real writer open after independently observing the real root
+        // exit and empty job. Only the deadline is modeled; no process, job count
+        // or EOF observation is fabricated, and no production hook is introduced.
+        let (read, retained_writer) = pipe().unwrap();
+        inner.stdout = Reader {
+            handle: read,
+            captured: 0,
+            maximum: Some(super::super::OUTPUT_CAP),
+            eof: false,
+        };
+        if limits.run_timeout.is_none() {
+            assert!(inner.stopping.is_none());
+            assert_eq!(
+                inner.poll(&mut out, &mut err, false).unwrap().state,
+                State::Stopping
+            );
+            assert!(inner.stopping.is_some());
+            assert!(!inner.stdout.eof);
         }
+        inner.stopping = Some(
+            Instant::now()
+                .checked_sub(limits.shutdown_grace + Duration::from_secs(1))
+                .unwrap(),
+        );
+        assert_eq!(
+            inner.poll(&mut out, &mut err, true),
+            Err(Error::RestartRequired)
+        );
+        assert!(!inner.stdout.eof);
+        assert_eq!(inner.exit().unwrap(), Some(0));
+        assert_eq!(inner.descendants().unwrap(), 0);
+        // Actual closure, even after a deadline, is independently observable. The
+        // public wrapper may now release its owner without poisoning later tests.
+        drop(retained_writer);
+        assert_eq!(
+            inner.poll(&mut out, &mut err, true).unwrap().state,
+            State::Exited(0)
+        );
+        assert!(inner.stdout.eof);
+        assert_eq!(
+            process.poll(&mut out, &mut err).unwrap().state,
+            State::Exited(0)
+        );
+        assert!(process.inner.is_none());
+        assert_eq!(ACTIVE.load(Ordering::Acquire), 0);
     }
-    assert!(inner.stderr.eof);
-    // Keep one real writer open after independently observing the real root
-    // exit and empty job. Only the deadline is modeled; no process, job count
-    // or EOF observation is fabricated, and no production hook is introduced.
-    let (read, retained_writer) = pipe().unwrap();
-    inner.stdout = Reader {
-        handle: read,
-        captured: 0,
-        maximum: super::super::OUTPUT_CAP,
-        eof: false,
-    };
-    inner.stopping = Some(
-        Instant::now()
-            .checked_sub(limits.shutdown_grace + Duration::from_secs(1))
-            .unwrap(),
-    );
-    assert_eq!(
-        inner.poll(&mut out, &mut err, true),
-        Err(Error::RestartRequired)
-    );
-    assert!(!inner.stdout.eof);
-    assert_eq!(inner.exit().unwrap(), Some(0));
-    assert_eq!(inner.descendants().unwrap(), 0);
-    // Actual closure, even after a deadline, is independently observable. The
-    // public wrapper may now release its owner without poisoning later tests.
-    drop(retained_writer);
-    assert_eq!(
-        inner.poll(&mut out, &mut err, true).unwrap().state,
-        State::Exited(0)
-    );
-    assert!(inner.stdout.eof);
-    assert_eq!(
-        process.poll(&mut out, &mut err).unwrap().state,
-        State::Exited(0)
-    );
-    assert!(process.inner.is_none());
-    assert_eq!(ACTIVE.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -243,6 +314,17 @@ fn finished_root_with_retained_diagnostic_writer_has_finite_grace_without_forged
 fn original_stream_payload() {
     println!("original-output-ready");
     eprintln!("original-error-ready");
+}
+#[test]
+#[ignore = "original streaming payload selected only by its supervised parent test"]
+fn original_interactive_stream_payload() {
+    let mut stdout = std::io::stdout().lock();
+    for _ in 0..20 {
+        stdout.write_all(&[b'x'; PUMP_BYTES]).unwrap();
+    }
+    stdout.flush().unwrap();
+    eprintln!("original-interactive-output-ready");
+    std::thread::sleep(Duration::from_secs(10));
 }
 #[test]
 #[ignore = "original child payload selected only by its supervised parent test"]

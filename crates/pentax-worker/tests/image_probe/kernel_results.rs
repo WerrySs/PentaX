@@ -65,6 +65,8 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
     assert!(!fields.contains_key("value"));
 }
 
+#[path = "interactive.rs"]
+mod interactive;
 #[path = "posix.rs"]
 mod posix;
 #[path = "posix_self.rs"]

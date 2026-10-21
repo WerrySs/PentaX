@@ -48,21 +48,33 @@ pub(crate) trait Transport {
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
     pub wire: pentax_session::Limits,
-    pub max_pumps: u64,
-    pub max_idle_nanoseconds: u64,
+    pub max_pumps: Option<u64>,
+    pub max_idle_nanoseconds: Option<u64>,
     pub handshake_timeout: Duration,
     pub frame_timeout: Duration,
-    pub session_timeout: Duration,
+    pub session_timeout: Option<Duration>,
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
             wire: Default::default(),
-            max_pumps: 1_000_000,
-            max_idle_nanoseconds: 30_000_000_000,
+            max_pumps: Some(1_000_000),
+            max_idle_nanoseconds: Some(30_000_000_000),
             handshake_timeout: Duration::from_secs(10),
             frame_timeout: Duration::from_secs(30),
-            session_timeout: Duration::from_secs(3600),
+            session_timeout: Some(Duration::from_secs(3600)),
+        }
+    }
+}
+impl Limits {
+    /// Removes only cumulative lifetime ceilings. Every handshake, frame,
+    /// allocation, endpoint poll and idle quantum keeps its finite bound.
+    pub(crate) fn interactive() -> Self {
+        Self {
+            max_pumps: None,
+            max_idle_nanoseconds: None,
+            session_timeout: None,
+            ..Self::default()
         }
     }
 }
@@ -144,16 +156,19 @@ impl<'transport> FrameBridge<'transport> {
         generation: u64,
         limits: Limits,
     ) -> Result<Self, Error> {
-        if limits.max_pumps == 0
-            || limits.max_pumps > 1_000_000
-            || limits.max_idle_nanoseconds == 0
-            || limits.max_idle_nanoseconds > 60_000_000_000
+        if limits.max_pumps.is_some_and(|n| n == 0 || n > 1_000_000)
+            || limits
+                .max_idle_nanoseconds
+                .is_some_and(|n| n == 0 || n > 60_000_000_000)
+            || (limits.session_timeout.is_none() != limits.max_pumps.is_none())
+            || (limits.session_timeout.is_none() != limits.max_idle_nanoseconds.is_none())
             || limits.handshake_timeout.is_zero()
             || limits.handshake_timeout > Duration::from_secs(30)
             || limits.frame_timeout.is_zero()
             || limits.frame_timeout > Duration::from_secs(60)
-            || limits.session_timeout.is_zero()
-            || limits.session_timeout > Duration::from_secs(3600)
+            || limits
+                .session_timeout
+                .is_some_and(|timeout| timeout.is_zero() || timeout > Duration::from_secs(3600))
             || transport.max_retained_bytes() > limits.wire.max_staging_bytes
         {
             return Err(Error::Limit);
@@ -239,24 +254,40 @@ impl<'transport> FrameBridge<'transport> {
             || self.deadline.is_some()
     }
     pub(super) fn external_wake(&self) -> Result<Option<ExternalWake>, Error> {
-        self.check_time()?;
+        self.external_wake_at(Instant::now())
+    }
+    fn external_wake_at(&self, now: Instant) -> Result<Option<ExternalWake>, Error> {
+        self.check_time_at(now)?;
         Ok(self.deadline.map(|deadline| ExternalWake {
             delay: deadline
-                .saturating_duration_since(Instant::now())
+                .saturating_duration_since(now)
                 .min(Duration::from_millis(1)),
-            maximum_idle_nanoseconds: self.limits.max_idle_nanoseconds,
+            maximum_idle_nanoseconds: self.limits.max_idle_nanoseconds.unwrap_or(u64::MAX),
         }))
     }
     fn check_time(&self) -> Result<(), Error> {
+        self.check_time_at(Instant::now())
+    }
+    fn check_time_at(&self, now: Instant) -> Result<(), Error> {
         if self.terminal {
             return Err(Error::Closed);
         }
-        let now = Instant::now();
-        if now.duration_since(self.started) >= self.limits.session_timeout
+        if self
+            .limits
+            .session_timeout
+            .is_some_and(|timeout| now.saturating_duration_since(self.started) >= timeout)
             || self.deadline.is_some_and(|end| now >= end)
         {
             return Err(Error::Timeout);
         }
+        Ok(())
+    }
+    fn count_pump(&mut self) -> Result<(), Error> {
+        self.pumps = self
+            .pumps
+            .checked_add(1)
+            .filter(|n| self.limits.max_pumps.is_none_or(|maximum| *n <= maximum))
+            .ok_or(Error::Limit)?;
         Ok(())
     }
     fn configure(
@@ -468,11 +499,7 @@ impl<'transport> FrameBridge<'transport> {
         session: &mut PreparedNativeKernelStartup<'_, '_>,
     ) -> Result<Pump, Error> {
         self.check_time()?;
-        self.pumps = self
-            .pumps
-            .checked_add(1)
-            .filter(|n| *n <= self.limits.max_pumps)
-            .ok_or(Error::Limit)?;
+        self.count_pump()?;
         self.admit(session)?;
         // A committed flip's completion has priority over all later controls:
         // none may return Progress and admit guest entry before its delivery.

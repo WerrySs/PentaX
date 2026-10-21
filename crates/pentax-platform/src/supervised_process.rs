@@ -25,31 +25,49 @@ const MAX_COMMAND_UNITS: usize = 32_767;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
-    pub run_timeout: Duration,
+    /// None selects an interactive lifetime; shutdown is still finite.
+    pub run_timeout: Option<Duration>,
     pub shutdown_grace: Duration,
-    pub max_stdout_bytes: usize,
-    pub max_stderr_bytes: usize,
+    /// Lifetime output ceilings. None is permitted only with no run timeout.
+    /// Each stream still copies at most 4096 bytes per poll and retains no queue.
+    pub max_stdout_bytes: Option<usize>,
+    pub max_stderr_bytes: Option<usize>,
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            run_timeout: Duration::from_secs(3600),
+            run_timeout: Some(Duration::from_secs(3600)),
             shutdown_grace: Duration::from_secs(2),
-            max_stdout_bytes: OUTPUT_CAP,
-            max_stderr_bytes: OUTPUT_CAP,
+            max_stdout_bytes: Some(OUTPUT_CAP),
+            max_stderr_bytes: Some(OUTPUT_CAP),
         }
     }
 }
 impl Limits {
+    /// Continuous streaming with bounded individual polls and finite teardown.
+    /// The caller owns protocol-line and resident-queue limits after each poll.
+    pub fn interactive() -> Self {
+        Self {
+            run_timeout: None,
+            max_stdout_bytes: None,
+            max_stderr_bytes: None,
+            ..Self::default()
+        }
+    }
     pub fn validate(self) -> Result<(), Error> {
-        if self.run_timeout.is_zero()
-            || self.run_timeout > Duration::from_secs(86_400)
+        if self
+            .run_timeout
+            .is_some_and(|timeout| timeout.is_zero() || timeout > Duration::from_secs(86_400))
             || self.shutdown_grace.is_zero()
             || self.shutdown_grace > Duration::from_secs(5)
-            || self.max_stdout_bytes == 0
-            || self.max_stdout_bytes > OUTPUT_CAP
-            || self.max_stderr_bytes == 0
-            || self.max_stderr_bytes > OUTPUT_CAP
+            || self
+                .max_stdout_bytes
+                .is_some_and(|n| n == 0 || n > OUTPUT_CAP)
+            || self
+                .max_stderr_bytes
+                .is_some_and(|n| n == 0 || n > OUTPUT_CAP)
+            || (self.run_timeout.is_some()
+                && (self.max_stdout_bytes.is_none() || self.max_stderr_bytes.is_none()))
         {
             return Err(Error::Limit);
         }
@@ -140,12 +158,12 @@ impl SupervisedProcess {
 mod tests {
     use super::*;
     #[test]
-    fn supervision_requires_finite_deadlines_and_independent_bounded_streams() {
+    fn supervision_defaults_are_finite_and_only_interactive_can_stream_without_lifetime_caps() {
         let limits = Limits::default();
         limits.validate().unwrap();
         assert_eq!(
             Limits {
-                run_timeout: Duration::ZERO,
+                run_timeout: Some(Duration::ZERO),
                 ..limits
             }
             .validate(),
@@ -153,7 +171,7 @@ mod tests {
         );
         assert_eq!(
             Limits {
-                run_timeout: Duration::from_secs(86_401),
+                run_timeout: Some(Duration::from_secs(86_401)),
                 ..limits
             }
             .validate(),
@@ -169,7 +187,7 @@ mod tests {
         );
         assert_eq!(
             Limits {
-                max_stdout_bytes: 0,
+                max_stdout_bytes: Some(0),
                 ..limits
             }
             .validate(),
@@ -177,7 +195,7 @@ mod tests {
         );
         assert_eq!(
             Limits {
-                max_stderr_bytes: OUTPUT_CAP + 1,
+                max_stderr_bytes: Some(OUTPUT_CAP + 1),
                 ..limits
             }
             .validate(),
@@ -185,12 +203,30 @@ mod tests {
         );
         assert_eq!(
             Limits {
-                max_stdout_bytes: 7,
-                max_stderr_bytes: 19,
+                max_stdout_bytes: Some(7),
+                max_stderr_bytes: Some(19),
                 ..limits
             }
             .validate(),
             Ok(())
+        );
+        assert_eq!(Limits::interactive().validate(), Ok(()));
+        for stdout in [false, true] {
+            let mut invalid = limits;
+            if stdout {
+                invalid.max_stdout_bytes = None;
+            } else {
+                invalid.max_stderr_bytes = None;
+            }
+            assert_eq!(invalid.validate(), Err(Error::Limit));
+        }
+        assert_eq!(
+            Limits {
+                shutdown_grace: Duration::ZERO,
+                ..Limits::interactive()
+            }
+            .validate(),
+            Err(Error::Limit)
         );
     }
 }

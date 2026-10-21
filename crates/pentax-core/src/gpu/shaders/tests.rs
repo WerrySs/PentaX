@@ -418,6 +418,38 @@ fn driver_shader_outcomes_distinguish_normal_rejection_from_typed_refusal() {
 }
 
 #[test]
+fn lifetime_driver_work_preserves_shader_call_admission_before_output_effects() {
+    use crate::gpu::driver::{Driver, Function, Limits};
+    let (mut space, base) = owner();
+    let mut memory = space.pause().unwrap();
+    for cap in [Some(0), None] {
+        let mut driver = Driver::new(Limits {
+            max_calls: u64::MAX,
+            max_preparation_work: u64::MAX,
+            max_shader_call_work: cap,
+            ..Default::default()
+        });
+        let args = seed(&mut memory, base, base + 0x400, 0, 96);
+        let before = data(&memory, base, 0x1000);
+        let result = driver.submit(&mut memory, Function::AgcCreateShader, args);
+        assert_eq!(driver.usage().calls, 1);
+        if cap.is_some() {
+            assert_eq!(result, Err(Failure::Limit));
+            assert_eq!(data(&memory, base, 0x1000), before);
+            assert_eq!(driver.usage().preparation_work, 0);
+            assert_eq!(
+                driver.function_profile().shader_create_outcomes(),
+                (0, 0, 1)
+            );
+        } else {
+            assert_eq!(result, Ok(0));
+            assert_eq!(word(&memory, args[0]), args[1]);
+            assert!(driver.usage().preparation_work > 0);
+        }
+    }
+}
+
+#[test]
 fn registered_shader_extent_is_consumed_by_actual_compute_preparation_and_gpu_writeback() {
     use crate::gpu::driver::{Driver, Function};
     let (mut space, base) = owner();

@@ -53,6 +53,8 @@ pub(super) struct NativeSessionLimits {
     pub libc_memory_builtins: Option<usize>,
     /// Explicit host-only diagnostic output, never enabled by guest input.
     pub private_samples: bool,
+    /// Explicit host lifetime policy; per-operation and resident bounds remain.
+    pub interactive: bool,
 }
 impl Default for NativeSessionLimits {
     fn default() -> Self {
@@ -69,6 +71,7 @@ impl Default for NativeSessionLimits {
             progress_interval_blocks: 2048,
             libc_memory_builtins: None,
             private_samples: false,
+            interactive: false,
         }
     }
 }
@@ -484,7 +487,11 @@ pub(super) fn run_prepared_with_window<'plan, 'image>(
         1,
         frame_bridge::Limits {
             wire: window.wire,
-            ..Default::default()
+            ..if limits.interactive {
+                frame_bridge::Limits::interactive()
+            } else {
+                Default::default()
+            }
         },
     )
     .map_err(NativeSessionError::Frame)?;
@@ -935,6 +942,7 @@ fn execute_epoch<'plan, 'image>(
             &mut state.frames,
             &mut progress.phase,
             external,
+            limits.interactive,
         )?;
         progress.dispatch = engine.usage();
         if !runnable {

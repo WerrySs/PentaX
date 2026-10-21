@@ -267,3 +267,105 @@ fn actual_endpoint_capacity_is_counted_and_core_queue_blocks_growth_before_windo
     assert!(!bridge.configuration_sent);
     assert!(bridge.frame.is_none());
 }
+
+#[test]
+fn interactive_lifetime_keeps_operation_deadlines_and_checked_monotonic_pumps() {
+    let start = Instant::now();
+    let after_old_lifetime = start.checked_add(Duration::from_secs(7200)).unwrap();
+    for interactive in [false, true] {
+        let io = Rc::new(RefCell::new(Bytes::default()));
+        let mut transport = OriginalTransport(io);
+        let limits = if interactive {
+            Limits::interactive()
+        } else {
+            Limits::default()
+        };
+        let mut bridge =
+            FrameBridge::new(&mut transport, Nonce::new([0x17; 16]).unwrap(), 3, limits).unwrap();
+        bridge.started = start;
+        assert_eq!(
+            bridge.check_time_at(after_old_lifetime),
+            if interactive {
+                Ok(())
+            } else {
+                Err(Error::Timeout)
+            }
+        );
+        bridge.pumps = 1_000_000;
+        assert_eq!(
+            bridge.count_pump(),
+            if interactive {
+                Ok(())
+            } else {
+                Err(Error::Limit)
+            }
+        );
+        assert_eq!(
+            bridge.pumps,
+            if interactive { 1_000_001 } else { 1_000_000 }
+        );
+        if !interactive {
+            continue;
+        }
+        let pending = bridge.wire.begin_frame(2, 2, flags()).unwrap();
+        for timeout in [limits.handshake_timeout, limits.frame_timeout] {
+            let end = after_old_lifetime.checked_add(timeout).unwrap();
+            bridge.deadline = Some(end);
+            let wake = bridge
+                .external_wake_at(after_old_lifetime)
+                .unwrap()
+                .unwrap();
+            assert_eq!(wake.delay, Duration::from_millis(1));
+            assert_eq!(wake.maximum_idle_nanoseconds, u64::MAX);
+            assert_eq!(bridge.check_time_at(end), Err(Error::Timeout));
+            // Expiry never completes a pending wire frame or mints a receipt.
+            assert!(bridge.frame.is_none() && bridge.completion.is_none());
+            assert_eq!(bridge.wire.pending().unwrap().header(), pending);
+            assert!(!bridge.wire.pending().unwrap().receipt_observed());
+            assert_eq!(bridge.wire.last_vblank(), 0);
+        }
+        bridge.deadline = None;
+        bridge.pumps = u64::MAX;
+        assert_eq!(bridge.count_pump(), Err(Error::Limit));
+        assert_eq!(bridge.pumps, u64::MAX);
+        assert_eq!(bridge.check_time_at(after_old_lifetime), Ok(()));
+        bridge.cancel();
+        assert_eq!(bridge.check_time_at(after_old_lifetime), Err(Error::Closed));
+    }
+}
+
+#[test]
+fn interactive_lifetime_does_not_relax_operation_or_staging_admission() {
+    for limits in [
+        Limits {
+            handshake_timeout: Duration::ZERO,
+            ..Limits::interactive()
+        },
+        Limits {
+            frame_timeout: Duration::from_secs(61),
+            ..Limits::interactive()
+        },
+        Limits {
+            max_pumps: None,
+            ..Limits::default()
+        },
+        Limits {
+            max_idle_nanoseconds: Some(0),
+            ..Limits::interactive()
+        },
+        Limits {
+            wire: pentax_session::Limits {
+                max_staging_bytes: CHUNK,
+                ..Default::default()
+            },
+            ..Limits::interactive()
+        },
+    ] {
+        let io = Rc::new(RefCell::new(Bytes::default()));
+        let mut transport = OriginalTransport(io);
+        assert!(matches!(
+            FrameBridge::new(&mut transport, Nonce::new([0x17; 16]).unwrap(), 3, limits,),
+            Err(Error::Limit)
+        ));
+    }
+}

@@ -185,8 +185,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 let remaining = self
                     .plan
                     .limits
-                    .max_provider_work
-                    .saturating_sub(self.provider_work);
+                    .provider_call_remaining(self.provider_work)?;
                 let limits = ModuleLookupLimits {
                     max_work: remaining,
                     ..Default::default()
@@ -213,8 +212,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 let remaining = self
                     .plan
                     .limits
-                    .max_provider_work
-                    .saturating_sub(self.provider_work);
+                    .provider_call_remaining(self.provider_work)?;
                 let identity = export.qualified_identity(remaining);
                 charge(
                     &mut self.provider_work,

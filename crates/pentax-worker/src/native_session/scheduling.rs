@@ -176,6 +176,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn rotate(
         &mut self,
         session: &mut PreparedNativeKernelStartup<'plan, 'image>,
@@ -184,6 +185,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         frames: &mut Vec<(SuspendedInitializer, NativeNestedCall, NativeSessionPhase)>,
         phase: &mut NativeSessionPhase,
         external: Option<super::frame_bridge::ExternalWake>,
+        interactive: bool,
     ) -> Result<bool, NativeSessionError> {
         let blocks = engine.usage().blocks;
         if !self.force_switch
@@ -239,7 +241,11 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                         charge(
                             &mut self.idle_nanoseconds,
                             sleep.as_nanos() as u64,
-                            session.plan().limits().kernel.max_sleep_nanoseconds,
+                            if interactive {
+                                u64::MAX
+                            } else {
+                                session.plan().limits().kernel.max_sleep_nanoseconds
+                            },
                             "idle waits",
                         )?;
                     }

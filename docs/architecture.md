@@ -15,8 +15,8 @@ PentaX targets PS5 execution, rather than wrapping another emulator. All first-p
 | `pentax-shader-compiler` | Validate supported programs/resources and emit SPIR-V | Checked control flow and defined-register use, bounded IR, resource/feature manifests and original validated outputs |
 | `pentax-codegen` | Plan same-ISA CPU blocks and mediated exits | Source-bound integer/legacy-SSE encoding, checked RIP-relative targets and typed transfer exits; no executable allocation or dispatcher |
 | `pentax-config` | Declarative preferences and profile inheritance | Versioned TOML, validation and atomic persistence |
-| `pentax-cli` | Reproducible inspection and synthetic guest diagnostics | Functional without a desktop session |
-| `pentax-desktop` | Library, preferences and diagnostics for mouse, keyboard and controller | Native frontend; no commercial-game launch path |
+| `pentax-cli` | Reproducible inspection, finite diagnostics and explicit interactive sessions | Bounded progress streaming and owned native worker supervision |
+| `pentax-desktop` | Library, preferences and sessions for mouse, keyboard and controller | Supervised Play/Stop launch path; commercial boot and playability unverified |
 | `pentax-platform` | Audited native memory, ABI and Vulkan boundary | Windows x86-64 NX guest owners, reusable unsafe one-block context/cache bridge and closed compiler-to-Vulkan diagnostics |
 | `pentax-worker` | Separate native fault-isolation process | Named original diagnostics; reusable prepared-owner loop verified with an original kernel/TLS program in debug and release |
 | `pentax-xtask` | Build-time distribution tools | Strict third-party notice rendering without machine paths |

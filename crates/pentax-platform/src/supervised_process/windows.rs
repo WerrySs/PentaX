@@ -251,7 +251,7 @@ fn command(program: &Path, args: &[OsString]) -> Result<(Vec<u16>, Vec<u16>), Er
 struct Reader {
     handle: Handle,
     captured: usize,
-    maximum: usize,
+    maximum: Option<usize>,
     eof: bool,
 }
 impl Reader {
@@ -286,7 +286,9 @@ impl Reader {
         if available == 0 {
             return Ok(0);
         }
-        let remaining = self.maximum - self.captured;
+        let remaining = self
+            .maximum
+            .map_or(usize::MAX, |maximum| maximum - self.captured);
         if remaining == 0 && !closing {
             return Err(Error::OutputLimit);
         }
@@ -327,7 +329,10 @@ impl Reader {
         if remaining == 0 {
             return Ok(0);
         } // shutdown drains excess without retaining it
-        self.captured += actual;
+        self.captured = self
+            .captured
+            .checked_add(actual)
+            .ok_or(Error::OutputLimit)?;
         Ok(actual)
     }
 }
@@ -414,12 +419,22 @@ impl Inner {
     ) -> Result<Status, Error> {
         let root = self.exit()?;
         let descendants = self.descendants()?;
-        // A vanished CLI must not leave a worker behind. Stop only this owned
-        // job; do not wait for, enumerate or manipulate unrelated processes.
-        if root.is_some() && descendants != 0 && self.stopping.is_none() {
+        // A vanished CLI must not leave a worker behind. Interactive lifetime
+        // also needs finite EOF cleanup once its root/job are finished: there
+        // is no later run timeout to begin that grace period. Stop only this
+        // owned job; never fabricate EOF or manipulate unrelated processes.
+        if root.is_some()
+            && self.stopping.is_none()
+            && (descendants != 0 || self.limits.run_timeout.is_none())
+        {
             self.stop()?;
         }
-        if !closing && self.stopping.is_none() && self.started.elapsed() >= self.limits.run_timeout
+        if !closing
+            && self.stopping.is_none()
+            && self
+                .limits
+                .run_timeout
+                .is_some_and(|timeout| self.started.elapsed() >= timeout)
         {
             self.stop()?;
             return Err(Error::Timeout);

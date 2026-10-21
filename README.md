@@ -85,8 +85,9 @@ cargo run --locked -p pentax-cli -- inspect "C:\Games\Example\eboot.bin"
 
 `inspect` opens the selected executable read-only and reads bounded header data;
 it does not execute it. The desktop interface is an early development tool.
-Play starts a finite supervised startup session; it does not imply that the
-selected commercial game can boot. Keep the desktop, CLI and worker together.
+Play starts a supervised interactive session with bounded resident resources;
+commercial game boot and playability remain unverified. Keep the desktop, CLI
+and worker together.
 No games, firmware, keys or proprietary SDK files are included.
 
 Native execution currently requires Windows x86-64. Build prerequisites for

@@ -355,6 +355,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
         }
         stack_identity(start, call)?;
         self.ime_callbacks.pending[index].phase = Phase::Failed;
+        let maximum = self.plan.limits.provider_call_maximum(self.provider_work)?;
         let (mut paused, threads) = self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
         let mut memory = KernelMemory {
             paused: &mut paused,
@@ -363,7 +364,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             lookup_limits: Some(pentax_linker::ModuleLookupLimits {
                 symbolic: self.plan.limits.startup.hle.linking,
                 max_name_bytes: self.plan.limits.kernel.max_name_bytes,
-                max_work: self.plan.limits.max_provider_work,
+                max_work: maximum,
             }),
             lookup_work: Some(&mut self.provider_work),
             loaded_modules: None,

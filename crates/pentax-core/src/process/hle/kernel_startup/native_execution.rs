@@ -267,13 +267,16 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         request: NativeServiceRequest,
         actions: bool,
     ) -> Result<NativeServiceAction, KernelStartupError> {
-        let maximum = self
-            .plan
-            .limits
-            .kernel
-            .max_attempts
-            .checked_add(self.plan.hle.service_limits().max_attempts)
-            .ok_or(KernelStartupError::Budget("native request attempts"))?;
+        let maximum = match self.plan.limits.max_native_service_requests {
+            Some(maximum) => maximum,
+            None => self
+                .plan
+                .limits
+                .kernel
+                .max_attempts
+                .checked_add(self.plan.hle.service_limits().max_attempts)
+                .ok_or(KernelStartupError::Budget("native request attempts"))?,
+        };
         self.native_service_requests = self
             .native_service_requests
             .checked_add(1)

@@ -9,7 +9,6 @@ use std::{
     ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
-    time::Duration,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,7 +77,7 @@ impl Plan {
         let mut args = vec![OsString::from("probe-entry")];
         pair(&mut args, "--image", image.as_os_str());
         pair(&mut args, "--memory-profile", "runtime");
-        pair(&mut args, "--execution-profile", "long-startup");
+        pair(&mut args, "--execution-profile", "interactive");
         pair(&mut args, "--present-window", "yes");
         pair(&mut args, "--data-directory", binding("/app0", root));
         pair(&mut args, "--save-directory", save.as_os_str());
@@ -103,6 +102,9 @@ impl Plan {
                         return Err(Error::Input);
                     }
                     pair(&mut args, option, binding(guest, &actual));
+                    if option == "--preload-libc-as" {
+                        pair(&mut args, "--libc-memory-builtins", "checked");
+                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 _ => return Err(Error::Input),
@@ -422,14 +424,9 @@ pub struct Session {
 }
 impl Session {
     pub fn start(plan: Plan) -> Result<Self, Error> {
-        let process = SupervisedProcess::spawn_cli(
-            &plan.args,
-            supervised_process::Limits {
-                run_timeout: Duration::from_secs(305),
-                ..Default::default()
-            },
-        )
-        .map_err(process_error)?;
+        let process =
+            SupervisedProcess::spawn_cli(&plan.args, supervised_process::Limits::interactive())
+                .map_err(process_error)?;
         Ok(Self {
             process: Some(process),
             protocol: Protocol::new(),

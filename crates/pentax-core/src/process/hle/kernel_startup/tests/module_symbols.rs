@@ -4,27 +4,92 @@ use super::*;
 use crate::process::hle::{NativeImageLimits, with_native_image_session};
 
 fn with_loaded(test: impl FnOnce(&mut PreparedNativeKernelStartup<'_, '_>, u64, u64)) {
+    with_loaded_limits(&NativeImageLimits::default(), test);
+}
+
+fn with_loaded_limits(
+    limits: &NativeImageLimits,
+    test: impl FnOnce(&mut PreparedNativeKernelStartup<'_, '_>, u64, u64),
+) {
     let primary = super::super::super::unavailable::tests::original_input(0);
     let provider =
         build_kernel_provider(KernelStartupLimits::default().max_kernel_provider_bytes).unwrap();
-    with_native_image_session(
-        &[&primary, provider.image()],
-        &NativeImageLimits::default(),
-        |session, layout| {
-            assert_eq!(session.supplied_module_handle(0), Some(1));
-            assert_eq!(session.supplied_module_handle(1), Some(2));
-            assert_eq!(session.supplied_module_handle(2), None);
-            let marker = provider
-                .markers()
-                .iter()
-                .find(|marker| marker.registration.service == Service::GetProcParam)
-                .unwrap();
-            let expected = session.plan().link_plan().modules()[1].load_bias() + marker.rva;
-            test(session, layout.entry.stack.address + 0x100, expected);
-            Ok::<_, ()>(())
-        },
-    )
+    with_native_image_session(&[&primary, provider.image()], limits, |session, layout| {
+        assert_eq!(session.supplied_module_handle(0), Some(1));
+        assert_eq!(session.supplied_module_handle(1), Some(2));
+        assert_eq!(session.supplied_module_handle(2), None);
+        let marker = provider
+            .markers()
+            .iter()
+            .find(|marker| marker.registration.service == Service::GetProcParam)
+            .unwrap();
+        let expected = session.plan().link_plan().modules()[1].load_bias() + marker.rva;
+        test(session, layout.entry.stack.address + 0x100, expected);
+        Ok::<_, ()>(())
+    })
     .unwrap();
+}
+
+#[test]
+fn lifetime_provider_ledger_preserves_per_lookup_refusal_and_output_on_retry() {
+    let mut limits = NativeImageLimits::default();
+    limits.startup.max_provider_work = u64::MAX;
+    limits.startup.max_provider_call_work = Some(0);
+    limits.startup.kernel.max_attempts = u64::MAX;
+    limits.startup.startup.hle.services.max_attempts = u64::MAX;
+    for request_cap in [None, Some(u64::MAX)] {
+        limits.startup.max_native_service_requests = request_cap;
+        with_loaded_limits(&limits, |session, scratch, _| {
+            session
+                .pause()
+                .unwrap()
+                .write(scratch + 128, &73_u64.to_le_bytes())
+                .unwrap();
+            for _ in 0..2 {
+                let work = session.provider_work;
+                let attempts = session.kernel_usage().attempts;
+                session
+                    .pause()
+                    .unwrap()
+                    .write(scratch, b"sceKernelGetProcParam\0")
+                    .unwrap();
+                let query = stop(
+                    session.plan(),
+                    Service::Dlsym,
+                    [2, scratch, scratch + 128, 0, 0, 0],
+                );
+                let result = session.service_request(super::super::NativeServiceRequest {
+                    owner_id: session.owner_id(),
+                    syscall_pc: query.syscall_pc,
+                    next_pc: query.syscall_pc + 2,
+                    service_id: query.service_id,
+                    args: query.args.0,
+                    vector_args: None,
+                    stack_pointer: None,
+                });
+                assert_eq!(word(session, scratch + 128), 73);
+                if request_cap.is_none() {
+                    assert_eq!(
+                        result,
+                        Err(KernelStartupError::Budget("native request attempts"))
+                    );
+                    assert_eq!(session.native_service_requests, 0);
+                    assert_eq!(session.provider_work, work);
+                    assert_eq!(session.kernel_usage().attempts, attempts);
+                    break;
+                }
+                assert_eq!(
+                    result,
+                    Err(KernelStartupError::Kernel(Failure::Limit(
+                        "module lookup work"
+                    )))
+                );
+                assert!(session.provider_work > work); // Authentication remains charged.
+                assert_eq!(session.kernel_usage().attempts, attempts + 1);
+                assert_eq!(session.native_service_requests, attempts + 1);
+            }
+        });
+    }
 }
 
 fn lookup(

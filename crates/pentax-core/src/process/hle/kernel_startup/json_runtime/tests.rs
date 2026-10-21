@@ -29,6 +29,56 @@ fn request(
 }
 
 #[test]
+fn lifetime_provider_work_keeps_a_finite_json_transaction_ceiling() {
+    let input = original_input(0);
+    for cap in [511, 65_536] {
+        let mut limits = NativeImageLimits::default();
+        limits.startup.max_provider_work = u64::MAX;
+        limits.startup.max_provider_call_work = Some(cap);
+        with_native_image_session(&[&input], &limits, |session, layout| {
+            let object = layout.entry.stack.address + 0x100;
+            let sentinel = [0x6b; 16];
+            session.pause().unwrap().write(object, &sentinel).unwrap();
+            let slot = session
+                .plan
+                .json
+                .unwrap()
+                .factory
+                .markers()
+                .iter()
+                .position(|marker| marker.function == JsonFunction::StringCtor)
+                .unwrap();
+            let before = session.provider_work;
+            let usage = session.kernel_usage();
+            let result = session.service_request(request(session, object, slot));
+            let mut observed = [0; 16];
+            session
+                .pause()
+                .unwrap()
+                .read(object, &mut observed)
+                .unwrap();
+            assert!(session.provider_work > before); // Retain authentication work.
+            if cap == 511 {
+                assert!(matches!(result, Err(KernelStartupError::Budget(_))));
+                assert_eq!(observed, sentinel);
+                assert_eq!(session.kernel_usage().handles_live, usage.handles_live);
+                assert_eq!(session.kernel_usage().mapped_bytes, usage.mapped_bytes);
+            } else {
+                assert_eq!(result, Ok(object));
+                assert_ne!(&observed[..8], &sentinel[..8]);
+                assert_eq!(&observed[8..], &sentinel[8..]);
+            }
+            assert!(matches!(
+                session.plan.limits.provider_call_maximum(u64::MAX),
+                Err(KernelStartupError::Budget("provider call work"))
+            ));
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+    }
+}
+
+#[test]
 fn json_initializer_constructor_returns_full_opaque_self_without_reads_or_writes() {
     let input = original_input(0);
     with_native_image_session(

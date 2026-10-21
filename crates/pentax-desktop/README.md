@@ -8,14 +8,16 @@ Selecting or inspecting an entry never starts it automatically.
 
 On Windows x64, Play prepares a bounded plan in a background job, then invokes
 only the application-adjacent `pentax-cli.exe` through the safe platform
-supervisor. It requests the runtime memory profile, finite long-startup execution
-profile and actual `--present-window yes` worker consumer. The CLI's current
-long-startup deadline remains 300 seconds; this is an experimental startup session,
-not an unlimited-play or title-compatibility promise. Install the desktop, CLI
-and worker together. Unsupported hosts keep Play disabled.
+supervisor. It requests the runtime memory profile, explicit interactive execution
+profile and actual `--present-window yes` worker consumer. Interactive sessions
+stream bounded progress records and have no fixed lifetime deadline; Stop still
+terminates only the owned session and requires observed process and pipe cleanup.
+Individual operations and resident resources retain their limits. Commercial
+compatibility remains unverified. Install the desktop, CLI and worker together.
+Unsupported hosts keep Play disabled.
 
 Preparation checks the selected executable and only two optional named files:
-`sce_module/libc.prx` for explicit preload and
+`sce_module/libc.prx` for explicit preload with checked memory helpers and
 `sce_module/libSceNpCppWebApi.prx` for deferred loading. It does not enumerate the
 game directory, read executable payloads or discover arbitrary modules. The
 selected executable's containing directory becomes the read-only `/app0` mount.

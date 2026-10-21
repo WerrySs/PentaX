@@ -108,6 +108,9 @@ pub struct Limits {
     pub max_command_bytes: u64,
     pub max_invocations: u64,
     pub max_preparation_work: u64,
+    /// Optional per-call shader/interpolant/fusion work bound, independent of
+    /// the cumulative driver ledger. None preserves the original allowance.
+    pub max_shader_call_work: Option<u64>,
     pub max_memory_write_bytes: u64,
     pub max_shader_mappings: usize,
     pub compute: compute::Limits,
@@ -135,6 +138,7 @@ impl Default for Limits {
             max_command_bytes: 4 * 1024 * 1024,
             max_invocations: 16 * 1024 * 1024,
             max_preparation_work: 256 * 1024 * 1024,
+            max_shader_call_work: None,
             max_memory_write_bytes: 4 * 1024 * 1024,
             max_shader_mappings: 4096,
             compute: compute::Limits::default(),
@@ -210,6 +214,18 @@ struct ConsumerBudget {
     external_held: usize,
 }
 impl Driver {
+    fn shader_call_maximum(&self) -> Result<u64, Failure> {
+        match self.limits.max_shader_call_work {
+            Some(work) => self
+                .usage
+                .preparation_work
+                .checked_add(work)
+                .map(|maximum| maximum.min(self.limits.max_preparation_work))
+                .ok_or(Failure::Limit),
+            None => Ok(self.limits.max_preparation_work),
+        }
+    }
+
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
             limits,
@@ -409,41 +425,45 @@ impl Driver {
             function,
             Function::AgcCreateInterpolantMapping | Function::AgcCreateInterpolantMapping2
         ) {
+            let maximum = self.shader_call_maximum()?;
             return super::shaders::interpolants::create(
                 memory,
                 args,
                 function == Function::AgcCreateInterpolantMapping2,
                 &mut self.usage.preparation_work,
-                self.limits.max_preparation_work,
+                maximum,
             );
         }
         if function == Function::AgcGetFusedShaderSize {
+            let maximum = self.shader_call_maximum()?;
             return super::shaders::fusion::size(
                 memory,
                 args,
                 &mut self.usage.preparation_work,
-                self.limits.max_preparation_work,
+                maximum,
             );
         }
         if matches!(
             function,
             Function::AgcFuseShaderHalves | Function::AgcFuseShaderHalvesLegacy
         ) {
+            let maximum = self.shader_call_maximum()?;
             return super::shaders::fusion::fuse(
                 memory,
                 args,
                 function == Function::AgcFuseShaderHalves,
                 &mut self.usage.preparation_work,
-                self.limits.max_preparation_work,
+                maximum,
             );
         }
         if function == Function::AgcCreateShader {
+            let maximum = self.shader_call_maximum()?;
             let result = self.shaders.create(
                 memory,
                 args,
                 self.limits.max_shader_mappings,
                 &mut self.usage.preparation_work,
-                self.limits.max_preparation_work,
+                maximum,
             );
             self.function_profile.record_shader_create(&result);
             return result;

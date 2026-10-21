@@ -291,6 +291,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             phase: Phase::Failed,
             ..pending
         });
+        let maximum = self.plan.limits.provider_call_maximum(self.provider_work)?;
         let action = self
             .kernel
             .complete_netctl_callback(&start.request)
@@ -303,7 +304,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             lookup_limits: Some(pentax_linker::ModuleLookupLimits {
                 symbolic: self.plan.limits.startup.hle.linking,
                 max_name_bytes: self.plan.limits.kernel.max_name_bytes,
-                max_work: self.plan.limits.max_provider_work,
+                max_work: maximum,
             }),
             lookup_work: Some(&mut self.provider_work),
             loaded_modules: None,

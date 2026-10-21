@@ -1,5 +1,33 @@
 # Native diagnostic worker
 
+`probe-entry --execution-profile interactive` selects an explicit interactive
+lifetime policy. It has no fixed session deadline or diagnostic block/work
+allowance. Checked u64 lifetime totals remain monotonic; they are never reset
+to renew permission, executor identity or callback tickets. The desktop selects
+this profile for Play. The existing `probe`, `startup`, `extended-startup` and
+`long-startup` profiles retain their finite execution and supervision rules.
+
+Interactive execution keeps the existing bounded scheduling turns, per-block
+planning, source windows, caches, live source/stack/TLS/operand checks, per-call
+I/O/scratch/work limits and resident resource capacities. Its initial owner
+allowance uses the same 4,096-object startup profile. Cumulative kernel,
+provider, service, graphics and dispatch accounting has checked lifetime
+ceilings independently of those per-operation and resident limits. Output
+still has its retained 8 MiB ceiling; this does not provide unlimited logging.
+Unsupported operations, overflow, exhausted resident limits and real host
+failures still stop explicitly. This profile enables continued execution; it
+does not establish title compatibility, startup completion or a rendered frame.
+
+For interactive launches, the CLI forwards complete validated public protocol
+records while the worker runs. Each record is at most 16 KiB, at most two wait
+in the forwarding queue, and no record history grows with session length. Raw
+stderr, incomplete/oversize records and free-form error payloads are refused;
+they are never copied into the public stream. Final completion still requires
+the actual child exit and exactly one outer-return result. Desktop supervision
+retains its owned process job, cancellation, finite shutdown/reap grace and
+quarantine rules. Window handshake and individual frame deadlines stay finite even though
+the interactive window session has no fixed lifetime deadline.
+
 `probe-entry --private-console <fresh-file>` explicitly creates a new private
 binary file for guest-console output already retained by the kernel. It is
 written only after the execution runner returns, including a typed guest stop,
@@ -619,11 +647,12 @@ Closed budget categories distinguish kernel stops/attempts, provider work and
 other runtime resources without printing internal error strings.
 These are diagnostic execution bounds; reaching one is not a completed boot.
 
-Explicit `long-startup` permits up to 256,000,000 blocks under a 300-second CLI
+Explicit `long-startup` permits up to 320,000,000 blocks under a 300-second CLI
 deadline. Its cumulative source/emission/window, admission, dispatch and provider
-work limits are four times the extended profile. It admits 4,000,000 kernel calls
+work limits are five times the extended profile, except provider work at four
+times. It admits 4,000,000 kernel calls
 and four times the usual cumulative kernel byte/work accounting. Progress every
-8,388,608 blocks retains the 30-record bound. Only this explicit supervised
+8,388,608 blocks retains a 38-record bound. This explicit supervised
 profile raises the shared kernel live-resource metadata allowance from 256 to
 4096; `probe`, `startup` and `extended-startup` retain 256, independently of the
 memory profile. Native backing, mapped bytes, thread counts, per-call I/O, libc
@@ -645,7 +674,7 @@ that retained objects are needed or that cleanup occurred. No guest identifiers,
 addresses, names or payloads enter these diagnostics.
 
 The explicit long profile also admits up to4,096 cumulative graphics library
-calls for shader initialization. Other profiles keep the compact256-call cap.
+calls for shader initialization. Other finite profiles keep the compact256-call cap.
 Graphics work, retained shader slots, GPU limits and every backing/access check
 remain independently bounded; this does not admit general rendering or boot.
 
