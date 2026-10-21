@@ -114,56 +114,6 @@ impl ServiceProfile {
     }
 }
 
-#[cfg(test)]
-mod service_profile_tests {
-    use super::ServiceProfile;
-
-    #[test]
-    fn infrequent_nonzero_returns_survive_hot_zero_calls_without_error_inference() {
-        let mut profile = ServiceProfile::default();
-        let mut work = 0;
-        for label in [
-            "PthreadMutexLock",
-            "PthreadMutexUnlock",
-            "pthread_mutex_lock",
-            "pthread_mutex_unlock",
-        ] {
-            for _ in 0..16 {
-                profile
-                    .record(Some(label), false, &mut work, u64::MAX)
-                    .unwrap();
-            }
-        }
-        // Both a successful nonzero identity and another nonzero result remain
-        // visible. The observer deliberately assigns neither an errno meaning.
-        profile
-            .record(Some("PthreadGetthreadid"), true, &mut work, u64::MAX)
-            .unwrap();
-        profile
-            .record(Some("Open"), true, &mut work, u64::MAX)
-            .unwrap();
-        profile
-            .record(Some("Open"), true, &mut work, u64::MAX)
-            .unwrap();
-        let fields = profile.protocol_fields();
-        let top = fields
-            .split('\t')
-            .find(|part| part.starts_with("service_top="))
-            .unwrap();
-        assert!(!top.contains("Open") && !top.contains("PthreadGetthreadid"));
-        let nonzero = fields
-            .split('\t')
-            .find(|part| part.starts_with("service_nonzero_top="))
-            .unwrap();
-        assert_eq!(nonzero, "service_nonzero_top=Open:2,PthreadGetthreadid:1");
-        assert!(fields.ends_with("service_last=Open\tservice_other=0\tservice_overflow=0"));
-        assert_eq!(
-            ServiceProfile::default().protocol_fields(),
-            "service_top=\tservice_nonzero_top=\tservice_last=other-provider\tservice_other=0\tservice_overflow=0"
-        );
-    }
-}
-
 impl StartupProfile {
     /// Explicit local output capability only; never part of protocol fields.
     pub fn enable_private_samples(&mut self) {
@@ -234,5 +184,55 @@ impl StartupProfile {
             self.exit_only_blocks,
             self.services.protocol_fields(),
         )
+    }
+}
+
+#[cfg(test)]
+mod service_profile_tests {
+    use super::ServiceProfile;
+
+    #[test]
+    fn infrequent_nonzero_returns_survive_hot_zero_calls_without_error_inference() {
+        let mut profile = ServiceProfile::default();
+        let mut work = 0;
+        for label in [
+            "PthreadMutexLock",
+            "PthreadMutexUnlock",
+            "pthread_mutex_lock",
+            "pthread_mutex_unlock",
+        ] {
+            for _ in 0..16 {
+                profile
+                    .record(Some(label), false, &mut work, u64::MAX)
+                    .unwrap();
+            }
+        }
+        // Both a successful nonzero identity and another nonzero result remain
+        // visible. The observer deliberately assigns neither an errno meaning.
+        profile
+            .record(Some("PthreadGetthreadid"), true, &mut work, u64::MAX)
+            .unwrap();
+        profile
+            .record(Some("Open"), true, &mut work, u64::MAX)
+            .unwrap();
+        profile
+            .record(Some("Open"), true, &mut work, u64::MAX)
+            .unwrap();
+        let fields = profile.protocol_fields();
+        let top = fields
+            .split('\t')
+            .find(|part| part.starts_with("service_top="))
+            .unwrap();
+        assert!(!top.contains("Open") && !top.contains("PthreadGetthreadid"));
+        let nonzero = fields
+            .split('\t')
+            .find(|part| part.starts_with("service_nonzero_top="))
+            .unwrap();
+        assert_eq!(nonzero, "service_nonzero_top=Open:2,PthreadGetthreadid:1");
+        assert!(fields.ends_with("service_last=Open\tservice_other=0\tservice_overflow=0"));
+        assert_eq!(
+            ServiceProfile::default().protocol_fields(),
+            "service_top=\tservice_nonzero_top=\tservice_last=other-provider\tservice_other=0\tservice_overflow=0"
+        );
     }
 }
