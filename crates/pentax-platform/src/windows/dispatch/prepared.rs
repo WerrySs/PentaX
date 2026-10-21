@@ -1823,19 +1823,22 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             || block.policy().requests_native_streaming_stores()
             || block.policy().requests_native_vector_moves()
             || block.policy().requests_native_scalar_float()
-            || block.policy().requests_native_scalar_fma())
+            || block.policy().requests_native_scalar_fma()
+            || block.policy().requests_native_fma_registers())
             && !block.policy().requests_native_ymm_registers())
             || ((block.policy().requests_native_ymm_registers()
                 || block.policy().requests_native_packed_float_memory()
                 || block.policy().requests_native_streaming_stores()
                 || block.policy().requests_native_vector_moves()
                 || block.policy().requests_native_scalar_float()
-                || block.policy().requests_native_scalar_fma())
+                || block.policy().requests_native_scalar_fma()
+                || block.policy().requests_native_fma_registers())
                 && self.machine.vector_mode.features().is_none())
         {
             return Err(NativeDispatchError::InvalidState);
         }
-        if block.policy().requests_native_scalar_fma()
+        if (block.policy().requests_native_scalar_fma()
+            || block.policy().requests_native_fma_registers())
             && !self.machine.vector_mode.supports(CpuidFeature::FMA)
         {
             return Err(NativeDispatchError::InvalidState);

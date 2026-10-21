@@ -75,6 +75,8 @@ mod multiply_vectors;
 mod mxcsr_registers;
 #[path = "tests/native_cache.rs"]
 mod native_cache;
+#[path = "tests/native_fma_registers.rs"]
+mod native_fma_registers_tests;
 #[path = "tests/native_packed_float_memory.rs"]
 mod native_packed_float_memory_tests;
 #[path = "tests/native_packed_float.rs"]

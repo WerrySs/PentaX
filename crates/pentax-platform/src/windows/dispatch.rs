@@ -915,14 +915,16 @@ fn publish_block_with_mode(
         || plan.policy().requests_native_streaming_stores()
         || plan.policy().requests_native_vector_moves()
         || plan.policy().requests_native_scalar_float()
-        || plan.policy().requests_native_scalar_fma())
+        || plan.policy().requests_native_scalar_fma()
+        || plan.policy().requests_native_fma_registers())
         && !plan.policy().requests_native_ymm_registers())
         || ((plan.policy().requests_native_ymm_registers()
             || plan.policy().requests_native_packed_float_memory()
             || plan.policy().requests_native_streaming_stores()
             || plan.policy().requests_native_vector_moves()
             || plan.policy().requests_native_scalar_float()
-            || plan.policy().requests_native_scalar_fma())
+            || plan.policy().requests_native_scalar_fma()
+            || plan.policy().requests_native_fma_registers())
             && mode.features().is_none())
     {
         return Err(PlatformError::UnsupportedHostFeature {
@@ -932,6 +934,11 @@ fn publish_block_with_mode(
     if plan.policy().requests_native_scalar_fma() && !mode.supports(CpuidFeature::FMA) {
         return Err(PlatformError::UnsupportedHostFeature {
             feature: "native scalar FMA profile",
+        });
+    }
+    if plan.policy().requests_native_fma_registers() && !mode.supports(CpuidFeature::FMA) {
+        return Err(PlatformError::UnsupportedHostFeature {
+            feature: "native FMA register profile",
         });
     }
     // 1. Host CPUID/OS support must satisfy the declared emission policy for

@@ -264,6 +264,20 @@ engine's admitted FMA capability, including supported OS vector state.
 FMA and AVX2 admission are independent cache identities. Planning neither
 proves execution nor changes the guest CPU identification profile.
 
+`with_native_fma_registers()` is a separate default-disabled request for all
+ninety-six VEX FMA3 Codes supported by the software mediator: the 132/213/231
+orders of FMADD/FMSUB/FNMADD/FNMSUB SS/SD and packed PS/PD, plus packed
+FMADDSUB/FMSUBADD PS/PD. Exactly three XMM0..15 or YMM0..15 operands of the
+declared width are admitted. The full-YMM request and declared AVX plus FMA
+remain required; actual host FMA and vector-state authority must be checked
+independently by the execution publishers. The existing two-form scalar request
+retains its narrower meaning. Memory, FMA4, EVEX and other families gain no
+authority. Scalar LIG encodings are re-encoded with L=0, and instruction-info
+dependencies retain the destructive destination input and source aliases.
+Original planning fixtures enumerate every Code and its aliases on both source
+paths. Planning proves neither numerical execution nor a title speedup; actual
+full-state hardware comparisons remain separate runtime proofs.
+
 `with_native_streaming_stores()` separately requests exactly VEX.128/256
 VMOVNTDQ memory destinations, with XMM0..15/YMM0..15 sources and ordinary 64-bit
 addresses. The full-YMM request and independently admitted actual AVX are also

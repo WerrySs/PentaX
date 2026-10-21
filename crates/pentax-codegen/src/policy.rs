@@ -59,6 +59,7 @@ pub struct TranslationPolicy {
     native_vector_moves: bool,
     native_scalar_float: bool,
     native_scalar_fma: bool,
+    native_fma_registers: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -73,6 +74,7 @@ impl TranslationPolicy {
             native_vector_moves: false,
             native_scalar_float: false,
             native_scalar_fma: false,
+            native_fma_registers: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -138,6 +140,16 @@ impl TranslationPolicy {
     }
     pub const fn requests_native_scalar_fma(self) -> bool {
         self.native_scalar_fma
+    }
+    /// Separately request the ninety-six supported VEX FMA3 register forms.
+    /// This does not imply full-YMM or actual host AVX/FMA/OS authority. The
+    /// runtime must independently retain masked MXCSR and destructive inputs.
+    pub const fn with_native_fma_registers(mut self) -> Self {
+        self.native_fma_registers = true;
+        self
+    }
+    pub const fn requests_native_fma_registers(self) -> bool {
+        self.native_fma_registers
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())
@@ -278,6 +290,10 @@ pub(crate) fn ordinary(
         && policy.requests_native_ymm_registers()
         && policy.requests_native_scalar_fma()
         && native_scalar_fma(instruction);
+    let vex_fma_registers = opcode.encoding() == EncodingKind::VEX
+        && policy.requests_native_ymm_registers()
+        && policy.requests_native_fma_registers()
+        && native_fma_registers(instruction);
     let vex_vector = opcode.encoding() == EncodingKind::VEX
         && policy.requests_native_ymm_registers()
         && (native_ymm_registers(instruction)
@@ -285,7 +301,8 @@ pub(crate) fn ordinary(
             || vex_streaming
             || vex_moves
             || vex_scalar
-            || vex_scalar_fma);
+            || vex_scalar_fma
+            || vex_fma_registers);
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
@@ -295,7 +312,7 @@ pub(crate) fn ordinary(
     if vex_vector && !policy.features.contains(CpuidFeature::AVX) {
         return Err(UnsupportedReason::MissingFeature(CpuidFeature::AVX));
     }
-    if vex_scalar_fma && !policy.features.contains(CpuidFeature::FMA) {
+    if (vex_scalar_fma || vex_fma_registers) && !policy.features.contains(CpuidFeature::FMA) {
         return Err(UnsupportedReason::MissingFeature(CpuidFeature::FMA));
     }
     for feature in instruction.cpuid_features() {
@@ -309,7 +326,7 @@ pub(crate) fn ordinary(
         // vector source plus a separately requested exact streaming write, or
         // one exact requested temporal vector/scalar transfer, or the separate
         // scalar arithmetic register/exact4-or8-byte read shape, or one of
-        // the two separately requested destructive scalar FMA register forms. No other
+        // separately requested destructive FMA3 register forms. No other
         // memory/immediate/implicit authority follows from this early return.
         return Ok(());
     }
@@ -643,6 +660,123 @@ fn native_scalar_fma(instruction: &Instruction) -> bool {
             instruction.op_kind(operand) == OpKind::Register
                 && register.is_xmm()
                 && register <= Register::XMM15
+        })
+}
+
+// Exact supported VEX FMA3 Codes; no mnemonic-wide or memory-form admission.
+// Scalar SS/SD use XMM destructive destinations; packed forms use their
+// declared full register width. Scalar LIG is canonicalized by the encoder.
+fn native_fma_registers(instruction: &Instruction) -> bool {
+    use Code::*;
+    let width = match instruction.code() {
+        VEX_Vfmadd132ss_xmm_xmm_xmmm32
+        | VEX_Vfmadd132sd_xmm_xmm_xmmm64
+        | VEX_Vfmadd132ps_xmm_xmm_xmmm128
+        | VEX_Vfmadd132pd_xmm_xmm_xmmm128
+        | VEX_Vfmadd213ss_xmm_xmm_xmmm32
+        | VEX_Vfmadd213sd_xmm_xmm_xmmm64
+        | VEX_Vfmadd213ps_xmm_xmm_xmmm128
+        | VEX_Vfmadd213pd_xmm_xmm_xmmm128
+        | VEX_Vfmadd231ss_xmm_xmm_xmmm32
+        | VEX_Vfmadd231sd_xmm_xmm_xmmm64
+        | VEX_Vfmadd231ps_xmm_xmm_xmmm128
+        | VEX_Vfmadd231pd_xmm_xmm_xmmm128
+        | VEX_Vfmsub132ss_xmm_xmm_xmmm32
+        | VEX_Vfmsub132sd_xmm_xmm_xmmm64
+        | VEX_Vfmsub132ps_xmm_xmm_xmmm128
+        | VEX_Vfmsub132pd_xmm_xmm_xmmm128
+        | VEX_Vfmsub213ss_xmm_xmm_xmmm32
+        | VEX_Vfmsub213sd_xmm_xmm_xmmm64
+        | VEX_Vfmsub213ps_xmm_xmm_xmmm128
+        | VEX_Vfmsub213pd_xmm_xmm_xmmm128
+        | VEX_Vfmsub231ss_xmm_xmm_xmmm32
+        | VEX_Vfmsub231sd_xmm_xmm_xmmm64
+        | VEX_Vfmsub231ps_xmm_xmm_xmmm128
+        | VEX_Vfmsub231pd_xmm_xmm_xmmm128
+        | VEX_Vfnmadd132ss_xmm_xmm_xmmm32
+        | VEX_Vfnmadd132sd_xmm_xmm_xmmm64
+        | VEX_Vfnmadd132ps_xmm_xmm_xmmm128
+        | VEX_Vfnmadd132pd_xmm_xmm_xmmm128
+        | VEX_Vfnmadd213ss_xmm_xmm_xmmm32
+        | VEX_Vfnmadd213sd_xmm_xmm_xmmm64
+        | VEX_Vfnmadd213ps_xmm_xmm_xmmm128
+        | VEX_Vfnmadd213pd_xmm_xmm_xmmm128
+        | VEX_Vfnmadd231ss_xmm_xmm_xmmm32
+        | VEX_Vfnmadd231sd_xmm_xmm_xmmm64
+        | VEX_Vfnmadd231ps_xmm_xmm_xmmm128
+        | VEX_Vfnmadd231pd_xmm_xmm_xmmm128
+        | VEX_Vfnmsub132ss_xmm_xmm_xmmm32
+        | VEX_Vfnmsub132sd_xmm_xmm_xmmm64
+        | VEX_Vfnmsub132ps_xmm_xmm_xmmm128
+        | VEX_Vfnmsub132pd_xmm_xmm_xmmm128
+        | VEX_Vfnmsub213ss_xmm_xmm_xmmm32
+        | VEX_Vfnmsub213sd_xmm_xmm_xmmm64
+        | VEX_Vfnmsub213ps_xmm_xmm_xmmm128
+        | VEX_Vfnmsub213pd_xmm_xmm_xmmm128
+        | VEX_Vfnmsub231ss_xmm_xmm_xmmm32
+        | VEX_Vfnmsub231sd_xmm_xmm_xmmm64
+        | VEX_Vfnmsub231ps_xmm_xmm_xmmm128
+        | VEX_Vfnmsub231pd_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub132ps_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub132pd_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub213ps_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub213pd_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub231ps_xmm_xmm_xmmm128
+        | VEX_Vfmaddsub231pd_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd132ps_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd132pd_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd213ps_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd213pd_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd231ps_xmm_xmm_xmmm128
+        | VEX_Vfmsubadd231pd_xmm_xmm_xmmm128 => 16,
+        VEX_Vfmadd132ps_ymm_ymm_ymmm256
+        | VEX_Vfmadd132pd_ymm_ymm_ymmm256
+        | VEX_Vfmadd213ps_ymm_ymm_ymmm256
+        | VEX_Vfmadd213pd_ymm_ymm_ymmm256
+        | VEX_Vfmadd231ps_ymm_ymm_ymmm256
+        | VEX_Vfmadd231pd_ymm_ymm_ymmm256
+        | VEX_Vfmsub132ps_ymm_ymm_ymmm256
+        | VEX_Vfmsub132pd_ymm_ymm_ymmm256
+        | VEX_Vfmsub213ps_ymm_ymm_ymmm256
+        | VEX_Vfmsub213pd_ymm_ymm_ymmm256
+        | VEX_Vfmsub231ps_ymm_ymm_ymmm256
+        | VEX_Vfmsub231pd_ymm_ymm_ymmm256
+        | VEX_Vfnmadd132ps_ymm_ymm_ymmm256
+        | VEX_Vfnmadd132pd_ymm_ymm_ymmm256
+        | VEX_Vfnmadd213ps_ymm_ymm_ymmm256
+        | VEX_Vfnmadd213pd_ymm_ymm_ymmm256
+        | VEX_Vfnmadd231ps_ymm_ymm_ymmm256
+        | VEX_Vfnmadd231pd_ymm_ymm_ymmm256
+        | VEX_Vfnmsub132ps_ymm_ymm_ymmm256
+        | VEX_Vfnmsub132pd_ymm_ymm_ymmm256
+        | VEX_Vfnmsub213ps_ymm_ymm_ymmm256
+        | VEX_Vfnmsub213pd_ymm_ymm_ymmm256
+        | VEX_Vfnmsub231ps_ymm_ymm_ymmm256
+        | VEX_Vfnmsub231pd_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub132ps_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub132pd_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub213ps_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub213pd_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub231ps_ymm_ymm_ymmm256
+        | VEX_Vfmaddsub231pd_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd132ps_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd132pd_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd213ps_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd213pd_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd231ps_ymm_ymm_ymmm256
+        | VEX_Vfmsubadd231pd_ymm_ymm_ymmm256 => 32,
+        _ => return false,
+    };
+    instruction.code_size() == iced_x86::CodeSize::Code64
+        && instruction.op_count() == 3
+        && (0..3).all(|operand| {
+            let register = instruction.op_register(operand);
+            instruction.op_kind(operand) == OpKind::Register
+                && if width == 16 {
+                    register.is_xmm() && register <= Register::XMM15
+                } else {
+                    register.is_ymm() && register <= Register::YMM15
+                }
         })
 }
 

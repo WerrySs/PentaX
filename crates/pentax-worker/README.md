@@ -761,12 +761,19 @@ A separate request admits only register VFMADD213SS and VFNMADD213SS with
 the actual full-YMM engine's AVX and FMA support. It preserves the old
 destination's inactive low128 bits, clears the upper128 bits, and retains
 masked MXCSR rounding, DAZ/FTZ, sticky status, ordered NaNs and integer flags.
-Other supported VEX fused forms and memory operands retain their checked
-software route; EVEX remains explicitly unsupported.
+The independent full register request also covers all ninety-six supported
+VEX FMA3 Codes, under the same actual-engine FMA admission. It admits only
+three correctly sized XMM/YMM registers; memory operands retain the checked
+software route and EVEX/FMA4 remain excluded. The old two-form scalar policy
+keeps its separate, narrower API meaning.
 `native_scalar_fma=true|false` reports this engine capability after
 admission; it does not count retired operations or establish a speedup.
 Original callers compare real native and mediated counter deltas while
 checking exact fused cancellation and state across a kernel service call.
+The original full-register worker consumer also checks packed231 PS at both
+widths, scalar SD, negative and alternating families, with literal register
+results feeding a genuinely mediated memory FMA. It verifies all sixteen
+vectors across a real kernel service and mode-aware exact operation/byte deltas.
 Software underflow uses precision rounding with an unbounded exponent to
 determine tininess before the final subnormal rounding; merely rounding a
 tiny value to the minimum normal value does not by itself suppress FTZ.
