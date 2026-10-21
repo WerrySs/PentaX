@@ -239,7 +239,7 @@ fn configured_pool_limits_flexible_maps_and_recovers_on_unmap_without_counting_d
 
 #[test]
 fn configured_pool_policy_refuses_zero_unaligned_or_out_of_profile_capacity() {
-    for capacity in [0, 1, PAGE - 1, 13_824 * 1024 * 1024, u64::MAX & !(PAGE - 1)] {
+    for capacity in [0, 1, PAGE - 1, 13_824 * 1024 * 1024, !(PAGE - 1)] {
         assert!(matches!(
             Kernel::new(
                 Limits {
