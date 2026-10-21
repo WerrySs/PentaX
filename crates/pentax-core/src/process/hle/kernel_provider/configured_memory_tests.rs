@@ -96,7 +96,8 @@ fn configured_memory_refuses_namespace_version_type_and_neighbor_nid_substitutio
         })
     ));
     let mut neighbor = consumer(b"libkernel", b"libkernel", &[row]);
-    neighbor.imports[0].nid = *b"n1-v6FgU7MR";
+    neighbor.imports[0].nid = *b"n1-v6FgU7MA";
+    assert!(pentax_linker::NidToken::parse(&neighbor.imports[0].nid).is_ok());
     assert!(matches!(
         link(&neighbor.build().unwrap(), &provider),
         Err(SymbolicError::MissingProvider { .. })

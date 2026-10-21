@@ -42,7 +42,7 @@ mod tests {
             ("libkernel", "libkernel", 1, 0, 1, row.nid),
             ("libkernel", "libkernel", 2, 1, 1, row.nid),
             ("libkernel", "libkernel", 1, 1, 2, row.nid),
-            ("libkernel", "libkernel", 1, 1, 1, "n1-v6FgU7MR"),
+            ("libkernel", "libkernel", 1, 1, 1, "n1-v6FgU7MA"),
         ] {
             assert_eq!(resolve(module, (major, minor), library, version, nid), None);
         }
