@@ -6,6 +6,48 @@ use pentax_kernel::{
 };
 
 #[test]
+fn observation_duration_arguments_preserve_default_and_reject_before_intake() {
+    let arguments = |profile: Option<&str>, values: &[&str]| {
+        let mut args: Vec<std::ffi::OsString> =
+            vec!["--image".into(), "original-unused-input".into()];
+        if let Some(profile) = profile {
+            args.extend(["--execution-profile".into(), profile.into()]);
+        }
+        for value in values {
+            args.extend(["--stop-after-seconds".into(), (*value).into()]);
+        }
+        args
+    };
+    assert_eq!(stop_after_seconds(&arguments(None, &[])), Ok(None));
+    for seconds in [1, 3600] {
+        assert_eq!(
+            stop_after_seconds(&arguments(Some("interactive"), &[&seconds.to_string()])),
+            Ok(Some(seconds))
+        );
+    }
+    for (profile, values) in [
+        (None, vec!["1"]),
+        (Some("probe"), vec!["1"]),
+        (Some("interactive"), vec!["0"]),
+        (Some("interactive"), vec!["3601"]),
+        (Some("interactive"), vec!["-1"]),
+        (Some("interactive"), vec!["+1"]),
+        (Some("interactive"), vec!["1.0"]),
+        (Some("interactive"), vec![" 1"]),
+        (Some("interactive"), vec![""]),
+        (Some("interactive"), vec!["4294967296"]),
+        (Some("interactive"), vec!["1", "2"]),
+    ] {
+        let args = arguments(profile, &values);
+        assert!(stop_after_seconds(&args).is_err());
+        assert!(matches!(
+            super::super::intake(&args, &NativeImageLimits::default()),
+            Err(super::super::ProbeError::Input("image-arguments"))
+        ));
+    }
+}
+
+#[test]
 fn interactive_lifetime_profile_preserves_live_and_individual_operation_policies() {
     let before = NativeImageLimits::default();
     let mut image = before.clone();
@@ -115,6 +157,7 @@ fn interactive_lifetime_profile_preserves_live_and_individual_operation_policies
     let original = NativeSessionLimits {
         private_samples: true,
         private_thread_states: true,
+        stop_after_seconds: Some(7),
         ..Default::default()
     };
     let mut execution = original;
@@ -155,6 +198,7 @@ fn interactive_lifetime_profile_preserves_live_and_individual_operation_policies
         original.private_thread_states
     );
     assert_eq!(execution.interactive, original.interactive);
+    assert_eq!(execution.stop_after_seconds, original.stop_after_seconds);
     assert_eq!(
         execution.libc_memory_builtins,
         original.libc_memory_builtins

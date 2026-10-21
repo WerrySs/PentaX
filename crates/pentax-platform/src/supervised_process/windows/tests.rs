@@ -47,6 +47,21 @@ fn windows_command_words_preserve_empty_unicode_quotes_and_trailing_slashes_with
 }
 
 #[test]
+fn selected_cli_refuses_relative_other_named_and_parent_paths_before_launch() {
+    for program in [
+        Path::new("pentax-cli.exe"),
+        Path::new(r"Z:\original-fixture\other.exe"),
+        Path::new(r"Z:\original-fixture\..\pentax-cli.exe"),
+        Path::new(r"Z:\original-fixture\pentax-cli.exe:other"),
+    ] {
+        assert!(matches!(
+            SupervisedProcess::spawn_selected_cli(program, &[], Limits::default()),
+            Err(Error::InvalidArguments)
+        ));
+    }
+}
+
+#[test]
 fn actual_private_diagnostic_pipe_preserves_partial_chunks_and_discards_excess_only_on_shutdown() {
     let (read, write) = pipe().unwrap();
     let mut reader = Reader {
@@ -120,8 +135,8 @@ fn actual_job_drains_root_output_and_cancellation_reaps_a_running_descendant_bef
         run_timeout: Some(Duration::from_secs(10)),
         ..Default::default()
     };
-    // Private original-fixture constructor only: the public API still accepts
-    // exactly the sibling CLI, never an arbitrary path from the desktop/guest.
+    // Private original-fixture constructor only: public APIs accept only the
+    // fixed CLI filename, never an arbitrary executable name.
     for tree in [false, true] {
         let mut process = SupervisedProcess::spawn(
             &executable,

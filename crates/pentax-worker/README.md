@@ -1,7 +1,7 @@
 # Native diagnostic worker
 
 `probe-entry --execution-profile interactive` selects an explicit interactive
-lifetime policy. It has no fixed session deadline or diagnostic block/work
+lifetime policy. By default it has no fixed session deadline or diagnostic block/work
 allowance. Checked u64 lifetime totals remain monotonic; they are never reset
 to renew permission, executor identity or callback tickets. The desktop selects
 this profile for Play. The existing `probe`, `startup`, `extended-startup` and
@@ -23,10 +23,31 @@ records while the worker runs. Each record is at most 16 KiB, at most two wait
 in the forwarding queue, and no record history grows with session length. Raw
 stderr, incomplete/oversize records and free-form error payloads are refused;
 they are never copied into the public stream. Final completion still requires
-the actual child exit and exactly one outer-return result. Desktop supervision
+the actual child exit; successful completion requires exactly one outer-return
+result. Typed stopped results remain failures. Desktop supervision
 retains its owned process job, cancellation, finite shutdown/reap grace and
 quarantine rules. Window handshake and individual frame deadlines stay finite even though
 the interactive window session has no fixed lifetime deadline.
+
+`--stop-after-seconds <1..3600>` optionally requests a graceful observation stop
+for the explicit interactive profile only. It may appear once; nondecimal,
+out-of-range, duplicate or noninteractive requests fail before execution. The
+default is absent. One monotonic wall-clock deadline starts with the first
+actual prepared executor, after intake and session setup, and remains unchanged
+across dynamic source epochs and initializers. It changes no execution ledger,
+operation deadline, live-resource bound or scheduler policy.
+
+Time is checked between at most 1,024 logical blocks and before scheduler idle
+or frame-delivery retry waits. The existing two-block trace is restricted at
+this observation boundary. Disabled observation makes no clock calls. A bounded
+operation already in progress can overrun the requested instant; this is not a
+hard realtime deadline. A return or error already produced by that operation
+keeps its normal precedence. Expiry returns a typed stopped RESULT with closed
+`code=observation-duration`, no guest return value, and worker/CLI exit status1.
+It does not kill or restart the guest process. Existing cleanup and optional
+private console/sample/thread-state capture run through their ordinary terminal
+paths; output failures cannot replace the stop. A duration observation does not
+establish startup completion, useful progress or a cause of missing rendering.
 
 `probe-entry --private-console <fresh-file>` explicitly creates a new private
 binary file for guest-console output already retained by the kernel. It is

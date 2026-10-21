@@ -277,10 +277,43 @@ fn run_interactive(
     result
 }
 
+fn stop_after_seconds(args: &[OsString]) -> Result<Option<u32>, ()> {
+    let mut values = args
+        .chunks_exact(2)
+        .filter(|pair| pair[0] == "--stop-after-seconds");
+    let Some(pair) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some()
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--execution-profile")
+            .count()
+            != 1
+        || !args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--execution-profile" && pair[1] == "interactive")
+    {
+        return Err(());
+    }
+    let text = pair[1].to_str().ok_or(())?;
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(());
+    }
+    let seconds = text.parse::<u32>().map_err(|_| ())?;
+    if !(1..=3600).contains(&seconds) {
+        return Err(());
+    }
+    Ok(Some(seconds))
+}
+
 pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
+    stop_after_seconds(args).map_err(
+        |()| "one --stop-after-seconds from 1 through 3600 requires the interactive profile",
+    )?;
     if args.is_empty()
         || !args.len().is_multiple_of(2)
-        || args.len() / 2 > 125 + 256 + 10
+        || args.len() / 2 > 125 + 256 + 11
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -291,6 +324,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                     && pair[0] != "--data-directory"
                     && pair[0] != "--memory-profile"
                     && pair[0] != "--execution-profile"
+                    && pair[0] != "--stop-after-seconds"
                     && pair[0] != "--present-window"
                     && pair[0] != "--libc-memory-builtins"
                     && pair[0] != "--private-samples"
@@ -317,6 +351,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                 && pair[0] != "--data-directory"
                 && pair[0] != "--memory-profile"
                 && pair[0] != "--execution-profile"
+                && pair[0] != "--stop-after-seconds"
                 && pair[0] != "--present-window"
                 && pair[0] != "--libc-memory-builtins"
                 && pair[0] != "--private-samples"
@@ -388,7 +423,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                 .any(|pair| pair[0] == "--preload-libc" || pair[0] == "--preload-libc-as"))
     {
         return Err(
-            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup|interactive] [--present-window yes|no] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--libc-memory-builtins off|checked] [--private-samples <fresh-file>] [--private-thread-states <fresh-file>] [--private-console <fresh-file>] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>]; first image is primary".into(),
+            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup|interactive] [--present-window yes|no] [--stop-after-seconds <1..3600, interactive only>] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--libc-memory-builtins off|checked] [--private-samples <fresh-file>] [--private-thread-states <fresh-file>] [--private-console <fresh-file>] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>]; first image is primary".into(),
         );
     }
     if args
@@ -536,6 +571,47 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn observation_duration_is_single_bounded_decimal_and_interactive_only() {
+        let arguments = |profile: Option<&str>, values: &[&str]| {
+            let mut args: Vec<OsString> = vec!["--image".into(), "original-unused-input".into()];
+            if let Some(profile) = profile {
+                args.extend(["--execution-profile".into(), profile.into()]);
+            }
+            for value in values {
+                args.extend(["--stop-after-seconds".into(), (*value).into()]);
+            }
+            args
+        };
+        assert_eq!(stop_after_seconds(&arguments(None, &[])), Ok(None));
+        assert_eq!(
+            stop_after_seconds(&arguments(Some("interactive"), &["1"])),
+            Ok(Some(1))
+        );
+        assert_eq!(
+            stop_after_seconds(&arguments(Some("interactive"), &["3600"])),
+            Ok(Some(3600))
+        );
+        for profile in [None, Some("probe"), Some("long-startup")] {
+            assert!(stop_after_seconds(&arguments(profile, &["1"])).is_err());
+        }
+        for values in [
+            &["0"][..],
+            &["3601"],
+            &["-1"],
+            &["+1"],
+            &["1.0"],
+            &[" 1"],
+            &[""],
+            &["4294967296"],
+            &["1", "2"],
+        ] {
+            assert!(stop_after_seconds(&arguments(Some("interactive"), values)).is_err());
+        }
+        let mut duplicate = arguments(Some("interactive"), &["1"]);
+        duplicate.extend(["--execution-profile".into(), "interactive".into()]);
+        assert!(stop_after_seconds(&duplicate).is_err());
+    }
     #[test]
     fn worker_output_collection_enforces_the_total_byte_bound() {
         assert_eq!(

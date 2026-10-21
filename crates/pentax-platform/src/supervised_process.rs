@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-//! Bounded sibling-CLI supervision for the desktop launcher.
+//! Bounded fixed-name CLI supervision for the desktop launcher and validators.
 //!
-//! The fixed sibling executable is launched suspended into a private Windows
+//! The sibling or explicitly selected absolute CLI is launched suspended into a private Windows
 //! kill-on-close job before any child instruction can run. Standard streams
 //! use only new private handles; no shell, ambient PATH lookup, inherited console
 //! handles, frame endpoint or raw-handle adoption API is supplied.
@@ -137,6 +137,14 @@ pub struct SupervisedProcess;
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 impl SupervisedProcess {
     pub fn spawn_cli(_: &[OsString], limits: Limits) -> Result<Self, Error> {
+        limits.validate()?;
+        Err(Error::UnsupportedHost)
+    }
+    pub fn spawn_selected_cli(
+        _: &std::path::Path,
+        _: &[OsString],
+        limits: Limits,
+    ) -> Result<Self, Error> {
         limits.validate()?;
         Err(Error::UnsupportedHost)
     }

@@ -67,61 +67,148 @@ fn run(
             args.push(path.as_os_str().to_owned());
         }
     }
-    let cli = std::env::var_os("PENTAX_TEST_CLI").unwrap_or_else(|| {
-        let worker = std::env::var_os("PENTAX_TEST_WORKER")
-            .unwrap_or_else(|| env!("CARGO_BIN_EXE_pentax-worker").into());
-        PathBuf::from(worker)
-            .with_file_name("pentax-cli.exe")
-            .into_os_string()
-    });
-    let mut child = Command::new(cli)
-        .arg("probe-entry")
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(0x0800_0000)
-        .spawn()
-        .expect("original private-state fixture requires the matching sibling CLI");
-    fn drain(mut reader: impl std::io::Read) -> (Vec<u8>, bool) {
-        let mut retained = Vec::with_capacity(32 * 1024);
-        let mut buffer = [0; 4096];
-        let mut overflow = false;
-        loop {
-            let count = reader.read(&mut buffer).unwrap();
-            if count == 0 {
-                return (retained, overflow);
+    run_arguments(&args, true)
+}
+
+fn run_selected_cli(executable: &std::path::Path, args: &[OsString]) -> (i32, Vec<u8>, Vec<u8>) {
+    use pentax_platform::supervised_process::{Limits, State, SupervisedProcess};
+    let args: Vec<_> = std::iter::once(OsString::from("probe-entry"))
+        .chain(args.iter().cloned())
+        .collect();
+    let mut process = SupervisedProcess::spawn_selected_cli(
+        executable,
+        &args,
+        Limits {
+            run_timeout: Some(Duration::from_secs(30)),
+            max_stdout_bytes: Some(32 * 1024),
+            max_stderr_bytes: Some(32 * 1024),
+            ..Limits::default()
+        },
+    )
+    .expect("original private-state fixture requires the selected CLI");
+    let mut stdout = Vec::with_capacity(32 * 1024);
+    let mut stderr = Vec::with_capacity(32 * 1024);
+    let mut out = [0; 4096];
+    let mut err = [0; 4096];
+    loop {
+        let status = match process.poll(&mut out, &mut err) {
+            Ok(status) => status,
+            Err(error) => {
+                // Cancellation owns the exact suspended-before-admission job,
+                // including the CLI's interactive worker. Never join readers
+                // or kill descendants discovered through an ambient census.
+                let deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    if process
+                        .shutdown_poll(&mut out, &mut err)
+                        .is_ok_and(|status| {
+                            matches!(status.state, State::Exited(_) | State::Closed)
+                        })
+                        || Instant::now() >= deadline
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                // Any unresolved owner retains the existing poisoned job;
+                // dropping it neither releases a live tree nor waits forever.
+                panic!("original private-state CLI supervision failed: {error}");
             }
-            let keep = count.min(32 * 1024 - retained.len());
-            retained.extend_from_slice(&buffer[..keep]);
-            overflow |= keep != count;
+        };
+        assert!(stdout.len() + status.stdout_len <= 32 * 1024);
+        assert!(stderr.len() + status.stderr_len <= 32 * 1024);
+        stdout.extend_from_slice(&out[..status.stdout_len]);
+        stderr.extend_from_slice(&err[..status.stderr_len]);
+        if let State::Exited(code) = status.state {
+            // Exited requires actual root exit, empty job and both real EOFs.
+            return (i32::try_from(code).unwrap(), stdout, stderr);
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    let output = std::thread::spawn(move || drain(stdout));
-    let errors = std::thread::spawn(move || drain(stderr));
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while child.try_wait().unwrap().is_none() {
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = output.join();
-            let _ = errors.join();
-            panic!("original private-state CLI exceeded its finite deadline");
+}
+
+pub(super) fn run_arguments(
+    args: &[OsString],
+    cli: bool,
+) -> (i32, HashMap<String, String>, String) {
+    // The platform supervisor owns one process tree per test process.
+    static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = RUN.lock().unwrap();
+    let interactive = args
+        .chunks_exact(2)
+        .any(|pair| pair[0] == "--execution-profile" && pair[1] == "interactive");
+    let worker = || {
+        std::env::var_os("PENTAX_TEST_WORKER")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_pentax-worker").into())
+    };
+    let executable = if cli {
+        std::env::var_os("PENTAX_TEST_CLI").unwrap_or_else(|| {
+            let worker = std::env::var_os("PENTAX_TEST_WORKER")
+                .unwrap_or_else(|| env!("CARGO_BIN_EXE_pentax-worker").into());
+            PathBuf::from(worker)
+                .with_file_name("pentax-cli.exe")
+                .into_os_string()
+        })
+    } else {
+        worker()
+    };
+    let (status, stdout, stderr) = if cli {
+        run_selected_cli(std::path::Path::new(&executable), args)
+    } else {
+        let mut child = Command::new(executable)
+            .arg("probe-entry")
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .expect("original private-state fixture requires the matching sibling CLI");
+        fn drain(mut reader: impl std::io::Read) -> (Vec<u8>, bool) {
+            let mut retained = Vec::with_capacity(32 * 1024);
+            let mut buffer = [0; 4096];
+            let mut overflow = false;
+            loop {
+                let count = reader.read(&mut buffer).unwrap();
+                if count == 0 {
+                    return (retained, overflow);
+                }
+                let keep = count.min(32 * 1024 - retained.len());
+                retained.extend_from_slice(&buffer[..keep]);
+                overflow |= keep != count;
+            }
         }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let status = child.wait().unwrap();
-    let (stdout, output_overflow) = output.join().unwrap();
-    let (stderr, error_overflow) = errors.join().unwrap();
-    assert!(!output_overflow && !error_overflow);
-    if status.success() {
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let output = std::thread::spawn(move || drain(stdout));
+        let errors = std::thread::spawn(move || drain(stderr));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = output.join();
+                let _ = errors.join();
+                panic!("original private-state CLI exceeded its finite deadline");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let status = child.wait().unwrap();
+        let (stdout, output_overflow) = output.join().unwrap();
+        let (stderr, error_overflow) = errors.join().unwrap();
+        assert!(!output_overflow && !error_overflow);
+        (status.code().unwrap(), stdout, stderr)
+    };
+    if status == 0 || !cli {
         assert!(stderr.is_empty());
     } else {
         assert_eq!(
             String::from_utf8(stderr).unwrap().trim_end(),
-            "PentaX: entry probe stopped; inspect its result category above"
+            if interactive {
+                "PentaX: entry worker stopped; inspect its result category above"
+            } else {
+                "PentaX: entry probe stopped; inspect its result category above"
+            }
         );
     }
     let text = String::from_utf8(stdout).unwrap();
@@ -140,13 +227,13 @@ fn run(
         .map(|field| field.split_once('=').unwrap())
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
         .collect();
-    (status.code().unwrap(), fields, text)
+    (status, fields, text)
 }
 
 fn u64_at(bytes: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap())
 }
-fn rows(path: &std::path::Path) -> Vec<Vec<u8>> {
+pub(super) fn rows(path: &std::path::Path) -> Vec<Vec<u8>> {
     let length = std::fs::metadata(path).unwrap().len();
     assert!(matches!(length, 176 | 336));
     let bytes = std::fs::read(path).unwrap();

@@ -69,6 +69,7 @@ impl ProbeError {
                 NativeSessionError::Allocation => "execution-allocation",
                 NativeSessionError::FixtureInvariant(_) => "execution-invariant",
                 NativeSessionError::ThreadDeadlock => "thread-deadlock",
+                NativeSessionError::ObservationStopped => "observation-duration",
                 NativeSessionError::Frame(_) => "frame-session",
             },
             Self::Admission(error) => error.code(),
@@ -81,6 +82,16 @@ pub(super) struct ProbeOutcome {
     pub unavailable_functions: Option<usize>,
 }
 impl ProbeOutcome {
+    pub fn exit_status(&self) -> u8 {
+        match &self.result {
+            Ok(_) => 0,
+            Err(ProbeError::Admission(NativeImageError::Callback(
+                NativeSessionError::ObservationStopped,
+            ))) => 1,
+            Err(_) => 2,
+        }
+    }
+
     pub fn error_runtime_failure(&self) -> Option<&'static str> {
         if let Err(ProbeError::Admission(NativeImageError::Callback(
             NativeSessionError::Dispatch(error),
@@ -308,13 +319,14 @@ struct Intake {
     data_roots: Vec<pentax_kernel::ReadOnlyRoot>,
 }
 fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, ProbeError> {
+    interactive::stop_after_seconds(args).map_err(|()| ProbeError::Input("image-arguments"))?;
     if args.is_empty()
         || !args.len().is_multiple_of(2)
         || args.len() / 2
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(10)
+                .saturating_add(11)
         || args
             .chunks_exact(2)
             .filter(|pair| {
@@ -325,6 +337,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                     && pair[0] != "--data-directory"
                     && pair[0] != "--memory-profile"
                     && pair[0] != "--execution-profile"
+                    && pair[0] != "--stop-after-seconds"
                     && pair[0] != "--present-window"
                     && pair[0] != "--libc-memory-builtins"
                     && pair[0] != "--private-samples"
@@ -351,6 +364,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
                 && pair[0] != "--data-directory"
                 && pair[0] != "--memory-profile"
                 && pair[0] != "--execution-profile"
+                && pair[0] != "--stop-after-seconds"
                 && pair[0] != "--present-window"
                 && pair[0] != "--libc-memory-builtins"
                 && pair[0] != "--private-samples"
@@ -525,6 +539,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         }
         if pair[0] == "--memory-profile"
             || pair[0] == "--execution-profile"
+            || pair[0] == "--stop-after-seconds"
             || pair[0] == "--present-window"
             || pair[0] == "--libc-memory-builtins"
             || pair[0] == "--private-samples"
@@ -799,6 +814,9 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
                     .map_err(|_| NativeSessionError::OutputUnavailable)?;
                 let mut execution = NativeSessionLimits {
                     interactive,
+                    stop_after_seconds: interactive::stop_after_seconds(args).map_err(|()| {
+                        NativeSessionError::FixtureInvariant("observation duration arguments")
+                    })?,
                     private_samples: private_samples_file.is_some(),
                     private_thread_states: private_thread_states_file.is_some(),
                     ..Default::default()
@@ -931,6 +949,43 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
 #[cfg(test)]
 mod budget_tests {
     use super::*;
+
+    #[test]
+    fn observation_stop_has_a_distinct_closed_code_and_only_its_own_process_status() {
+        for (error, status, code) in [
+            (
+                NativeSessionError::ObservationStopped,
+                1,
+                "observation-duration",
+            ),
+            (
+                NativeSessionError::SourceWindow,
+                2,
+                "initialized-source-unavailable",
+            ),
+            (
+                NativeSessionError::Budget("source windows"),
+                2,
+                "execution-budget",
+            ),
+        ] {
+            let outcome = ProbeOutcome {
+                result: Err(ProbeError::Admission(NativeImageError::Callback(error))),
+                progress: NativeSessionProgress::default(),
+                unavailable_functions: None,
+            };
+            assert_eq!(outcome.exit_status(), status);
+            assert_eq!(outcome.result.as_ref().unwrap_err().code(), code);
+            assert_eq!(
+                outcome.error_budget(),
+                if code == "execution-budget" {
+                    Some("source-windows")
+                } else {
+                    None
+                }
+            );
+        }
+    }
 
     #[test]
     fn service_failures_keep_their_category_without_exposing_error_payloads() {

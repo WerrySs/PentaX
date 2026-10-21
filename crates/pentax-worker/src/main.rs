@@ -264,7 +264,7 @@ fn execute_image_probe(args: &[std::ffi::OsString]) -> io::Result<u8> {
         "RESULT\t{status}\tmode=entry-probe\tcode={code}\t{}\tunavailable_functions={unavailable}{value}{fp_status}{instruction}{budget}{public_function}{reference}{reference_library}{runtime_failure}",
         outcome.progress.protocol_fields(),
     ))?;
-    Ok(if outcome.result.is_ok() { 0 } else { 2 })
+    Ok(outcome.exit_status())
 }
 #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 fn execute_image_probe(_: &[std::ffi::OsString]) -> io::Result<u8> {

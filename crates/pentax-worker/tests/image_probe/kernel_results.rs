@@ -67,6 +67,8 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
 
 #[path = "interactive.rs"]
 mod interactive;
+#[path = "observation_stop.rs"]
+mod observation_stop;
 #[path = "posix.rs"]
 mod posix;
 #[path = "posix_self.rs"]

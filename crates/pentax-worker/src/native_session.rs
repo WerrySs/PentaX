@@ -29,6 +29,7 @@ mod dispatch_context;
 // The optional local window runs on this supervised worker thread, outside
 // every guest entry and memory pause. Ordinary probes retain no consumer.
 pub(crate) mod frame_bridge;
+mod observation_stop;
 mod plan_cache;
 mod private_thread_states;
 mod scheduling;
@@ -61,6 +62,8 @@ pub(super) struct NativeSessionLimits {
     pub private_thread_states: bool,
     /// Explicit host lifetime policy; per-operation and resident bounds remain.
     pub interactive: bool,
+    /// Optional graceful observation duration, valid only for interactive mode.
+    pub stop_after_seconds: Option<u32>,
 }
 impl Default for NativeSessionLimits {
     fn default() -> Self {
@@ -79,6 +82,7 @@ impl Default for NativeSessionLimits {
             private_samples: false,
             private_thread_states: false,
             interactive: false,
+            stop_after_seconds: None,
         }
     }
 }
@@ -101,6 +105,7 @@ pub(super) enum NativeSessionError {
     OutputUnavailable,
     FixtureInvariant(&'static str),
     ThreadDeadlock,
+    ObservationStopped,
     Frame(frame_bridge::Error),
 }
 impl std::fmt::Display for NativeSessionError {
@@ -123,6 +128,7 @@ impl std::fmt::Display for NativeSessionError {
             Self::ThreadDeadlock => {
                 f.write_str("all guest threads are blocked without a runnable notifier")
             }
+            Self::ObservationStopped => f.write_str("requested observation duration reached"),
             Self::Frame(error) => write!(f, "frame session: {error:?}"),
         }
     }
@@ -654,6 +660,10 @@ fn run_prepared_consumer_inner<'plan, 'image>(
         reported_blocks: 0,
         report: None,
         frame_pump_blocks: None,
+        observation_stop: observation_stop::ObservationStop::new(
+            limits.stop_after_seconds,
+            limits.interactive,
+        )?,
     };
     state
         .frames
@@ -815,6 +825,7 @@ struct RunState<'plan, 'image> {
     reported_blocks: u64,
     report: Option<NativeSessionReport>,
     frame_pump_blocks: Option<u64>,
+    observation_stop: observation_stop::ObservationStop,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -874,6 +885,10 @@ fn execute_epoch<'plan, 'image>(
     // This closure changes no guest error ordering. A dynamic source transition
     // still moves the same machine out only after the closure has returned.
     let outcome = (|| {
+        state.observation_stop.start(Instant::now)?;
+        state
+            .observation_stop
+            .check(engine.usage().blocks, true, Instant::now)?;
         progress.dispatch = engine.usage();
         let native_ymm_features = engine.native_ymm_features();
         progress.native_scalar_fma =
@@ -961,7 +976,16 @@ fn execute_epoch<'plan, 'image>(
         // Reuse only allocation storage within this source epoch. Every attempt
         // still fetches its complete live executable window before cache lookup.
         let mut window_storage = Vec::new();
+        let mut first_operation = true;
         loop {
+            state.observation_stop.check(
+                engine.usage().blocks,
+                first_operation
+                    || state.scheduling.active_blocked()
+                    || consumer.is_some() && state.frame_pump_blocks.is_none(),
+                Instant::now,
+            )?;
+            first_operation = false;
             let mut external = None;
             if let Some(consumer) = consumer.as_deref_mut() {
                 let blocked = state.scheduling.active_blocked();
@@ -974,6 +998,11 @@ fn execute_epoch<'plan, 'image>(
                     progress.window = consumer.observations();
                     match pumped.map_err(NativeSessionError::Frame)? {
                         frame_bridge::Pump::RetryEventDelivery => {
+                            state.observation_stop.check(
+                                engine.usage().blocks,
+                                true,
+                                Instant::now,
+                            )?;
                             let wake = consumer
                                 .external_wake()
                                 .map_err(NativeSessionError::Frame)?
@@ -1162,6 +1191,7 @@ fn execute_epoch<'plan, 'image>(
                         frame_pump_blocks: state.frame_pump_blocks,
                     }
                     .maximum_span()
+                    .min(state.observation_stop.maximum_span(engine.usage().blocks))
                 } else {
                     1
                 };

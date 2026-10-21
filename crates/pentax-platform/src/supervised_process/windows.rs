@@ -498,7 +498,31 @@ impl SupervisedProcess {
             .filter(|path| path.is_absolute())
             .ok_or(Error::SiblingUnavailable)?;
         let program = directory.join("pentax-cli.exe");
-        Self::spawn(&program, args, limits)
+        Self::spawn_selected_cli(&program, args, limits)
+    }
+    /// Supervise an explicitly selected build or extracted CLI with the same
+    /// private-job ownership as the sibling launcher. Only an absolute path
+    /// ending in the exact CLI filename is accepted; no shell or PATH search
+    /// selects an executable, and this does not attest its file contents.
+    pub fn spawn_selected_cli(
+        program: &Path,
+        args: &[OsString],
+        limits: Limits,
+    ) -> Result<Self, Error> {
+        limits.validate()?;
+        if !program.is_absolute()
+            || program.file_name() != Some(std::ffi::OsStr::new("pentax-cli.exe"))
+            || program.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::CurDir
+                )
+            })
+            || args.len() > MAX_ARGUMENTS
+        {
+            return Err(Error::InvalidArguments);
+        }
+        Self::spawn(program, args, limits)
     }
     fn spawn(program: &Path, args: &[OsString], limits: Limits) -> Result<Self, Error> {
         let permit = Permit::acquire()?;

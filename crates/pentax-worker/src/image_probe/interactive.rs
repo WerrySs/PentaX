@@ -6,6 +6,38 @@
 use crate::native_session::NativeSessionLimits;
 use pentax_core::process::hle::NativeImageLimits;
 
+/// Explicit command-line duration; invalid requests fail before file intake or
+/// RUNNING. Do not reinterpret this as a supervisor or per-operation deadline.
+pub(super) fn stop_after_seconds(args: &[std::ffi::OsString]) -> Result<Option<u32>, ()> {
+    let mut values = args
+        .chunks_exact(2)
+        .filter(|pair| pair[0] == "--stop-after-seconds");
+    let Some(pair) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some()
+        || args
+            .chunks_exact(2)
+            .filter(|pair| pair[0] == "--execution-profile")
+            .count()
+            != 1
+        || !args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--execution-profile" && pair[1] == "interactive")
+    {
+        return Err(());
+    }
+    let text = pair[1].to_str().ok_or(())?;
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(());
+    }
+    let seconds = text.parse::<u32>().map_err(|_| ())?;
+    if !(1..=3600).contains(&seconds) {
+        return Err(());
+    }
+    Ok(Some(seconds))
+}
+
 pub(super) fn configure_image(limits: &mut NativeImageLimits) {
     // Preserve finite JSON/metadata and shader helper work before extending
     // only their containing monotonic ledgers. Reapplication cannot loosen an
