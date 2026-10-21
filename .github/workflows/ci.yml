@@ -123,19 +123,23 @@ jobs:
         run: >-
           cargo test --locked -p pentax-platform --lib -- native_string_index_tests:: packed_comparison_all_controls_and_lengths_match_hardware --test-threads=1 --nocapture
       - name: Test bounded interactive CLI records
-        run: cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1
       - name: Test owned interactive process lifetime and cancellation
-        run: cargo test --locked -p pentax-platform --lib supervised_process:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-platform --lib supervised_process:: -- --test-threads=1
       - name: Test interactive frame deadlines and retained resource policies
         run: >-
           cargo test --locked -p pentax-worker --bin pentax-worker -- native_session::frame_bridge::tests:: image_probe::interactive::tests:: --test-threads=1
       - name: Test desktop interactive launch plans
-        run: cargo test --locked -p pentax-desktop --bin pentax launch::tests:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-desktop --bin pentax launch::tests:: -- --test-threads=1
       - name: Test original finite programs through interactive worker and CLI
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
           PENTAX_TEST_CLI: ${{ github.workspace }}/target/release/pentax-cli.exe
-        run: cargo test --locked -p pentax-worker --test image_probe kernel_results::interactive:: -- --test-threads=1
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::interactive:: -- --test-threads=1
       - name: Test explicit private console output with original code
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
