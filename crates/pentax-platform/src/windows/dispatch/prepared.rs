@@ -442,6 +442,8 @@ mod bit_counts;
 mod cache_hints;
 #[path = "prepared/libc_builtin.rs"]
 mod libc_builtin;
+#[path = "prepared/native_context.rs"]
+mod native_context;
 pub use libc_builtin::NativeLibcBuiltin;
 #[path = "prepared/cpu_identification.rs"]
 mod cpu_identification;
@@ -1630,19 +1632,16 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 .native_entries
                 .checked_add(1)
                 .ok_or(NativeDispatchError::Budget("native entries"))?;
-            let _guard = DispatchGuard::acquire()?;
-            let mut context = GuestContext::zeroed();
-            context.gpr = self.machine.state.gpr;
-            context.rflags = self.machine.state.rflags;
-            context.mxcsr = self.machine.state.mxcsr;
-            self.machine.vector_mode.load(
-                &mut context,
-                &self.machine.state.xmm,
-                &self.machine.state.ymm_upper,
+            let guard = DispatchGuard::acquire()?;
+            let guest_base = end(self.machine.stack.stack)?;
+            native_context::stage(
+                &guard,
+                self.machine.vector_mode,
+                &self.machine.state,
+                guest_base,
+                self.machine.stack.stack.address,
+                block.placement().address,
             );
-            context.guest_base = end(self.machine.stack.stack)?;
-            context.guest_limit = self.machine.stack.stack.address;
-            context.rip = block.placement().address;
             // Fail closed if anything after actual execution rejects its result.
             self.machine.phase = Phase::Terminal;
             // SAFETY: The caller and live checks establish the exact source,
@@ -1651,22 +1650,13 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             // bounded placement belongs to this cache. The process-wide guard
             // owns CONTEXT; no Rust reference crosses assembly.
             unsafe {
-                *CONTEXT.0.get() = context;
                 self.machine.vector_mode.enter();
                 if streaming {
                     super::complete_non_temporal_stores();
                 }
-                context = *CONTEXT.0.get();
             }
             self.machine.usage.native_entries = entries;
-            self.machine.state.gpr = context.gpr;
-            self.machine.state.rflags = context.rflags;
-            self.machine.state.mxcsr = context.mxcsr;
-            self.machine.vector_mode.save(
-                &context,
-                &mut self.machine.state.xmm,
-                &mut self.machine.state.ymm_upper,
-            );
+            native_context::capture(&guard, self.machine.vector_mode, &mut self.machine.state);
         } else {
             // An attested UD2-only plan has no native body. Resolve its exit
             // from the same admitted CPU/memory state without entering hardware.

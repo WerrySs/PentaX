@@ -918,6 +918,16 @@ page span. The source remains logically
 immutable and is checked against the current declaration on every step. Stack,
 CPU, host features and current operand rights are also rechecked on every reuse.
 Counters distinguish successful publications, exact reuses and hardware entries.
+Ordinary and affine native entries stage active guest fields directly in the
+existing process-guarded context record and capture only the selected bridge's
+guest outputs. AVX uses its full YMM bank without also populating the inactive
+legacy XMM snapshot; SSE2 capture retains the software upper YMM state. No
+context reference survives the assembly call. The original bridge, host-state
+restoration, entry/capture ordering, non-temporal fence and conservative work
+charges remain unchanged. Dropping the guard still clears the complete private
+record before permitting another user. An explicit finite artifact comparison
+checks equal guest outcomes and execution counters while reporting wall time
+as an observation, without requiring a timing inequality or implying title FPS.
 Resident hints commit only after validated cache reuse or complete publication
 and sealing. A later hardware-entry admission refusal can follow that genuine
 cache event without executing the body. Historical publication keys remain

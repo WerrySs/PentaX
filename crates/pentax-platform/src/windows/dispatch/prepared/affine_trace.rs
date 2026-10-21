@@ -229,7 +229,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         {
             return Ok(None);
         }
-        let Ok(_guard) = DispatchGuard::acquire() else {
+        let Ok(guard) = DispatchGuard::acquire() else {
             return Ok(None);
         };
         charge(
@@ -252,38 +252,26 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         self.publish_affine_trace(trace, &layout)?;
         self.machine.usage.source_bytes += block.usage().source_bytes;
         self.machine.usage.emitted_bytes += emitted;
-        let mut context = GuestContext::zeroed();
-        context.gpr = self.machine.state.gpr;
-        context.rflags = self.machine.state.rflags;
-        context.mxcsr = self.machine.state.mxcsr;
-        self.machine.vector_mode.load(
-            &mut context,
-            &self.machine.state.xmm,
-            &self.machine.state.ymm_upper,
+        let guest_base = end(self.machine.stack.stack)?;
+        native_context::stage(
+            &guard,
+            self.machine.vector_mode,
+            &self.machine.state,
+            guest_base,
+            self.machine.stack.stack.address,
+            trace.placement().address,
         );
-        context.guest_base = end(self.machine.stack.stack)?;
-        context.guest_limit = self.machine.stack.stack.address;
-        context.rip = trace.placement().address;
         self.machine.phase = Phase::Terminal;
         // SAFETY: The exact opaque trace, both actual operand sets, immutable
         // source, disjoint writes, current rights and two mode-bound cells were
         // checked under this same pause and guard. No Rust reference crosses asm.
         unsafe {
-            *CONTEXT.0.get() = context;
             self.machine.vector_mode.enter();
-            context = *CONTEXT.0.get();
         }
         self.machine.usage.native_entries += 1;
         self.machine.usage.affine_loop_entries += 1;
-        self.machine.state.gpr = context.gpr;
-        self.machine.state.rflags = context.rflags;
-        self.machine.state.mxcsr = context.mxcsr;
-        self.machine.vector_mode.save(
-            &context,
-            &mut self.machine.state.xmm,
-            &mut self.machine.state.ymm_upper,
-        );
-        let iterations = context.rip;
+        native_context::capture(&guard, self.machine.vector_mode, &mut self.machine.state);
+        let iterations = native_context::affine_iterations(&guard);
         if !(1..=2).contains(&iterations) {
             return Err(NativeDispatchError::EmissionMismatch);
         }

@@ -163,13 +163,17 @@ impl VectorMode {
     }
 
     pub(super) fn load(self, context: &mut GuestContext, low: &[u8; 256], upper: &[u8; 256]) {
-        context.xmm = *low;
-        if matches!(self, Self::Avx { .. }) {
-            for register in 0..16 {
-                context.ymm[register * 32..register * 32 + 16]
-                    .copy_from_slice(&low[register * 16..register * 16 + 16]);
-                context.ymm[register * 32 + 16..register * 32 + 32]
-                    .copy_from_slice(&upper[register * 16..register * 16 + 16]);
+        // Each bridge reads exactly its active bank. In particular AVX entry
+        // never reads the separate legacy XMM snapshot.
+        match self {
+            Self::Sse2 => context.xmm = *low,
+            Self::Avx { .. } => {
+                for register in 0..16 {
+                    context.ymm[register * 32..register * 32 + 16]
+                        .copy_from_slice(&low[register * 16..register * 16 + 16]);
+                    context.ymm[register * 32 + 16..register * 32 + 32]
+                        .copy_from_slice(&upper[register * 16..register * 16 + 16]);
+                }
             }
         }
     }
