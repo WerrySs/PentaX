@@ -317,16 +317,16 @@ impl PreparedNativeKernelStartup<'_, '_> {
         if index == 0 && virtual_overlap(args.rdi, args.rsi, args.rdx) {
             return Ok(None);
         }
-        // Split only disjoint owned fields: the exact paused owner, existing HLE
-        // budget, provider scan budget and fixed profile counters.
+        // Split only disjoint owned fields: the exact paused owner, persistent
+        // optional budget, provider scan budget and fixed profile counters.
         let maximum = self.plan.limits.max_provider_work;
-        let (mut memory, budget) = self
-            .hle
-            .pause_with_service_budget()
-            .map_err(KernelStartupError::Hle)?;
+        let mut memory = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let budget = &mut self.libc_builtin_budget;
         // This is optional route selection, not recovery from a failed helper.
-        // Preserve the original native path when the unchanged shared service
-        // allowance cannot admit this entire call. No attempt or token exists.
+        // Preserve the original native path when this process-owned optional
+        // allowance cannot admit the call. It has the same configured limits
+        // as required services, but never consumes their separate allowance.
+        // No attempt or token exists at this point.
         if !budget.can_admit_builtin(FUNCTIONS[index], args.rdx) {
             return Ok(None);
         }

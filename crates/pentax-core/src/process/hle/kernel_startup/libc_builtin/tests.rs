@@ -86,6 +86,16 @@ fn service_usage(session: &mut PreparedNativeKernelStartup<'_, '_>) -> (u64, u64
     )
 }
 
+fn optional_usage(session: &PreparedNativeKernelStartup<'_, '_>) -> (u64, u64, u64, u64) {
+    let budget = &session.libc_builtin_budget;
+    (
+        budget.attempts(),
+        budget.total_bytes(),
+        budget.work(),
+        budget.completed(),
+    )
+}
+
 fn physical_alias(
     session: &mut PreparedNativeKernelStartup<'_, '_>,
     original: u64,
@@ -275,7 +285,7 @@ fn exact_supplied_exports_coalesce_finite_aliases_and_refuse_wrong_sources_or_co
 }
 
 #[test]
-fn checked_supplied_memory_helpers_use_shared_hle_and_preserve_normal_and_outer_ret_state() {
+fn checked_supplied_memory_helpers_use_isolated_budget_and_preserve_normal_and_outer_ret_state() {
     let primary = crate::process::hle::unavailable::tests::original_input(0);
     let library = supplied();
     with_native_image_session(
@@ -382,8 +392,12 @@ fn checked_supplied_memory_helpers_use_shared_hle_and_preserve_normal_and_outer_
                     session.hle.service_attempts(),
                     session.hle.completed_services()
                 ),
-                (3, 3)
+                (0, 0)
             );
+            assert_eq!(service_usage(session), (0, 0, 0, 0));
+            let optional = optional_usage(session);
+            assert_eq!((optional.0, optional.1, optional.3), (3, 22, 3));
+            assert!(optional.2 > 0);
             Ok::<_, ()>(())
         },
     )
@@ -474,10 +488,10 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
             .unwrap();
             let planned = block(&proof, &engine, 1);
             if case == 9 {
-                let (_, budget) = session.hle.pause_with_service_budget().unwrap();
-                budget.refuse_reservation = Some(0);
+                session.libc_builtin_budget.refuse_reservation = Some(0);
             }
             let service_before = service_usage(session);
+            let optional_before = optional_usage(session);
             let dispatch_before = engine.usage();
             let result = session.try_libc_builtin(&manifest, &proof, &mut engine, &planned);
             if matches!(case, 0 | 1 | 2 | 4 | 5 | 6 | 7) {
@@ -486,6 +500,7 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
                 assert_eq!(session.libc_builtin_usage(), LibcBuiltinUsage::default());
                 assert_eq!(session.hle.service_attempts(), 0);
                 assert_eq!(service_usage(session), service_before);
+                assert_eq!(optional_usage(session), optional_before);
                 if matches!(case, 4 | 5) {
                     // Span/attempt ineligibility is checked before even the
                     // platform's logical block/token admission.
@@ -496,6 +511,7 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
                 assert!(engine.libc_builtin_entry_ready());
                 assert_eq!(session.libc_builtin_usage(), LibcBuiltinUsage::default());
                 assert_eq!(service_usage(session), service_before);
+                assert_eq!(optional_usage(session), optional_before);
             } else {
                 if case == 3 {
                     assert!(matches!(
@@ -511,6 +527,9 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
                 assert!(!engine.libc_builtin_entry_ready());
                 assert_eq!(session.libc_builtin_usage().attempted, [0, 0, 1]);
                 assert_eq!(session.libc_builtin_usage().completed, [0; 3]);
+                let optional = optional_usage(session);
+                assert_eq!((optional.0, optional.1, optional.3), (1, 8, 0));
+                assert!(optional.2 > optional_before.2);
                 assert!(
                     engine
                         .begin_libc_builtin(&session.pause().unwrap(), &planned)
@@ -522,6 +541,7 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
             session.pause().unwrap().read(output, &mut bytes).unwrap();
             assert_eq!(bytes, [0xa5; 8]);
             assert_eq!(session.hle.completed_services(), 0);
+            assert_eq!(service_usage(session), service_before);
             Ok::<_, ()>(())
         })
         .unwrap();
@@ -529,7 +549,7 @@ fn builtin_fallbacks_precede_helper_attempts_and_service_refusals_are_terminal_w
 }
 
 #[test]
-fn optional_builtin_exhaustion_preserves_the_shared_service_allowance() {
+fn optional_builtin_exhaustion_leaves_required_service_allowance_intact() {
     use crate::process::hle::ServiceLimit;
     use crate::process::hle::dispatch::{self, AbiArgs};
     let primary = crate::process::hle::unavailable::tests::original_input(0);
@@ -538,10 +558,16 @@ fn optional_builtin_exhaustion_preserves_the_shared_service_allowance() {
     limits.startup.startup.hle.services.max_total_bytes = 8;
     with_native_image_session(&[&primary, &library], &limits, |session, layout| {
         let proof = session.prepare_native_source(&Default::default()).unwrap();
-        let manifest = session.prepare_libc_builtins(&proof, 1).unwrap();
         let bias = proof.materialized_source().source_plan().modules()[1].load_bias();
         let output = bias + crate::memory::PAGE_SIZE;
         for iteration in 0..2 {
+            let optional_before = optional_usage(session);
+            let required_before = service_usage(session);
+            // Repreparation after exhaustion must neither replace nor reset
+            // the process-owned optional ledger or the required ledger.
+            let manifest = session.prepare_libc_builtins(&proof, 1).unwrap();
+            assert_eq!(optional_usage(session), optional_before);
+            assert_eq!(service_usage(session), required_before);
             let mut state = NativeCpuState::new(bias + 0x120, layout.entry.return_slot);
             state.fs_base = Some(session.tls().instances()[0].thread_pointer);
             state.gpr[7] = output;
@@ -557,7 +583,7 @@ fn optional_builtin_exhaustion_preserves_the_shared_service_allowance() {
             )
             .unwrap();
             let planned = block(&proof, &engine, 1);
-            let before = service_usage(session);
+            let before = optional_usage(session);
             let dispatch_before = engine.usage();
             let result = session
                 .try_libc_builtin(&manifest, &proof, &mut engine, &planned)
@@ -567,16 +593,17 @@ fn optional_builtin_exhaustion_preserves_the_shared_service_allowance() {
             if iteration == 0 {
                 assert_eq!(result, Some(NativeBlockStop::Returned { value: output }));
                 assert_eq!(actual, [0x6d; 8]);
-                let usage = service_usage(session);
+                let usage = optional_usage(session);
                 assert_eq!((usage.0, usage.1, usage.3), (1, 8, 1));
             } else {
                 assert_eq!(result, None);
                 assert_eq!(actual, [0xa5; 8]);
                 assert_eq!(*engine.state(), state);
                 assert_eq!(engine.usage(), dispatch_before);
-                assert_eq!(service_usage(session), before);
+                assert_eq!(optional_usage(session), before);
                 assert!(engine.libc_builtin_entry_ready());
             }
+            assert_eq!(service_usage(session), (0, 0, 0, 0));
         }
         assert_eq!(
             session.libc_builtin_usage(),
@@ -585,36 +612,59 @@ fn optional_builtin_exhaustion_preserves_the_shared_service_allowance() {
                 completed: [0, 0, 1],
             }
         );
-        // Calling the real service engine still enforces the SAME exhausted
-        // allowance. Optional-route fallback never resets or refunds it.
-        let (mut memory, budget) = session.hle.pause_with_service_budget().unwrap();
-        let attempt = budget.begin_attempt().unwrap();
-        let result = dispatch::invoke(
-            attempt,
-            KnownFunction::Memset,
-            AbiArgs {
-                rdi: output,
-                rsi: 0x37,
-                rdx: 1,
-            },
-            &mut memory,
-            budget,
-        );
-        assert!(matches!(
-            result,
-            Err(MemoryServiceError::LimitExceeded {
-                kind: ServiceLimit::TotalBytes,
-                requested: 9,
-                maximum: 8,
-            })
-        ));
-        assert_eq!(
-            (budget.attempts(), budget.total_bytes(), budget.completed()),
-            (2, 8, 1)
-        );
-        let mut actual = [0; 8];
-        memory.read(output, &mut actual).unwrap();
-        assert_eq!(actual, [0xa5; 8]);
+        let exhausted = optional_usage(session);
+        assert_eq!((exhausted.0, exhausted.1, exhausted.3), (1, 8, 1));
+        // The required service retains its full original allowance, then
+        // refuses exactly the ninth byte. Neither ledger resets or refunds.
+        {
+            let (mut memory, budget) = session.hle.pause_with_service_budget().unwrap();
+            let attempt = budget.begin_attempt().unwrap();
+            let result = dispatch::invoke(
+                attempt,
+                KnownFunction::Memset,
+                AbiArgs {
+                    rdi: output,
+                    rsi: 0x37,
+                    rdx: 8,
+                },
+                &mut memory,
+                budget,
+            )
+            .unwrap();
+            assert_eq!(result.rax, output);
+            assert_eq!(
+                (budget.attempts(), budget.total_bytes(), budget.completed()),
+                (1, 8, 1)
+            );
+            let attempt = budget.begin_attempt().unwrap();
+            let result = dispatch::invoke(
+                attempt,
+                KnownFunction::Memset,
+                AbiArgs {
+                    rdi: output,
+                    rsi: 0x99,
+                    rdx: 1,
+                },
+                &mut memory,
+                budget,
+            );
+            assert!(matches!(
+                result,
+                Err(MemoryServiceError::LimitExceeded {
+                    kind: ServiceLimit::TotalBytes,
+                    requested: 9,
+                    maximum: 8,
+                })
+            ));
+            assert_eq!(
+                (budget.attempts(), budget.total_bytes(), budget.completed()),
+                (2, 8, 1)
+            );
+            let mut actual = [0; 8];
+            memory.read(output, &mut actual).unwrap();
+            assert_eq!(actual, [0x37; 8]);
+        }
+        assert_eq!(optional_usage(session), exhausted);
         Ok::<_, ()>(())
     })
     .unwrap();

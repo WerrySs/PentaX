@@ -667,6 +667,8 @@ pub struct PreparedNativeKernelStartup<'plan, 'image> {
     provider_work: u64,
     native_service_requests: u64,
     libc_builtins: LibcBuiltinUsage,
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    libc_builtin_budget: super::dispatch::ServiceBudget,
     last_admitted_kernel_service: Option<&'static str>,
     loaded_modules: module_lifecycle::LoadedModules,
     once: pthread_once::OnceState,
@@ -1136,6 +1138,8 @@ fn prepare_in<'plan, 'image>(
         provider_work: 0,
         native_service_requests: 0,
         libc_builtins: LibcBuiltinUsage::default(),
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        libc_builtin_budget: super::dispatch::ServiceBudget::new(plan.hle.service_limits()),
         last_admitted_kernel_service: None,
         loaded_modules: module_lifecycle::LoadedModules::new(plan.kernel_provider_index())?,
         once: pthread_once::OnceState::new()?,
