@@ -22,6 +22,7 @@ use pentax_platform::native_dispatch::{
 use pentax_platform::native_memory::{NativeMemoryError, PausedNativeMemory};
 use std::sync::OnceLock;
 
+mod causality;
 mod dispatch_context;
 // The optional local window runs on this supervised worker thread, outside
 // every guest entry and memory pause. Ordinary probes retain no consumer.
@@ -182,6 +183,7 @@ pub(super) struct NativeSessionProgress {
     pub phase: NativeSessionPhase,
     pub plan_cache_hits: u64,
     pub plan_cache_misses: u64,
+    plan_cache_observations: causality::PlanCacheTotals,
     /// Public catalogue label captured only when that admitted call fails.
     pub failed_kernel_service: Option<&'static str>,
     pub output_bytes: u64,
@@ -225,8 +227,13 @@ impl NativeSessionProgress {
             .map_or_else(String::new, |status| {
                 format!("\tprivate_console_status={status}")
             });
+        let causality = causality::fields(
+            &self.dispatch,
+            &self.plan_cache_observations,
+            self.kernel_handles,
+        );
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}{console}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}{private}{console}{causality}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
@@ -896,6 +903,7 @@ fn execute_epoch<'plan, 'image>(
             policy = policy.with_native_scalar_fma();
         }
     }
+    progress.plan_cache_observations.begin_epoch();
     let plans = plan_cache::PlanCache::new(
         source,
         policy
@@ -907,6 +915,7 @@ fn execute_epoch<'plan, 'image>(
     );
     progress.admission_work = state.admission_work;
     let mut plans = plans?;
+    let mut previous_plan_observations = plan_cache::PlanCacheObservations::default();
     // Reuse only allocation storage within this source epoch. Every attempt
     // still fetches its complete live executable window before cache lookup.
     let mut window_storage = Vec::new();
@@ -1040,7 +1049,12 @@ fn execute_epoch<'plan, 'image>(
                 limits.max_admission_work,
             );
             progress.admission_work = state.admission_work;
-            let (block, hit) = prepared?;
+            let (block, hit, observations) = prepared?;
+            if !hit {
+                progress
+                    .plan_cache_observations
+                    .observe(observations, &mut previous_plan_observations);
+            }
             charge(
                 if hit {
                     &mut progress.plan_cache_hits

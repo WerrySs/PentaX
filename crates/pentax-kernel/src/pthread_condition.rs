@@ -111,6 +111,7 @@ impl ConditionState {
         memory: &mut MemoryState,
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
+        mutexes: &mut crate::pthread_mutex::MutexState,
     ) -> Result<u64, Failure> {
         budget.work(
             (self.attributes.len() + self.conditions.len() + self.waiters.len() + 1) as u64,
@@ -195,7 +196,7 @@ impl ConditionState {
             }
             CondSignal | CondBroadcast => {
                 let index = self.condition_index(a[0], true, memory, guest, budget)?;
-                self.notify(self.conditions[index].id, service == CondBroadcast);
+                self.notify(self.conditions[index].id, service == CondBroadcast, mutexes);
                 Ok(0)
             }
             _ => Err(Failure::Unsupported("condition waiter scheduling")),
@@ -231,6 +232,7 @@ impl crate::Kernel {
             &mut self.memory,
             guest,
             &mut self.budget,
+            &mut self.pthread_mutex,
         );
         if positive {
             crate::posix::pthread_result(result)

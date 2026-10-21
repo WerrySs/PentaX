@@ -4,6 +4,15 @@ use super::*;
 
 #[test]
 fn native_condition_wait_parks_child_and_reacquires_mutex_before_both_wakeups() {
+    condition_wakeups(false);
+}
+
+#[test]
+fn native_condition_observations_distinguish_a_real_barging_acquisition() {
+    condition_wakeups(true);
+}
+
+fn condition_wakeups(barge: bool) {
     let imports = [
         "6UgtwV+0zb4",
         "9UK1vLZQft4",
@@ -41,6 +50,17 @@ fn native_condition_wait_parks_child_and_reacquires_mutex_before_both_wakeups() 
     p.ptr(7, 8);
     p.call(2);
     p.expect(0);
+    if barge {
+        // A short free interval precedes the next ready-queue scan. This is
+        // one real reacquisition by the notifier, not a starvation claim.
+        p.ptr(7, 8);
+        p.call(1);
+        p.expect(0);
+        p.word(24, 1);
+        p.ptr(7, 8);
+        p.call(2);
+        p.expect(0);
+    }
     p.load(0, 24);
     p.code.extend([0x48, 0x83, 0xf8, 2, 0x75, 0xf5]);
     p.ptr(7, 8);
@@ -99,6 +119,18 @@ fn native_condition_wait_parks_child_and_reacquires_mutex_before_both_wakeups() 
         assert_eq!(fields["value"], "42");
         assert_eq!(fields["service_stops"], (calls + 4).to_string());
         assert_eq!(fields["phase"], "main-entry");
+        assert_eq!(fields["pthread_mutex_waits"], "0");
+        assert_eq!(fields["pthread_condition_waits"], "0");
+        assert_eq!(fields["pthread_notified_condition_waits"], "0");
+        assert_eq!(
+            fields["pthread_eligible_mutex_releases"],
+            if barge { "3" } else { "2" }
+        );
+        assert_eq!(
+            fields["pthread_barging_mutex_acquisitions"],
+            if barge { "1" } else { "0" }
+        );
+        assert_eq!(fields["pthread_wait_observations_overflowed"], "false");
     }
 }
 
@@ -120,6 +152,9 @@ fn native_condition_wait_with_no_runnable_notifier_reports_deadlock_without_retu
     assert_eq!(fields["code"], "thread-deadlock");
     assert_eq!(fields["service_stops"], "2");
     assert!(!fields.contains_key("value"));
+    assert_eq!(fields["pthread_condition_waits"], "1");
+    assert_eq!(fields["pthread_notified_condition_waits"], "0");
+    assert_eq!(fields["pthread_barging_mutex_acquisitions"], "0");
     // A still-running child can cease to be a notifier by returning while its
     // parent is parked. That is a real guest deadlock, not an executor invariant.
     let mut p = Program::new();

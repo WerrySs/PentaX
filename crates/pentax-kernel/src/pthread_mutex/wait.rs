@@ -133,6 +133,12 @@ impl crate::Kernel {
         if mutex.owner.is_none() {
             mutex.owner = Some(thread);
             mutex.count = 1;
+            if observations::eligible(mutex) {
+                observations::increment(
+                    &mut state.barging_acquisitions,
+                    &mut state.observations_overflowed,
+                );
+            }
             return Ok(MutexWaitAction::Returned(0));
         }
         let self_wait = mutex.owner == Some(thread);

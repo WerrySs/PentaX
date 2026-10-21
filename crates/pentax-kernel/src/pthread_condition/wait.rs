@@ -33,10 +33,16 @@ pub(super) struct Waiter {
 }
 
 impl ConditionState {
-    pub(super) fn notify(&mut self, condition: u64, all: bool) {
+    pub(super) fn notify(
+        &mut self,
+        condition: u64,
+        all: bool,
+        mutexes: &mut crate::pthread_mutex::MutexState,
+    ) {
         for waiter in &mut self.waiters {
             if waiter.condition == condition && !waiter.notified {
                 waiter.notified = true;
+                mutexes.observe_condition_notification(waiter.mutex);
                 if !all {
                     break;
                 }
@@ -47,6 +53,12 @@ impl ConditionState {
         self.waiters
             .iter()
             .any(|waiter| waiter.condition == condition && !waiter.notified)
+    }
+    pub(crate) fn wait_observations(&self) -> (u64, u64) {
+        (
+            self.waiters.len() as u64,
+            self.waiters.iter().filter(|waiter| waiter.notified).count() as u64,
+        )
     }
     fn wait_index(&self, ticket: &ConditionWait, budget: &mut Budget) -> Result<usize, Failure> {
         budget.work(self.waiters.len() as u64 + 1)?;

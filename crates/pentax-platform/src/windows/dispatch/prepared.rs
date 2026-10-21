@@ -147,6 +147,17 @@ pub struct NativeDispatchUsage {
     pub cache_publications: u64,
     /// Exact byte/tail/cell matches in a previously published executable slot.
     pub cache_reuses: u64,
+    /// Successful publications after a slot's first committed publication.
+    /// Includes same-key repairs, even after a failed attempt invalidated its
+    /// old executable length; this is historical publication accounting.
+    pub cache_replacements: u64,
+    /// A replacement revisiting that slot's immediately prior evicted source
+    /// key: exact source epoch, guest PC and vector mode. Not byte equality,
+    /// reuse distance, retired frequency or a classification of every miss.
+    /// Byte-identical reuse does not rename the last publication's source key.
+    pub cache_evicted_key_revisits: u64,
+    /// New diagnostic counts saturate instead of refusing execution.
+    pub cache_history_saturated: bool,
     /// Emitted guest instructions in blocks that returned from native execution.
     /// Planning attempts, host bridge instructions and modeled exits do not count.
     pub native_instructions: u64,
@@ -462,6 +473,57 @@ mod vectors;
 mod x87_control;
 pub use threads::NativeThreadContext;
 
+// Publication history is machine-local, hence implicitly qualified by its
+// actual owner and executor. Source identities are immutable epoch identities;
+// a source append does not rename old slot history. Full vector mode includes
+// independent AVX2/FMA admission. None of this metadata grants cache reuse.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PublicationKey {
+    source: pentax_linker::SourceIdentity,
+    guest_pc: u64,
+    vector_mode: VectorMode,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct PublicationSlot {
+    length: Option<usize>,
+    current: Option<PublicationKey>,
+    previous_evicted: Option<PublicationKey>,
+}
+const PUBLICATION_HISTORY_WORK: u64 = (2 * std::mem::size_of::<PublicationSlot>()) as u64;
+
+impl PublicationSlot {
+    // Called only after the native bytes, tail and cell have been independently
+    // checked and the full cache range successfully flushed/sealed. No work or
+    // allocation can fail here. Failed attempts leave these historical keys
+    // unchanged even if their old executable length had to be invalidated.
+    fn commit(&mut self, key: PublicationKey, length: usize, usage: &mut NativeDispatchUsage) {
+        fn increment(value: &mut u64, saturated: &mut bool) {
+            match value.checked_add(1) {
+                Some(next) => *value = next,
+                None => *saturated = true,
+            }
+        }
+        if let Some(current) = self.current {
+            increment(
+                &mut usage.cache_replacements,
+                &mut usage.cache_history_saturated,
+            );
+            if current != key {
+                if self.previous_evicted == Some(key) {
+                    increment(
+                        &mut usage.cache_evicted_key_revisits,
+                        &mut usage.cache_history_saturated,
+                    );
+                }
+                self.previous_evicted = Some(current);
+            }
+        }
+        self.current = Some(key);
+        self.length = Some(length);
+    }
+}
+
 /// Retained owner, cache, CPU/context and cumulative limits without a borrowed
 /// source. This opaque value has no execution interface. A source view and the
 /// original unsafe preparation/operand obligations are required to run again.
@@ -472,7 +534,7 @@ pub struct NativeBlockMachine {
     stack: NativeStackFrame,
     cache: CodeCache,
     vector_mode: VectorMode,
-    published_lengths: Vec<Option<usize>>,
+    published_slots: Vec<PublicationSlot>,
     limits: NativeDispatchLimits,
     usage: NativeDispatchUsage,
     phase: Phase,
@@ -713,19 +775,21 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         thread_stacks.push(stack);
         charge(
             &mut usage.work_units,
-            (limits.cache_slots * std::mem::size_of::<Option<usize>>()
+            (limits.cache_slots * std::mem::size_of::<PublicationSlot>()
                 + limits.cache_bytes / NATIVE_GUEST_PAGE as usize) as u64,
             limits.max_work_units,
             "cache metadata",
         )?;
-        let mut published_lengths = Vec::new();
-        published_lengths
+        let mut published_slots = Vec::new();
+        published_slots
             .try_reserve_exact(limits.cache_slots)
             .map_err(|_| NativeDispatchError::Allocation)?;
-        if published_lengths.capacity() != limits.cache_slots {
+        // Requested bytes were admitted before allocation; exact actual
+        // capacity is required, bounded by the unchanged <=4096 slot policy.
+        if published_slots.capacity() != limits.cache_slots {
             return Err(NativeDispatchError::Allocation);
         }
-        published_lengths.resize(limits.cache_slots, None);
+        published_slots.resize(limits.cache_slots, PublicationSlot::default());
         let anchor = state
             .guest_pc
             .checked_add(0xffff)
@@ -780,7 +844,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 stack,
                 cache,
                 vector_mode,
-                published_lengths,
+                published_slots,
                 limits: *limits,
                 usage,
                 phase: Phase::Ready,
@@ -1766,7 +1830,7 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
             .machine
             .cache
             .range_executable(page_start, page_bytes)?
-            && self.machine.published_lengths[slot] == Some(offset + 6)
+            && self.machine.published_slots[slot].length == Some(offset + 6)
             && self.machine.cache.matches(base_offset, &bytes[..offset])?
             && self.machine.cache.matches(base_offset + offset, &tail)?
             && self
@@ -1785,7 +1849,15 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         let publications = self.machine.usage.cache_publications.checked_add(1).ok_or(
             NativeDispatchError::Budget("cache publication observations"),
         )?;
-        self.machine.published_lengths[slot] = None;
+        // Fixed metadata work is admitted only for a real publication attempt,
+        // before invalidating old executable state or performing any writes.
+        charge(
+            &mut self.machine.usage.work_units,
+            PUBLICATION_HISTORY_WORK,
+            self.machine.limits.max_work_units,
+            "cache publication history",
+        )?;
+        self.machine.published_slots[slot].length = None;
         self.machine
             .cache
             .arm_writable_range(page_start, page_bytes)?;
@@ -1808,7 +1880,15 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
         self.machine
             .cache
             .seal_executable_range(page_start, page_bytes)?;
-        self.machine.published_lengths[slot] = Some(offset + 6);
+        self.machine.published_slots[slot].commit(
+            PublicationKey {
+                source: block.source_plan().identity(),
+                guest_pc: block.guest_pc(),
+                vector_mode: self.machine.vector_mode,
+            },
+            offset + 6,
+            &mut self.machine.usage,
+        );
         self.machine.usage.cache_publications = publications;
         Ok(true)
     }

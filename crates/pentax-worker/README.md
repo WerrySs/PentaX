@@ -768,6 +768,39 @@ Software underflow uses precision rounding with an unbounded exponent to
 determine tininess before the final subnormal rounding; merely rounding a
 tiny value to the minimum normal value does not by itself suppress FTZ.
 
+Final-only cache observations distinguish successful executable replacements
+from `cache_evicted_key_revisits`: returns to a slot's immediately previous
+evicted publication key, qualified by source epoch, guest PC and full native
+vector mode. No keys are emitted. Byte-identical reuse leaves its historical
+producer unchanged. A revisit does not prove identical emitted bytes, complete
+reuse distance, a dominant cost or the cause of every cache miss. Publication
+metadata has fixed storage bounded by the existing slot count; its allocation
+and fixed miss work are admitted before executable writes. Saturating counters
+set `cache_history_saturated` without making diagnostic overflow fatal.
+
+The final `plan_cache_occupied_collisions` and
+`plan_cache_same_key_replacements` count committed retention changes.
+`plan_cache_byte_purges` and `plan_cache_purged_plans` report actual byte-pressure
+purges and their victim counts. A collision and a purge may describe the same
+operation. Retained and peak byte gauges describe the existing conservative
+allocation-charge ledger, not simultaneous or whole-process heap consumption.
+Counters accumulate across source epochs; the retained gauge is the last
+successful snapshot, cleared before preparing a new epoch's cache.
+`plan_cache_observations_overflowed` marks saturated observations.
+
+Final `pthread_mutex_waits`, `pthread_condition_waits` and
+`pthread_notified_condition_waits` describe actual retained queues.
+`pthread_eligible_mutex_releases` counts final releases with eligible queued
+waiters, including the full recursive release performed by an admitted
+condition wait. `pthread_barging_mutex_acquisitions` counts fresh acquisitions
+while an eligible waiter is still queued; completion of a queued wait is not
+a fresh acquisition. Recursive unlock decrements and unnotified conditions do
+not create eligible-release observations. Kernel observation lookup work has
+an independent fixed allowance; saturation or exhaustion sets
+`pthread_wait_observations_overflowed`, making history potentially partial.
+These observations do not change ownership, notifications, readiness or
+scheduling, and cannot establish starvation or a title's blocking cause alone.
+
 Final-only graphics fields expose existing committed accounting:
 `graphics_calls` includes all implemented graphics-provider calls, including
 VideoOut and shader helpers; `graphics_command_buffers` counts nonempty admitted

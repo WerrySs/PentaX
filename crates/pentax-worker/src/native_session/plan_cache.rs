@@ -14,6 +14,47 @@ const MAX_PLAN_BYTES: u64 = 8 * 1024 * 1024;
 
 mod initialized_windows;
 
+/// Diagnostics for committed pure-plan retention, never execution authority.
+/// Collision and same-key replacement describe the occupied incoming slot;
+/// either may coincide with a byte-pressure purge. They must not be added to
+/// purge counts as disjoint reasons. Gauges use the existing retained plan
+/// allocation ledger, including its conservative encoder/replacement charges.
+/// They exclude slot/memo metadata and are not a simultaneous/process heap peak.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct PlanCacheObservations {
+    pub occupied_collisions: u64,
+    pub same_key_replacements: u64,
+    pub byte_purges: u64,
+    pub purged_plans: u64,
+    pub retained_bytes: u64,
+    pub peak_retained_bytes: u64,
+    pub overflow: bool,
+}
+
+impl PlanCacheObservations {
+    fn add(value: &mut u64, count: u64, overflow: &mut bool) {
+        if let Some(next) = value.checked_add(count) {
+            *value = next;
+        } else {
+            *value = u64::MAX;
+            *overflow = true;
+        }
+    }
+    fn committed(&mut self, replacement: Option<bool>, purged: Option<u64>, retained: u64) {
+        match replacement {
+            Some(true) => Self::add(&mut self.occupied_collisions, 1, &mut self.overflow),
+            Some(false) => Self::add(&mut self.same_key_replacements, 1, &mut self.overflow),
+            None => {}
+        }
+        if let Some(plans) = purged {
+            Self::add(&mut self.byte_purges, 1, &mut self.overflow);
+            Self::add(&mut self.purged_plans, plans, &mut self.overflow);
+        }
+        self.retained_bytes = retained;
+        self.peak_retained_bytes = self.peak_retained_bytes.max(retained);
+    }
+}
+
 pub(super) struct PlanCache<'view, 'plan, 'image> {
     source: &'view MaterializedSource<'plan, 'image>,
     policy: TranslationPolicy,
@@ -22,8 +63,12 @@ pub(super) struct PlanCache<'view, 'plan, 'image> {
     retained_bytes: u64,
     max_bytes: u64,
     initialized_windows: initialized_windows::Memo<'view, 'plan, 'image>,
+    observations: PlanCacheObservations,
 }
 
+#[cfg(test)]
+#[path = "plan_cache/observation_tests.rs"]
+mod observation_tests;
 #[cfg(test)]
 #[path = "plan_cache/tests.rs"]
 mod tests;
@@ -61,6 +106,7 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             retained_bytes: 0,
             max_bytes: MAX_PLAN_BYTES,
             initialized_windows,
+            observations: PlanCacheObservations::default(),
         })
     }
 
@@ -84,7 +130,14 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
         placement: CachePlacement,
         work: &mut u64,
         work_limit: u64,
-    ) -> Result<(&MaterializedBlockPlan<'view, 'plan, 'image>, bool), NativeSessionError> {
+    ) -> Result<
+        (
+            &MaterializedBlockPlan<'view, 'plan, 'image>,
+            bool,
+            PlanCacheObservations,
+        ),
+        NativeSessionError,
+    > {
         charge(work, live.len() as u64 + 8, work_limit, "admission work")?;
         self.initialized_windows
             .yield_to_plans(self.retained_bytes, 0, self.max_bytes);
@@ -108,6 +161,11 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
                 &self.limits,
             )?;
             let bytes = plan.usage().allocation_bytes;
+            // Classify only a valid replacement plan. A later refusal must
+            // leave every diagnostic counter/gauge unchanged as well.
+            let replacement = self.slots[index]
+                .as_ref()
+                .map(|old| old.guest_pc() != pc || old.module().index() != module);
             let old = self.slots[index]
                 .as_ref()
                 .map_or(0, |plan| plan.usage().allocation_bytes);
@@ -121,12 +179,16 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             if bytes > self.max_bytes {
                 return Err(NativeSessionError::Budget("plan cache bytes"));
             }
+            let mut purged = None;
             if remaining > self.max_bytes - bytes {
                 charge(work, SLOTS as u64, work_limit, "admission work")?;
+                let mut removed = 0_u64;
                 for slot in &mut self.slots {
+                    removed += u64::from(slot.is_some()); // At most SLOTS.
                     *slot = None;
                 }
                 self.retained_bytes = 0;
+                purged = Some(removed);
             } else {
                 self.slots[index] = None;
                 self.retained_bytes = remaining;
@@ -135,12 +197,15 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
             // encoder storage, conservatively bounding retained plan capacities.
             self.retained_bytes += bytes;
             self.slots[index] = Some(plan);
+            self.observations
+                .committed(replacement, purged, self.retained_bytes);
         }
         Ok((
             self.slots[index]
                 .as_ref()
                 .ok_or(NativeSessionError::FixtureInvariant("missing cached plan"))?,
             hit,
+            self.observations,
         ))
     }
 }

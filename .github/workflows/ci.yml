@@ -133,6 +133,17 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe kernel_results::native_scalar_fma:: -- --test-threads=1
+      - name: Test bounded wait and publication observations
+        run: >-
+          cargo test --locked -p pentax-kernel --lib pthread_mutex::observations::tests:: -- --test-threads=1
+      - name: Test native publication history boundaries
+        run: >-
+          cargo test --locked -p pentax-platform --lib cache_causality_tests:: -- --test-threads=1
+      - name: Test original cache and wait observation callers
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe -- kernel_results::cache_causality:: kernel_results::pthread_condition:: --test-threads=1
       - name: Test bounded interactive CLI records
         run: >-
           cargo test --locked -p pentax-cli --bin pentax-cli entry::tests:: -- --test-threads=1

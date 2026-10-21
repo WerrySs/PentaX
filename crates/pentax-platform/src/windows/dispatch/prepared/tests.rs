@@ -37,6 +37,8 @@ mod rounding_tests;
 #[path = "tests/saturating_packs.rs"]
 mod saturating_packs_tests;
 
+#[path = "tests/cache_causality.rs"]
+mod cache_causality_tests;
 #[path = "tests/cpu_identification.rs"]
 mod cpu_identification_tests;
 #[path = "tests/float_integer_convert.rs"]

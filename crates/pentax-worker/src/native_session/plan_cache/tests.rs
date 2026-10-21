@@ -5,7 +5,7 @@ use pentax_codegen::declare_materialized_source;
 use pentax_linker::{ModuleInput, SymbolicLimits, plan_symbolic};
 use pentax_loader::open_executable;
 
-fn image() -> Vec<u8> {
+pub(super) fn image() -> Vec<u8> {
     let mut bytes = vec![0; 4096];
     bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     for (at, value) in [(16, 3_u16), (18, 62), (52, 64), (54, 56), (56, 1)] {
@@ -62,7 +62,7 @@ fn plan_cache_keeps_formerly_colliding_pcs_in_distinct_native_placements() {
             };
             let offset = (pc - 0x100000) as usize;
             let live = &bytes[offset..offset + 64];
-            let (plan, hit) = cache
+            let (plan, hit, _) = cache
                 .prepare(0, pc, live, placement, &mut work, u64::MAX)
                 .unwrap();
             assert_eq!(hit, round != 0);
@@ -143,11 +143,11 @@ fn plan_cache_reuses_only_exact_live_windows_and_is_bound_to_one_declaration() {
     let policy = TranslationPolicy::x64_sse2();
     let mut work = 0;
     let mut cache = PlanCache::new(&source, policy, limits, &mut work, u64::MAX).unwrap();
-    let (_, hit) = cache
+    let (_, hit, _) = cache
         .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);
-    let (plan, hit) = cache
+    let (plan, hit, _) = cache
         .prepare(0, 0x100200, &[0xc3; 64], placement, &mut work, u64::MAX)
         .unwrap();
     assert!(hit);
@@ -157,7 +157,7 @@ fn plan_cache_reuses_only_exact_live_windows_and_is_bound_to_one_declaration() {
         address: placement.address + 0x10000,
         ..placement
     };
-    let (plan, hit) = cache
+    let (plan, hit, _) = cache
         .prepare(0, 0x100200, &[0xc3; 64], moved, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);
@@ -195,7 +195,7 @@ fn plan_cache_reuses_only_exact_live_windows_and_is_bound_to_one_declaration() {
     );
     let other = declare_materialized_source(&linked, &[], &limits).unwrap();
     let mut next = PlanCache::new(&other, policy, limits, &mut work, u64::MAX).unwrap();
-    let (plan, hit) = next
+    let (plan, hit, _) = next
         .prepare(0, 0x100200, &[0xc3; 32], placement, &mut work, u64::MAX)
         .unwrap();
     assert!(!hit);

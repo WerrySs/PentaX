@@ -10,6 +10,7 @@ use crate::{CallArgs, Errno, Failure, GuestAccess, Service};
 
 mod wait;
 pub use wait::{MutexWait, MutexWaitAction};
+mod observations;
 
 #[derive(Clone, Copy)]
 struct Attributes {
@@ -30,6 +31,8 @@ struct Mutex {
     count: u32,
     condition_waits: usize,
     mutex_waits: usize,
+    // Diagnostic bookkeeping only; never consulted by ownership or readiness.
+    notified_condition_waits: u64,
 }
 
 pub(crate) struct ConditionMutex {
@@ -42,6 +45,11 @@ pub(crate) struct MutexState {
     mutexes: Vec<Mutex>,
     waiters: Vec<wait::Waiter>,
     max_waiters: usize,
+    eligible_releases: u64,
+    barging_acquisitions: u64,
+    observations_overflowed: bool,
+    observation_lookup_visits: u64,
+    observation_mutex_index: Option<usize>,
 }
 
 impl MutexState {
@@ -66,6 +74,11 @@ impl MutexState {
             mutexes,
             waiters,
             max_waiters: limits.max_thread_contexts,
+            eligible_releases: 0,
+            barging_acquisitions: 0,
+            observations_overflowed: false,
+            observation_lookup_visits: observations::LOOKUP_VISITS,
+            observation_mutex_index: None,
         })
     }
     fn slot(slot: u64, guest: &impl GuestAccess, budget: &mut Budget) -> Result<u64, Failure> {
@@ -117,6 +130,7 @@ impl MutexState {
             count: 0,
             condition_waits: 0,
             mutex_waits: 0,
+            notified_condition_waits: 0,
         });
         Ok(self.mutexes.len() - 1)
     }
@@ -279,6 +293,12 @@ impl MutexState {
                     } else {
                         value.owner = None;
                         value.count = 0;
+                        if observations::eligible(value) {
+                            observations::increment(
+                                &mut self.eligible_releases,
+                                &mut self.observations_overflowed,
+                            );
+                        }
                     }
                     return Ok(0);
                 }
@@ -321,6 +341,12 @@ impl MutexState {
                 }
                 value.owner = Some(thread);
                 value.count = 1;
+                if observations::eligible(value) {
+                    observations::increment(
+                        &mut self.barging_acquisitions,
+                        &mut self.observations_overflowed,
+                    );
+                }
                 Ok(0)
             }
             _ => Err(Failure::Unsupported("pthread mutex service")),
@@ -360,6 +386,12 @@ impl MutexState {
         mutex.owner = None;
         mutex.count = 0;
         mutex.condition_waits += 1;
+        if observations::eligible(mutex) {
+            observations::increment(
+                &mut self.eligible_releases,
+                &mut self.observations_overflowed,
+            );
+        }
     }
 
     pub(crate) fn condition_available(
@@ -398,6 +430,7 @@ impl MutexState {
         mutex.owner = Some(thread);
         mutex.count = count;
         mutex.condition_waits -= 1;
+        mutex.notified_condition_waits = mutex.notified_condition_waits.saturating_sub(1);
         Ok(true)
     }
 }

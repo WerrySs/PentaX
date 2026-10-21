@@ -45,6 +45,23 @@ pub struct HandleUsage {
     /// AudioOut2 contexts, ports and users. Logical sinks are bounded internal
     /// components of those records and must never be added again.
     pub audio2: usize,
+    /// Retained ordinary mutex wait tickets, not readiness or deadlock proof.
+    /// These six diagnostics are not handles and never enter `accounted()`.
+    pub pthread_mutex_waits: u64,
+    /// Retained condition wait tickets, including notified reacquisition waits.
+    pub pthread_condition_waits: u64,
+    /// Subset of condition waits with a real, still-retained notification.
+    pub pthread_notified_condition_waits: u64,
+    /// Successful final unlocks or condition-wait releases with a remaining
+    /// ordinary or matched notified-condition waiter. Recursive decrements do
+    /// not count. This is a scheduling opportunity, not a missed wakeup claim.
+    pub pthread_eligible_mutex_releases: u64,
+    /// Fresh lock/try-lock acquisitions while such waiters remain. Completing
+    /// an already-enrolled wait is excluded; no FIFO policy is implied.
+    pub pthread_barging_mutex_acquisitions: u64,
+    /// Sticky saturation or observer-allowance exhaustion flag; never stops the
+    /// guest. Treat all wait observations as partial when this is true.
+    pub pthread_wait_observations_overflowed: bool,
 }
 impl HandleUsage {
     #[must_use]
@@ -75,6 +92,14 @@ impl Kernel {
     pub fn handle_usage(&self) -> HandleUsage {
         let (trophy_contexts, trophy_packages, trophy_users, trophy_registered_contexts) =
             self.trophies.retained_record_counts();
+        let (
+            pthread_mutex_waits,
+            pthread_eligible_mutex_releases,
+            pthread_barging_mutex_acquisitions,
+            pthread_wait_observations_overflowed,
+        ) = self.pthread_mutex.wait_observations();
+        let (pthread_condition_waits, pthread_notified_condition_waits) =
+            self.pthread_condition.wait_observations();
         HandleUsage {
             live: self.usage().handles_live,
             limit: self.budget.limits.max_handles,
@@ -103,6 +128,12 @@ impl Kernel {
             ime: self.ime.retained_handle_count(),
             acm: self.acm.retained_handle_count(),
             audio2: self.audio_out2.retained_handle_count(),
+            pthread_mutex_waits,
+            pthread_condition_waits,
+            pthread_notified_condition_waits,
+            pthread_eligible_mutex_releases,
+            pthread_barging_mutex_acquisitions,
+            pthread_wait_observations_overflowed,
         }
     }
 }

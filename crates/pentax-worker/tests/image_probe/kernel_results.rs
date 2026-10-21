@@ -84,6 +84,8 @@ mod thread_priority;
 #[path = "system_notice.rs"]
 mod system_notice;
 
+#[path = "cache_causality.rs"]
+mod cache_causality;
 #[path = "element_permutations.rs"]
 mod element_permutations;
 #[path = "immediate_permutations.rs"]
