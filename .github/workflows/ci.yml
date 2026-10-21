@@ -119,6 +119,9 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe private_samples_opt_in_exports_completed_relative_rows_and_preserves_guest_outcomes -- --test-threads=1
+      - name: Test native string-index state and dependent continuations
+        run: >-
+          cargo test --locked -p pentax-platform --lib -- native_string_index_tests:: packed_comparison_all_controls_and_lengths_match_hardware --test-threads=1 --nocapture
       - name: Test explicit private console output with original code
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

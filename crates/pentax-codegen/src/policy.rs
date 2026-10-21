@@ -607,13 +607,27 @@ pub(crate) fn native_packed_float_memory_width(instruction: &Instruction) -> Opt
     Some(width)
 }
 
-/// Seventy exact decoded forms, all register-only. The twelve packed
+/// Seventy-one exact decoded forms, all register-only. The twelve packed
 /// ADD/SUB/MUL floating-point forms require the runtime's checked masked MXCSR
 /// profile, just like already admitted legacy SSE arithmetic. W/L,
 /// mandatory prefixes and reserved fields remain the pinned decoder's contract.
 /// Memory encodings sharing a Code are explicitly excluded below.
 fn native_ymm_registers(instruction: &Instruction) -> bool {
     use Code::*;
+    // This single implicit-length index form reads two XMM registers and an
+    // immediate, then writes ECX and arithmetic flags. Its cached dependency
+    // template must retain the implicit full-RCX write just like any GPR alias.
+    if instruction.code() == VEX_Vpcmpistri_xmm_xmmm128_imm8 {
+        return instruction.code_size() == iced_x86::CodeSize::Code64
+            && instruction.op_count() == 3
+            && instruction.op2_kind() == OpKind::Immediate8
+            && (0..2).all(|operand| {
+                let register = instruction.op_register(operand);
+                instruction.op_kind(operand) == OpKind::Register
+                    && register.is_xmm()
+                    && register <= Register::XMM15
+            });
+    }
     let (width, operands) = match instruction.code() {
         VEX_Vmovdqa_xmm_xmmm128
         | VEX_Vmovdqa_xmmm128_xmm
