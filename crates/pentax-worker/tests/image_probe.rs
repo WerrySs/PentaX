@@ -34,6 +34,9 @@ mod x87_arithmetic;
 #[path = "image_probe/x87_comparisons.rs"]
 mod x87_comparisons;
 
+#[path = "image_probe/x87_integer.rs"]
+mod x87_integer;
+
 #[path = "image_probe/late_binding.rs"]
 mod late_binding;
 

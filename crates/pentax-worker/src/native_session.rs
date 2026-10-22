@@ -1850,6 +1850,11 @@ fn fetch_window_into<'window>(
     }
     let length =
         usize::try_from(length).map_err(|_| NativeSessionError::Budget("window allocation"))?;
+    if storage.len() == length {
+        // fetch_source checks the entire current executable span before copying.
+        memory.fetch_source(address, storage)?;
+        return Ok(storage.as_slice());
+    }
     memory.preflight_fetch_source(address, length as u64)?;
     if storage.capacity() < length {
         // Vec reservation is relative to length, including after a shorter
@@ -1874,6 +1879,8 @@ mod netctl_tests;
 #[cfg(test)]
 #[path = "native_session/segment_tests.rs"]
 mod segment_tests;
+#[cfg(test)]
+mod source_window_tests;
 #[cfg(test)]
 mod thread_tests;
 

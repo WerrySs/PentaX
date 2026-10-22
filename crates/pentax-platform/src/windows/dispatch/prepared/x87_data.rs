@@ -167,7 +167,7 @@ pub(super) fn register(
     }
     Ok(register.number())
 }
-fn push(
+pub(super) fn push(
     state: &mut NativeX87State,
     value: [u8; 10],
     value_tag: u16,

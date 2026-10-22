@@ -1581,3 +1581,6 @@ mod x87_arithmetic;
 
 #[path = "tests/x87_comparison.rs"]
 mod x87_comparison;
+
+#[path = "tests/x87_integer.rs"]
+mod x87_integer;

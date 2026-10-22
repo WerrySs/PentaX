@@ -498,6 +498,8 @@ mod x87_comparison;
 mod x87_control;
 #[path = "prepared/x87_data.rs"]
 mod x87_data;
+#[path = "prepared/x87_integer.rs"]
+mod x87_integer;
 pub use threads::NativeThreadContext;
 
 // Publication history is machine-local, hence implicitly qualified by its
