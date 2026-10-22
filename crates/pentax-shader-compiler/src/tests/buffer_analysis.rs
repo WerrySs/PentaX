@@ -140,10 +140,10 @@ fn staged_discovery_refuses_dynamic_descriptors_and_preserves_access_errors() {
     let program = ShaderProgram::decode(&dynamic, ShaderStage::Vertex, &limits).unwrap();
     assert!(matches!(
         analyze(&program, stage_profile(ShaderStage::Vertex), &limits),
-        Err(CompileError::Unsupported {
+        Err(CompileError::Unsupported(Unsupported {
             reason: UnsupportedReason::DynamicDescriptor,
             ..
-        })
+        }))
     ));
 
     let mut words = vec![
@@ -174,10 +174,10 @@ fn staged_discovery_refuses_dynamic_descriptors_and_preserves_access_errors() {
     .unwrap();
     assert!(matches!(
         analyze(&program, stage_profile(ShaderStage::Vertex), &limits),
-        Err(CompileError::Unsupported {
+        Err(CompileError::Unsupported(Unsupported {
             reason: UnsupportedReason::DynamicDescriptor,
             ..
-        })
+        }))
     ));
 }
 
