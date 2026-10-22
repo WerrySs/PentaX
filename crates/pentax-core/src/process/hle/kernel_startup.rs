@@ -1141,10 +1141,10 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 stop.args.0,
                 stack_pointer,
             );
-            if prepared.is_err() {
-                if let pentax_kernel::NpCallbackAction::Call(request) = action {
-                    self.kernel.fail_np_callback(&request);
-                }
+            if prepared.is_err()
+                && let pentax_kernel::NpCallbackAction::Call(request) = action
+            {
+                self.kernel.fail_np_callback(&request);
             }
             prepared
         } else if actions && marker.registration.service == pentax_kernel::Service::FontCreateString

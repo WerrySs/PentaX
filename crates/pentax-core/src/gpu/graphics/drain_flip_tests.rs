@@ -247,7 +247,6 @@ fn actual_submitted_draw_drain_flip_reaches_real_presentation_before_owned_ackno
             .is_err()
     );
     assert_eq!(kernel.usage().attempts, 0);
-    drop(memory);
     presenter.cancel();
     println!(
         "draw_drain_flip_native_available=true draw_drain_flip_native_draws={} draw_drain_flip_native_presentations={} draw_drain_flip_native_acknowledgements={}",
