@@ -18,6 +18,8 @@ pub(super) struct StartupProfile {
     pub native_body_blocks: u64,
     pub exit_only_blocks: u64,
     pub services: ServiceProfile,
+    builtin_routes: [[BuiltinRouteMetric; 8]; 3],
+    builtin_route_overflowed: bool,
     blocks: block_samples::BlockSamples,
 }
 
@@ -155,7 +157,99 @@ impl ServiceProfile {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct BuiltinRouteMetric {
+    count: u64,
+    nanoseconds: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum BuiltinRouteOutcome {
+    Substituted,
+    Fallback,
+    /// The route may fail after helper completion during its checked RET.
+    Refused,
+}
+
 impl StartupProfile {
+    /// Optional fixed aggregates reuse the already measured route wall time.
+    /// None means diagnostics disabled; no guest budget or outcome is changed.
+    pub fn record_builtin_route(
+        &mut self,
+        operation: usize,
+        requested_bytes: Option<u64>,
+        nanoseconds: u64,
+        outcome: BuiltinRouteOutcome,
+    ) {
+        let Some(bytes) = requested_bytes else { return };
+        if self.builtin_route_overflowed {
+            return;
+        }
+        let row = match outcome {
+            BuiltinRouteOutcome::Substituted => match bytes {
+                0 => 0,
+                1..=64 => 1,
+                65..=4096 => 2,
+                4097..=65536 => 3,
+                65537..=1048576 => 4,
+                _ => 5,
+            },
+            BuiltinRouteOutcome::Fallback => 6,
+            BuiltinRouteOutcome::Refused => 7,
+        };
+        let Some(cells) = self.builtin_routes.get_mut(operation) else {
+            self.builtin_route_overflowed = true;
+            return;
+        };
+        let cell = &mut cells[row];
+        let Some(count) = cell.count.checked_add(1) else {
+            self.builtin_route_overflowed = true;
+            return;
+        };
+        let Some(elapsed) = cell.nanoseconds.checked_add(nanoseconds) else {
+            self.builtin_route_overflowed = true;
+            return;
+        };
+        *cell = BuiltinRouteMetric {
+            count,
+            nanoseconds: elapsed,
+        };
+    }
+
+    /// Terminal fields only; progress output and original totals stay intact.
+    pub fn append_builtin_route_fields(&self, output: &mut String) {
+        const OPERATIONS: [&str; 3] = ["memcpy", "memmove", "memset"];
+        const ROWS: [&str; 8] = [
+            "zero",
+            "1_64",
+            "65_4096",
+            "4097_65536",
+            "65537_1048576",
+            "over_1048576",
+            "fallback",
+            "refused",
+        ];
+        for (name, cells) in OPERATIONS.into_iter().zip(&self.builtin_routes) {
+            write!(output, "\tlibc_builtin_route_{name}=")
+                .expect("String formatting is infallible");
+            let mut separator = "";
+            for (label, cell) in ROWS.into_iter().zip(cells) {
+                write!(
+                    output,
+                    "{separator}{label}:{}:{}",
+                    cell.count, cell.nanoseconds
+                )
+                .expect("String formatting is infallible");
+                separator = ",";
+            }
+        }
+        write!(
+            output,
+            "\tlibc_builtin_route_overflowed={}",
+            self.builtin_route_overflowed
+        )
+        .expect("String formatting is infallible");
+    }
     /// Explicit local output capability only; never part of protocol fields.
     pub fn enable_private_samples(&mut self) {
         self.blocks.enable_private_samples();
@@ -284,3 +378,7 @@ mod service_profile_tests {
 
 #[cfg(test)]
 mod service_timing_tests;
+
+#[cfg(test)]
+#[path = "startup_profile/libc_builtin_timing_tests.rs"]
+mod libc_builtin_timing_tests;

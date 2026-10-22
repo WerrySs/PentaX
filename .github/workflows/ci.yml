@@ -115,7 +115,7 @@ jobs:
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
-          cargo test --locked -p pentax-worker --test image_probe -- x87_data:: x87_arithmetic:: x87_comparisons:: x87_integer:: x87_conditional_moves:: np_callbacks:: kernel_results::np:: --test-threads=1
+          cargo test --locked -p pentax-worker --test image_probe -- x87_data:: x87_arithmetic:: x87_comparisons:: x87_integer:: x87_conditional_moves:: np_callbacks:: kernel_results::np:: agc_reset_queue:: --test-threads=1
       - name: Test bounded snapshot candidate diagnostics
         run: cargo test --locked -p pentax-worker --bin pentax-worker static_candidates_are_aggregate_private_value_independent_and_stop_at_bounds -- --test-threads=1
       - name: Test native YMM admission and context preservation

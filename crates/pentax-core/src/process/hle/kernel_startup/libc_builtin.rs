@@ -70,10 +70,15 @@ impl PreparedLibcBuiltins<'_, '_> {
     }
     /// Cheap selection only; actual invocation rechecks the complete binding.
     pub fn contains_pc(&self, pc: u64) -> bool {
+        self.function_index_at(pc).is_some()
+    }
+
+    /// Metadata selection in memcpy, memmove, memset order, not execution
+    /// authority. Invocation independently retains every source/owner/ABI check.
+    pub fn function_index_at(&self, pc: u64) -> Option<usize> {
         self.entries
             .iter()
-            .flatten()
-            .any(|entry| entry.address == pc)
+            .position(|entry| entry.is_some_and(|entry| entry.address == pc))
     }
 }
 

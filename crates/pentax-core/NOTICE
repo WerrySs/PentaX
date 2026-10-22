@@ -545,3 +545,16 @@ exact current source/owner/TLS/stack/frame admission, real return receipts,
 bounded independent snapshot continuations and unconditional owner-local
 failure revocation. Original fixtures use source-defined inputs only. No online
 NP state, commercial compatibility or successful native execution is inferred.
+
+The two AGC queue-reset encoders additionally adapt the pinned KytyPS5-Performance
+revision 209dffe9032d72749257ce18680d506b891284de:
+  src/libs/agc.cpp: CommandBuffer and AgcAcbResetQueue/AgcDcbResetQueue
+  src/libs/libAgcDriver.cpp: exact Graphics5 identities and signatures
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/libs/agc.cpp#L2121
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/libs/libAgcDriver.cpp#L69
+The encoder bodies are independently corroborated by public KytyPS5/KytyPS5
+revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 src/libs/agc.cpp.
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 provide checked owner-bound
+memory, bounded actual grow continuation, append-only exact bindings and
+source-ordered failure prefixes. No packet emission implies GPU completion.

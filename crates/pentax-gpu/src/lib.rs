@@ -43,6 +43,7 @@ pub mod graphics;
 mod inspect;
 mod limits;
 mod packet;
+mod queue_reset;
 mod registers;
 mod report;
 

@@ -18,6 +18,7 @@ mod command_builder;
 #[path = "driver/flip_encoder.rs"]
 mod flip_encoder;
 pub(crate) use command_builder::EXPORTS as COMMAND_BUILDER_EXPORTS;
+pub(crate) use command_builder::RESET_EXPORTS as RESET_QUEUE_EXPORTS;
 pub(crate) use command_builder::supports as is_command_builder;
 pub(crate) use command_builder::{CommandBuilderAction, PendingCommandBuilder};
 #[path = "driver/function_profile.rs"]
@@ -139,6 +140,8 @@ pub enum Function {
     VideoGetVblankStatus,
     VideoColorSettingsSetGamma,
     VideoAdjustColor,
+    AgcAcbResetQueue,
+    AgcDcbResetQueue,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.

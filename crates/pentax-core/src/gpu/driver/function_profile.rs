@@ -118,6 +118,8 @@ catalogue!(
     VideoGetVblankStatus,
     VideoColorSettingsSetGamma,
     VideoAdjustColor,
+    AgcAcbResetQueue,
+    AgcDcbResetQueue,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

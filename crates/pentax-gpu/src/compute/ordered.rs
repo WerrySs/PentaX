@@ -59,7 +59,7 @@ impl OrderedCommands {
             std::mem::size_of::<Self>(),
             std::mem::size_of::<Self>() as u64,
         )?;
-        let sanitized = program.sanitized()?;
+        let sanitized = program.sanitized(std::mem::size_of::<ComputeState>())?;
         struct Snapshot<'a> {
             bytes: &'a [u8],
             root: CommandRange,
@@ -179,6 +179,14 @@ impl OrderedCommands {
                 return Ok(Some(OrderedStep::Array));
             }
             let word = |index| self.program.word(packet, index);
+            if crate::queue_reset::is_header(header.raw()) {
+                let reset = crate::queue_reset::decode(header.raw(), word(1))
+                    .map_err(Error::Unsupported)?;
+                if reset == crate::queue_reset::Reset::Processor {
+                    self.state.reset();
+                }
+                continue;
+            }
             if header.opcode() == 0x76 {
                 for index in 2..packet.words {
                     self.state

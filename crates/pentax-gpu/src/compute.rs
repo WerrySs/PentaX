@@ -193,6 +193,17 @@ impl ComputeState {
             indirect_base: None,
         }
     }
+    // Only defaults with an exact public field/register correspondence are
+    // restored. Packed raw resource controls and START registers remain unknown.
+    fn reset(&mut self) {
+        *self = Self::empty();
+        for index in [
+            3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+        ] {
+            self.values[index] = Some(0);
+        }
+        self.indirect_base = Some(0);
+    }
     fn index(reg: u32) -> Option<usize> {
         Some(match reg {
             0x204..=0x209 => (reg - 0x204) as usize,
@@ -233,6 +244,8 @@ fn packets(bytes: &[u8], budget: &mut Budget<'_>) -> Result<(ComputeState, [u32;
         let fail = |reason| Error::Packet { dword: at, reason };
         let length = if header.raw() == 0x8000_0000 {
             1
+        } else if crate::queue_reset::is_header(header.raw()) {
+            2
         } else if header.packet_type() == 3 && matches!(header.low_byte(), 0 | 2) {
             if header.opcode() == 0x10 && header.count() == 0x3fff {
                 1
@@ -246,7 +259,18 @@ fn packets(bytes: &[u8], budget: &mut Budget<'_>) -> Result<(ComputeState, [u32;
             .checked_add(length)
             .filter(|n| *n <= bytes.len() / 4)
             .ok_or(fail("truncated packet"))?;
-        if length == 1 || header.opcode() == 0x10 { /* Hardware NOP payload remains opaque. */
+        if crate::queue_reset::is_header(header.raw()) {
+            let reset = crate::queue_reset::decode(header.raw(), word(at + 1)).map_err(fail)?;
+            budget.work(std::mem::size_of::<ComputeState>() as u64)?;
+            if reset == crate::queue_reset::Reset::Processor {
+                // This API returns one dispatch state, not a queue-history
+                // product. A later reset cannot retroactively replace it.
+                if dispatch.is_some() {
+                    return Err(fail("queue reset after single dispatch"));
+                }
+                regs.reset();
+            }
+        } else if length == 1 || header.opcode() == 0x10 { /* Hardware NOP payload remains opaque. */
         } else if header.opcode() == 0x76
             && matches!(header.low_byte(), 0 | 2)
             && length >= 3
@@ -584,3 +608,7 @@ fn prepare_state(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "compute/reset_tests.rs"]
+mod reset_tests;

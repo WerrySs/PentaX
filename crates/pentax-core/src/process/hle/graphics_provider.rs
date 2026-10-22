@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 225] = {
+const ENTRIES: [(&str, Function, usize, usize); 229] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 225] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 225];
+    let mut entries = [BASE_ENTRIES[0]; 229];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -161,6 +161,14 @@ const ENTRIES: [(&str, Function, usize, usize); 225] = {
     entries[222] = ("1FZBKy8HeNU", Function::VideoGetVblankStatus, 3, 3);
     entries[223] = ("DYhhWbJSeRg", Function::VideoColorSettingsSetGamma, 3, 3);
     entries[224] = ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3);
+    let resets = crate::gpu::driver::RESET_QUEUE_EXPORTS;
+    i = 0;
+    while i < resets.len() {
+        let (nid, function) = resets[i];
+        entries[225 + i * 2] = (nid, function, 1, 1);
+        entries[226 + i * 2] = (nid, function, 2, 2);
+        i += 1;
+    }
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -364,7 +372,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 225);
+        assert_eq!(provider.function_count(), 229);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -444,3 +452,30 @@ mod flip_tests {
 #[cfg(test)]
 #[path = "graphics_provider/presentation_tests.rs"]
 mod presentation_tests;
+
+#[cfg(test)]
+mod reset_queue_tests {
+    use super::*;
+    #[test]
+    fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 229);
+        assert_eq!(
+            ENTRIES[224],
+            ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
+        );
+        for (offset, (nid, function)) in crate::gpu::driver::RESET_QUEUE_EXPORTS
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 2);
+            for pair in [1, 2] {
+                let ordinal = 225 + offset * 2 + pair - 1;
+                assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
+                let marker = provider.markers().nth(ordinal).unwrap();
+                assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+                assert_eq!(marker.function, function);
+            }
+        }
+    }
+}

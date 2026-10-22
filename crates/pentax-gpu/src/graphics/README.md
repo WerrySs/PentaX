@@ -355,3 +355,22 @@ attempt byte/buffer/work counters with the causal error. These counters are
 committed to the session on both success and failure before returning; repeated
 malformed or unreadable nested buffers cannot reset the attempted prefix's
 budget. The failure contains no command product or executable prefix.
+
+Exact `0xc0001024,0` dispatch-reset packets reset the selected modeled processor
+at their command position, including stale shader/uconfig/context authority.
+Known compute program addresses, local sizes, user SGPRs and indirect base
+return to source zero values. Packed raw controls and other unmapped reset
+fields remain unknown and cannot authorize a dispatch or draw. The pinned
+processor reset leaves independent index base and instance fields unchanged;
+index type/count and mapped uconfig defaults reset as specified by that source.
+Exact `0xc0001200,state` packets accept only the low four payload bits and always
+clear context alone: the payload does not select push/pop. SH/uconfig and index
+or instance state remain intact. Both reset packets invalidate a prior draw's
+flip eligibility; a fresh admitted draw can establish it again. Immutable
+capture, nested source provenance, live array ordering, quotas and source alias
+exclusions remain mandatory. These are bounded state semantics, not a complete
+hardware reset-register table, asynchronous queue restart or display reset.
+The separate single-flat-compute preparation API refuses a processor reset after
+its sole dispatch rather than applying later state retroactively. Stateful
+queue plans retain the dispatch-position snapshot and publish final reset state
+only after admitted execution succeeds.

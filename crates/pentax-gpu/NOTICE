@@ -173,3 +173,18 @@ system values are unchanged, and unsupported descriptor/source forms remain
 explicit refusals. Source mechanisms and licenses are those already listed for
 shaderBindings.h, ResourceTracking.cpp, BindingLayout.cpp and the Vulkan port;
 no additional source project or game-derived fixture is introduced.
+
+The exact queue-reset packet contracts additionally adapt the same pinned209dffe
+src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+  CpOpDispatchReset and CpOpClearState
+src/graphics/guest_gpu/graphicsRun.cpp:
+  CommandProcessor::Reset and ApplyContextStateOperation(Clear)
+src/graphics/guest_gpu/hardwareContext.h: Shader/UserConfig/Context field defaults.
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L1405
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/graphics/guest_gpu/graphicsRun.cpp#L696
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original MIT grant
+continue to apply. PentaX changes2026 add exact captured-packet admission,
+precharged reset/replay work, conservative unknown raw defaults, selected
+processor state effects and original static/ordered/indirect fixtures. The
+pinned209dffe Reset retains independent index base and instance fields; this
+is distinct from a later public revision's additional assignments.

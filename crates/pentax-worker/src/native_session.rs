@@ -39,7 +39,7 @@ mod stop_diagnostics;
 use scheduling::Scheduling;
 use stop_diagnostics::StopDiagnostics;
 
-use startup_profile::StartupProfile;
+use startup_profile::{BuiltinRouteOutcome, StartupProfile};
 use std::time::Instant;
 
 /// Independent bounds for source-window admission and the reusable engine.
@@ -257,7 +257,7 @@ impl NativeSessionProgress {
             &self.plan_cache_observations,
             self.kernel_handles,
         );
-        format!(
+        let mut fields = format!(
             "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}\tregister_loop_entries={}\tregister_loop_iterations={}{private}{console}{contexts}{causality}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
@@ -273,7 +273,9 @@ impl NativeSessionProgress {
             self.dispatch.affine_loop_iterations,
             self.dispatch.register_loop_entries,
             self.dispatch.register_loop_iterations,
-        )
+        );
+        self.profile.append_builtin_route_fields(&mut fields);
+        fields
     }
 
     // Preserve existing PROGRESS records and their total bounded output size.
@@ -1168,17 +1170,35 @@ fn execute_epoch<'plan, 'image>(
             };
             // Exact supplied-library API entries are an explicit opt-in. A normal
             // pre-effect fallback still runs the original native block below.
-            let builtin = if let Some(manifest) = libc_builtins
-                .as_ref()
-                .filter(|manifest| manifest.contains_pc(engine.state().guest_pc))
-            {
+            let builtin = if let Some((manifest, operation)) =
+                libc_builtins.as_ref().and_then(|manifest| {
+                    manifest
+                        .function_index_at(engine.state().guest_pc)
+                        .map(|index| (manifest, index))
+                }) {
                 let next_stops = state
                     .service_stops
                     .checked_add(1)
                     .ok_or(NativeSessionError::Budget("service observations"))?;
+                // This scalar is requested ABI length, never an address or a
+                // claim about bytes transferred on a refused/fallback route.
+                let requested_bytes = limits.report_progress.then(|| engine.state().gpr[2]);
                 let service_start = limits.report_progress.then(Instant::now);
                 let result = session.try_libc_builtin(manifest, proof, &mut engine, block);
                 let elapsed_ns = progress.profile.service_finished(service_start);
+                if requested_bytes.is_some() {
+                    let route = match &result {
+                        Ok(Some(_)) => BuiltinRouteOutcome::Substituted,
+                        Ok(None) => BuiltinRouteOutcome::Fallback,
+                        Err(_) => BuiltinRouteOutcome::Refused,
+                    };
+                    progress.profile.record_builtin_route(
+                        operation,
+                        requested_bytes,
+                        elapsed_ns,
+                        route,
+                    );
+                }
                 if result.is_err() || matches!(&result, Ok(None)) {
                     progress.profile.services.record_unattributed(elapsed_ns);
                 }

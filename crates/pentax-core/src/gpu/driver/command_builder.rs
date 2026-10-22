@@ -85,8 +85,18 @@ pub(crate) const EXPORTS: [(&str, Function); 52] = [
     ),
 ];
 
+// Keep the original fifty-two export ordinals immutable. Reset bindings are
+// appended after the later VideoOut entries by the provider factory.
+pub(crate) const RESET_EXPORTS: [(&str, Function); 2] = [
+    ("JrtiDtKeS38", Function::AgcAcbResetQueue),
+    ("TRO721eVt4g", Function::AgcDcbResetQueue),
+];
+
 pub(crate) fn supports(function: Function) -> bool {
-    EXPORTS.iter().any(|(_, found)| *found == function)
+    EXPORTS
+        .iter()
+        .chain(RESET_EXPORTS.iter())
+        .any(|(_, found)| *found == function)
 }
 
 const INVALID_PACKET: u64 = 0x8a6c_000c;
@@ -240,6 +250,18 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcAcbResetQueue => {
+            if a[1] & !0x1c2 != 0 {
+                return Err(Failure::UnsupportedQueue);
+            }
+            Packet::fixed(&[pm4(2, 0x10, 9), 0])
+        }
+        AgcDcbResetQueue => {
+            if a[1] & !0xfff != 0 {
+                return Err(Failure::UnsupportedQueue);
+            }
+            Packet::fixed(&[pm4(2, 0x12, 0), a[2] & 15])
+        }
         AgcCbNop => {
             let mut value = Packet::fixed(&[pm4(a[1], 0x10, 0)]);
             value.allocate = a[1];

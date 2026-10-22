@@ -99,7 +99,9 @@ impl OrderedCommands {
                 std::mem::size_of::<Self>() as u64,
             )
             .map_err(convert)?;
-        let sanitized = program.sanitized().map_err(convert)?;
+        let sanitized = program
+            .sanitized(std::mem::size_of::<GraphicsState>())
+            .map_err(convert)?;
         let (host, work) = program.remaining();
         let mut static_limits = *limits;
         static_limits.max_host_bytes = host;
@@ -205,6 +207,12 @@ impl OrderedCommands {
                 return Ok(Some(OrderedStep::Array));
             }
             let word = |index| self.program.word(packet, index);
+            if crate::queue_reset::is_header(header.raw()) {
+                let reset = crate::queue_reset::decode(header.raw(), word(1))
+                    .map_err(Error::Unsupported)?;
+                self.state.reset(reset);
+                continue;
+            }
             if matches!(header.opcode(), 0x69 | 0x76 | 0x79) && header.raw() != 0xc002_7904 {
                 let space = match header.opcode() {
                     0x69 => RegisterSpace::Context,

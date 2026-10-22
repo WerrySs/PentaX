@@ -587,3 +587,6 @@ fn late_patch_rmw_fault_keeps_actual_source_prefix_and_prevents_replay() {
         assert_eq!(read(&memory, at, words.len() * 4), snapshot);
     }
 }
+
+#[path = "tests/reset_tests.rs"]
+mod reset_tests;

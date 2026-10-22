@@ -291,6 +291,8 @@ pub fn plan_commands(
             };
             let length = if header.raw() == 0x8000_0000 {
                 1
+            } else if crate::queue_reset::is_header(header.raw()) {
+                2
             } else if header.raw() == 0xc004_105c {
                 6
             } else if header.raw() == 0xc006_1060 {
@@ -311,6 +313,14 @@ pub fn plan_commands(
                 .checked_add(length)
                 .filter(|n| *n <= bytes.len() / 4)
                 .ok_or(fail("truncated packet"))?;
+            if crate::queue_reset::is_header(header.raw()) {
+                let reset = crate::queue_reset::decode(header.raw(), word(at + 1)).map_err(fail)?;
+                work(&mut usage, limits, size_of::<GraphicsState>() as u64)?;
+                state.reset(reset);
+                fresh_draw = false;
+                at = end;
+                continue;
+            }
             if header.raw() == 0xc004_105c {
                 if actions.len() >= action_count {
                     return Err(Error::Limit("command actions"));

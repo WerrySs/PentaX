@@ -277,10 +277,16 @@ impl Program {
     pub fn packet(&self, index: usize) -> Option<Packet> {
         self.packets.get(index).copied()
     }
-    pub fn sanitized(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn sanitized(&mut self, reset_state_bytes: usize) -> Result<Vec<u8>, Error> {
         let mut bytes = self.reserve::<u8>(self.bytes.len())?;
         bytes.extend_from_slice(&self.bytes);
+        let mut reset_work = 0u64;
         for packet in &self.packets {
+            if crate::queue_reset::is_header(Header::new(self.word(*packet, 0)).raw()) {
+                reset_work = reset_work
+                    .checked_add(reset_state_bytes as u64)
+                    .ok_or(Error::Limit("ordered reset work"))?;
+            }
             if indirect_opcode(Header::new(self.word(*packet, 0))) {
                 // Preserve the complete five-DWORD extent as one opaque NOP.
                 // Only the static grammar pass sees this temporary stream;
@@ -288,6 +294,9 @@ impl Program {
                 bytes[packet.at..packet.at + 4].copy_from_slice(&0xc003_1000u32.to_le_bytes());
             }
         }
+        // The original sanitization walk also precharges the live replay's
+        // reset-state copy. There is no additional packet scan or allocation.
+        self.charge(0, reset_work)?;
         Ok(bytes)
     }
     pub fn packets(&self) -> &[Packet] {
@@ -348,6 +357,13 @@ fn packet_words(bytes: &[u8]) -> Result<usize, Error> {
     let header = Header::new(word(bytes, 0));
     if header.raw() == 0x8000_0000 {
         return Ok(1);
+    }
+    if crate::queue_reset::is_header(header.raw()) {
+        if bytes.len() < 8 {
+            return Err(Error::Unsupported("truncated queue reset packet"));
+        }
+        crate::queue_reset::decode(header.raw(), word(bytes, 4)).map_err(Error::Unsupported)?;
+        return Ok(2);
     }
     if header.raw() == 0xc004_105c {
         return Ok(6);

@@ -53,6 +53,25 @@ impl GraphicsState {
             index_count: None,
         }
     }
+    pub(super) fn reset(&mut self, reset: crate::queue_reset::Reset) {
+        match reset {
+            crate::queue_reset::Reset::Context => self.context = [None; 0x400],
+            crate::queue_reset::Reset::Processor => {
+                // Pinned209dffe Reset does not assign these independent fields.
+                let index_base = self.index_base;
+                let instances = self.instances;
+                *self = Self::empty();
+                // Public CommandProcessor::Reset and UserConfig defaults.
+                self.primitive = Some(0);
+                self.index_offset = Some(0);
+                self.primitive_restart = Some(0);
+                self.instances = instances;
+                self.index_type = Some(IndexType::U16);
+                self.index_base = index_base;
+                self.index_count = Some(0);
+            }
+        }
+    }
     pub(super) fn get(&self, space: RegisterSpace, register: u32) -> Result<u32, Error> {
         let value = match space {
             RegisterSpace::Context => self.context.get(register as usize).copied().flatten(),

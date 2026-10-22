@@ -913,3 +913,15 @@ coalesced vblank events before the first pixels, while mode changes rebase the
 same grid atomically. Numeric consumer ticks do not create additional periods.
 This display count remains separate from real draw, frame and acknowledgement
 evidence. Detailed source/error/ownership scope is in src/gpu/video/README.md.
+
+The exact `AgcAcbResetQueue` and `AgcDcbResetQueue` encoders reserve two real
+command DWORDs through the existing checked descriptor and grow continuation.
+Their returned address identifies the emitted packet; encoding does not reset
+host, display or other guest queue state. The canonical Graphics5 pair and the
+separately verified paired libSceAgc identities are explicit, with old export
+ordinals retained. Invalid arguments/allocation failures remain typed refusals.
+On submission, reset effects occur in that processor's captured command order.
+ACB reset discards prior modeled register authority and restores only mapped
+public defaults; DCB clears context state while preserving SH, uconfig and
+independent index/instance state. Reset invalidates an earlier draw's flip
+eligibility. These contracts do not establish commercial rendering or speed.

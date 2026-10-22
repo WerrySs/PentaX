@@ -669,3 +669,33 @@ fn optional_builtin_exhaustion_leaves_required_service_allowance_intact() {
     })
     .unwrap();
 }
+
+#[test]
+fn builtin_operation_indices_preserve_sparse_manifest_order_without_service_authority() {
+    let primary = crate::process::hle::unavailable::tests::original_input(0);
+    let library = supplied();
+    with_native_image_session(
+        &[&primary, &library],
+        &NativeImageLimits::default(),
+        |session, _| {
+            let proof = session.prepare_native_source(&Default::default()).unwrap();
+            let mut manifest = session.prepare_libc_builtins(&proof, 1).unwrap();
+            let bias = proof.materialized_source().source_plan().modules()[1].load_bias();
+            let before = session.libc_builtin_usage();
+            for (index, offset) in [0x100, 0x110, 0x120].into_iter().enumerate() {
+                assert_eq!(manifest.function_index_at(bias + offset), Some(index));
+                assert!(manifest.contains_pc(bias + offset));
+                assert_eq!(manifest.function_index_at(bias + offset + 1), None);
+            }
+            manifest.entries[0] = None;
+            assert_eq!(manifest.function_index_at(bias + 0x100), None);
+            assert_eq!(manifest.function_index_at(bias + 0x110), Some(1));
+            assert_eq!(manifest.function_index_at(bias + 0x120), Some(2));
+            assert!(!manifest.contains_pc(bias + 0x100));
+            assert_eq!(session.libc_builtin_usage(), before);
+            assert_eq!(session.hle.service_attempts(), 0);
+            Ok::<_, ()>(())
+        },
+    )
+    .unwrap();
+}

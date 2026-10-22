@@ -1599,3 +1599,6 @@ mod x87_conditional_moves;
 
 #[path = "image_probe/np_callbacks.rs"]
 mod np_callbacks;
+
+#[path = "image_probe/agc_reset_queue.rs"]
+mod agc_reset_queue;

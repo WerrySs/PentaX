@@ -369,6 +369,8 @@ fn plan_commands_for_queue(
         let fail = |reason| Error::Packet { dword: at, reason };
         let length = if header.raw() == 0x8000_0000 {
             1
+        } else if crate::queue_reset::is_header(header.raw()) {
+            2
         } else if header.raw() == 0xc006_1060 {
             8
         } else if header.raw() == 0xc002_7904 {
@@ -388,6 +390,15 @@ fn plan_commands_for_queue(
             .filter(|v| *v <= frame.bytes.len() / 4)
             .ok_or(fail("truncated packet"))?;
         frame.at = end;
+        if crate::queue_reset::is_header(header.raw()) {
+            let reset =
+                crate::queue_reset::decode(header.raw(), frame.word(at + 1)).map_err(fail)?;
+            budget.work(size_of::<ComputeState>() as u64)?;
+            if reset == crate::queue_reset::Reset::Processor {
+                state.reset();
+            }
+            continue;
+        }
         if length == 1 || (header.opcode() == 0x10 && header.raw() != 0xc006_1060) {
             continue;
         }
