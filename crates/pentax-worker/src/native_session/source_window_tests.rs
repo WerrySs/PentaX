@@ -261,7 +261,7 @@ fn report(arm: Arm, samples: &[Sample]) {
 #[ignore = "bounded release-only paired measurement; requires explicit owner approval after title closure"]
 fn original_same_length_source_window_paired_release_measurement() {
     assert!(
-        !cfg!(debug_assertions),
+        !std::hint::black_box(cfg!(debug_assertions)),
         "run the ignored measurement with --release"
     );
     let iterations = match std::env::var("PENTAX_SOURCE_WINDOW_BENCH_ITERATIONS") {
