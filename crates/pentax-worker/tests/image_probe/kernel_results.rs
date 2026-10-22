@@ -222,6 +222,8 @@ mod raw_input;
 mod rudp;
 #[path = "save.rs"]
 mod save;
+#[path = "save_directories.rs"]
+mod save_directories;
 #[path = "share.rs"]
 mod share;
 #[path = "share_media.rs"]
@@ -334,6 +336,8 @@ mod align_right;
 mod libc_memory_builtins;
 #[path = "native_context_staging.rs"]
 mod native_context_staging;
+#[path = "native_register_loop.rs"]
+mod native_register_loop;
 #[path = "native_vector_broadcasts.rs"]
 mod native_vector_broadcasts;
 

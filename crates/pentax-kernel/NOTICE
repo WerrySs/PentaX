@@ -245,6 +245,21 @@ Ported sources:
     save-memory Setup2/Get2/Set2/Sync layouts, limits, range/error ordering,
     metadata timestamps and completion status; PentaX's directory capability,
     exclusive locking and atomic checksummed bundle format are original Rust
+    The directory-save adaptation additionally retains TransferringMount/Mount3,
+    Umount2, mount information, delete, parameter/search layouts and output/error
+    ordering, backup events and save-memory busy/lifecycle interactions.
+    src/libs/saveDataMountSlots.h, verified Git blob
+    c02143e5f6b3d3320ae9ab2c820b77952d3e805c at the same pinned revision,
+    supplies the sixteen slots, lowest-free selection and duplicate-before-full
+    rules. Encoded title/save capability namespaces, staged metadata creation,
+    guest-output rollback, bounded non-following traversal and actual icon
+    persistence are original PentaX implementations; upstream icon functions are
+    stubs. Directory saves and existing checksummed memory bundles are separate
+    formats, with no ambient discovery, migration or rawmemory.dat adapter.
+    Mounted save filesystem operations preserve reviewed source IO layouts and
+    ordering while retaining owned open descriptors across unmount. Read-only
+    package roots remain separate. Actual descriptor flush and refusal to read
+    write-only descriptors are PentaX extensions to the pinned profile.
   src/libs/network.cpp/h, libNet.cpp and errno.h: reviewed NP offline account outputs,
     scoped registrations and bounded sync/async request lifecycle, completion,
     poll, cancellation and premium-result error ordering

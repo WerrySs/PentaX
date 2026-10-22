@@ -81,6 +81,10 @@ impl Plan {
         pair(&mut args, "--present-window", "yes");
         pair(&mut args, "--data-directory", binding("/app0", root));
         pair(&mut args, "--save-directory", save.as_os_str());
+        if let Some(title) = entry.title_id.as_deref() {
+            let title = pentax_config::TitleId::new(title).map_err(|_| Error::Preferences)?;
+            pair(&mut args, "--save-title-id", title.as_str());
+        }
         pair(
             &mut args,
             "--physical-backing-directory",

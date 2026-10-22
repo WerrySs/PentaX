@@ -131,6 +131,27 @@ impl Program {
         if buffers.len() > limits.buffers || roots.len() != buffers.len() {
             return Err(Error::Limit("register command buffers"));
         }
+        for (bytes, root) in buffers.iter().zip(roots) {
+            if root.size != bytes.len() as u64 {
+                return Err(Error::Unsupported("register command extent"));
+            }
+        }
+        Self::build(buffers, roots, limits)
+    }
+
+    /// Only the sealed graphics capture can supply expanded bytes independently
+    /// of their original whole source ranges. No synthetic guest range exists.
+    pub(crate) fn captured(
+        capture: &crate::graphics::CapturedCommands,
+        limits: Limits,
+    ) -> Result<Self, Error> {
+        Self::build(&[capture.bytes()], capture.command_ranges(), limits)
+    }
+
+    fn build(buffers: &[&[u8]], roots: &[CommandRange], limits: Limits) -> Result<Self, Error> {
+        if buffers.len() > limits.buffers || roots.len() > limits.buffers {
+            return Err(Error::Limit("register command buffers"));
+        }
         let mut usage = Usage::default();
         let mut count = 0usize;
         let mut arrays = 0usize;
@@ -142,8 +163,8 @@ impl Program {
                 .checked_mul(2)
                 .ok_or(Error::Limit("register metadata"))?,
         )?;
-        for (bytes, root) in buffers.iter().zip(roots) {
-            if !bytes.len().is_multiple_of(4) || root.size != bytes.len() as u64 {
+        for bytes in buffers {
+            if !bytes.len().is_multiple_of(4) {
                 return Err(Error::Unsupported("register command extent"));
             }
             usage.command_bytes = usage

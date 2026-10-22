@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2021 InoriRus
-// Modified 2026 for PentaX: explicit read-only file capabilities, checked guest
-// buffers, transactional logical positions and bounded descriptors; see NOTICE.
+// Modified 2026 for PentaX: explicit read-only roots and separate owned writable
+// save capabilities, checked buffers and bounded descriptors; see NOTICE.
 
 use crate::budget::{Budget, Limits};
 use crate::{CallArgs, Errno, Failure, GuestAccess, GuestWrite, Service};
@@ -13,7 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod apr;
 mod content;
 mod directories;
+mod save;
 mod trophy;
+pub(crate) use save::PreparedSaveMount;
 
 enum FileData {
     Regular(File),
@@ -96,6 +98,7 @@ impl ReadOnlyRoot {
 fn directory_error(error: std::io::Error) -> Failure {
     match error.kind() {
         ErrorKind::NotFound => Errno::NoEntry.into(),
+        ErrorKind::AlreadyExists => Errno::Exists.into(),
         ErrorKind::PermissionDenied => Errno::Access.into(),
         ErrorKind::NotADirectory => Errno::NotDirectory.into(),
         ErrorKind::IsADirectory => Errno::IsDirectory.into(),
@@ -144,9 +147,15 @@ fn directory_name(path: &str) -> bool {
 struct OpenFile {
     data: FileData,
     position: u64,
+    readable: bool,
+    writable: bool,
+    append: bool,
+    sync: bool,
+    save: bool,
 }
 pub(crate) struct FileState {
     roots: Vec<ReadOnlyRoot>,
+    save_mounts: [Option<Dir>; 16],
     open: Vec<Option<OpenFile>>,
     limits: Limits,
     apr: apr::State,
@@ -226,6 +235,7 @@ impl FileState {
             .map_err(|_| Failure::Allocation)?;
         Ok(Self {
             roots,
+            save_mounts: std::array::from_fn(|_| None),
             open,
             limits,
             apr: apr::State::default(),
@@ -247,6 +257,9 @@ impl FileState {
     fn selected_canonical(&self, path: &str, budget: &mut Budget) -> Result<Option<File>, Failure> {
         if !path.starts_with('/') || !safe_components(&path[1..]) {
             return Err(Errno::NoEntry.into());
+        }
+        if let Some(file) = self.selected_save(path, budget)? {
+            return Ok(Some(file));
         }
         budget.work(self.roots.len() as u64)?;
         // Longest mount prefix wins, as in source mount resolution.
@@ -354,6 +367,11 @@ impl FileState {
                 Ok(0)
             }
             Service::Read | Service::Pread => self.read_file(service, a, guest, budget),
+            Service::Write | Service::Pwrite => self.write_save_file(service, a, guest, budget),
+            Service::Ftruncate | Service::Fsync => self.save_descriptor_control(service, a, budget),
+            Service::Mkdir | Service::Rmdir | Service::Unlink | Service::Rename => {
+                self.save_path_operation(service, a, guest, budget)
+            }
             Service::Lseek => self.seek_file(a, budget),
             Service::Getdirentries | Service::Getdents => {
                 self.get_directory(service, a, guest, budget)
@@ -434,6 +452,9 @@ impl FileState {
         }
         let path = budget.name(guest, a[0])?;
         let flags = a[1] as u32;
+        if save::namespace(&path).is_some_and(|(slot, _)| self.save_mounts[slot].is_some()) {
+            return self.open_save_file(&path, flags, budget);
+        }
         if flags & 3 == 3 {
             return Err(Failure::Unsupported("source-aborting file access mode"));
         }
@@ -469,7 +490,15 @@ impl FileState {
             FileData::Directory(directory) => directory.bytes.capacity() as u64,
             _ => 0,
         };
-        let opened = Some(OpenFile { data, position: 0 });
+        let opened = Some(OpenFile {
+            data,
+            position: 0,
+            readable: true,
+            writable: false,
+            append: false,
+            sync: false,
+            save: false,
+        });
         if index == self.open.len() {
             self.open.push(opened);
         } else {
@@ -501,6 +530,9 @@ impl FileState {
             return Err(Errno::Invalid.into());
         }
         let opened = self.open[index].as_mut().ok_or(Errno::BadFd)?;
+        if !opened.readable {
+            return Err(Errno::BadFd.into());
+        }
         if matches!(opened.data, FileData::Directory(_)) && service == Service::Pread {
             return Err(Failure::Unsupported("directory pread"));
         }
@@ -536,6 +568,9 @@ impl FileState {
         let FileData::Regular(file) = &opened.data else {
             unreachable!()
         };
+        if opened.save {
+            budget.save_io(a[2], false)?;
+        }
         let count = positional_read(file, &mut bytes, offset)?;
         let next = offset
             .checked_add(count as u64)

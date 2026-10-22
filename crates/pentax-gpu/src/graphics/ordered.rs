@@ -40,7 +40,7 @@ impl OrderedCommands {
         initial: GraphicsState,
         limits: &CommandLimits,
     ) -> Result<Self, Error> {
-        let mut program = Program::new(
+        let program = Program::new(
             buffers,
             roots,
             registers::Limits {
@@ -52,6 +52,47 @@ impl OrderedCommands {
             },
         )
         .map_err(convert)?;
+        Self::from_program(program, initial, limits)
+    }
+
+    pub(super) fn captured(
+        capture: &mut super::CapturedCommands,
+        initial: GraphicsState,
+        limits: &CommandLimits,
+    ) -> Result<Self, Error> {
+        let program = Program::captured(
+            capture,
+            registers::Limits {
+                buffers: limits.max_buffers,
+                command_bytes: limits.max_command_bytes,
+                packets: limits.max_packets,
+                host: limits.max_host_bytes,
+                work: limits.max_work,
+            },
+        )
+        .map_err(convert)?;
+        let mut ordered = Self::from_program(program, initial, limits)
+            .map_err(|error| capture.source_error(error))?;
+        let usage = capture.usage();
+        ordered
+            .plan
+            .source_usage(usage.command_bytes, usage.packets);
+        let provenance = capture.origins_host_bytes()?;
+        ordered
+            .program
+            .usage
+            .host
+            .checked_add(provenance)
+            .ok_or(Error::Limit("graphics provenance capacity"))?;
+        capture.transfer_origins(&mut ordered.plan)?;
+        Ok(ordered)
+    }
+
+    fn from_program(
+        mut program: Program,
+        initial: GraphicsState,
+        limits: &CommandLimits,
+    ) -> Result<Self, Error> {
         program
             .charge(
                 std::mem::size_of::<Self>(),
@@ -98,7 +139,9 @@ impl OrderedCommands {
     }
     pub fn usage(&self) -> CommandUsage {
         let mut usage = self.plan.usage();
-        usage.host_bytes = self.program.usage.host;
+        // Provenance was moved from the already-admitted capture after static
+        // planning, not allocated a second time inside the register program.
+        usage.host_bytes = self.program.usage.host + self.plan.provenance_bytes();
         usage.work = self.program.usage.work;
         // Sanitization preserves packet extents; retain the complete static
         // packet count, including compound wait packets and each array slot.
@@ -106,6 +149,11 @@ impl OrderedCommands {
     }
     pub fn command_ranges(&self) -> &[CommandRange] {
         self.program.ranges()
+    }
+    /// Retains the actual packet location across an array/draw late failure.
+    pub fn current_source(&self) -> Option<super::CommandLocation> {
+        let packet = self.program.packet(self.packet.checked_sub(1)?)?;
+        self.plan.command_location(packet.at / 4)
     }
     pub fn memory_action(&self, index: usize) -> &MemoryAction {
         self.plan.memory_action(index)

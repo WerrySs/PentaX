@@ -149,3 +149,16 @@ PentaX modifications 2026: checked descriptors, immutable bounded command
 products, current-owner ordered array snapshots, replayed register banks and
 actual draw/dispatch preparation. Source masks retain unknown bits for explicit
 refusal rather than inventing register values or execution success.
+
+Bounded graphics indirect-buffer capture additionally adapts PUBLIC
+KytyPS5/KytyPS5 revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp,
+    blob19034daafbd6da20d11f634debbf666c1054eed7, CpOpIndirectBuffer;
+  src/graphics/guest_gpu/graphicsRun.cpp,
+    blob41aeee369b497769e0d62f27ad7df94e7d069bdd, ProcessIndirectBuffer.
+The existing GPL-2.0-only terms and retained original Kyty MIT grant apply.
+PentaX modifications 2026: immutable complete root/IB capture, iterative bounded
+call/chain traversal, strict ordinary control profile, active-cycle refusal,
+original packet provenance and whole-source physical-alias metadata. The
+existing compute admission remains separately scoped. All new packet and data
+fixtures are original; no commercial command stream or asset is included.

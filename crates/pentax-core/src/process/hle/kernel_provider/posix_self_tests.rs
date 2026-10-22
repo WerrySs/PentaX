@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn posix_self_exact_got_bindings_append_without_moving_existing_marker_sites() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1326);
+    assert_eq!(provider.registration_count(), 1369);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (69, 71));
     for (index, marker) in provider.markers()[..1313].iter().enumerate() {
         assert_eq!(

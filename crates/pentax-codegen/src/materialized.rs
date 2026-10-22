@@ -234,6 +234,7 @@ pub struct MaterializedBlockPlan<'view, 'plan, 'image> {
     declaration: &'view MaterializedSource<'plan, 'image>,
     inner: BlockPlan<'plan, 'image>,
     pub(crate) affine: crate::affine_loop_trace::Preparation,
+    pub(crate) register_loop: crate::register_loop_trace::Preparation,
 }
 
 impl fmt::Debug for MaterializedBlockPlan<'_, '_, '_> {
@@ -314,6 +315,7 @@ impl<'view, 'plan, 'image> MaterializedBlockPlan<'view, 'plan, 'image> {
         self.usage()
             .allocation_bytes
             .saturating_add(self.affine.allocated)
+            .saturating_add(self.register_loop.allocated)
     }
     /// Pure comparison only; the future unsafe consumer must independently
     /// establish the exact prepared owner, typed proof and live source bytes.
@@ -361,5 +363,6 @@ pub fn plan_materialized_block<'view, 'plan, 'image>(
         declaration: source,
         inner,
         affine: crate::affine_loop_trace::Preparation::default(),
+        register_loop: crate::register_loop_trace::Preparation::default(),
     })
 }

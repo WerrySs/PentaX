@@ -63,6 +63,7 @@ pub struct TranslationPolicy {
     native_float_min_max: bool,
     native_vector_broadcasts: bool,
     affine_loop_trace: bool,
+    register_loop_trace: bool,
 }
 impl TranslationPolicy {
     pub const fn new(features: CpuFeatures) -> Self {
@@ -81,6 +82,7 @@ impl TranslationPolicy {
             native_float_min_max: false,
             native_vector_broadcasts: false,
             affine_loop_trace: false,
+            register_loop_trace: false,
         }
     }
     pub const fn features(self) -> CpuFeatures {
@@ -186,6 +188,15 @@ impl TranslationPolicy {
     }
     pub const fn requests_affine_loop_trace(self) -> bool {
         self.affine_loop_trace
+    }
+    /// Separately request a finite two-iteration register-only self-loop.
+    /// This changes no ordinary opcode, source, feature or runtime authority.
+    pub const fn with_register_loop_trace(mut self) -> Self {
+        self.register_loop_trace = true;
+        self
+    }
+    pub const fn requests_register_loop_trace(self) -> bool {
+        self.register_loop_trace
     }
     pub fn x64_sse2() -> Self {
         Self::new(CpuFeatures::x64_sse2())

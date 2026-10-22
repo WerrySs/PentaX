@@ -72,6 +72,10 @@ fn launch_plan_selects_only_named_sources_and_keeps_title_storage_and_preference
     let plan = Plan::prepare(&entry, &config).unwrap();
     assert_eq!(plan.args[0], "probe-entry");
     assert_eq!(
+        value(&plan, "--save-title-id"),
+        Some(std::ffi::OsStr::new("PPSA12345"))
+    );
+    assert_eq!(
         value(&plan, "--present-window"),
         Some(std::ffi::OsStr::new("yes"))
     );

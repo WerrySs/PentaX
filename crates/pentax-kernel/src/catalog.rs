@@ -632,6 +632,28 @@ pub enum Service {
     PadSetTriggerEffect,
     PadSetLightBar,
     ConvertKeycodeGetImeKeyboardType,
+    SaveTransferringMount,
+    SaveMount3,
+    SaveUmount2,
+    SaveGetMountInfo,
+    SaveDirNameSearch,
+    SaveDelete,
+    SaveGetParam,
+    SaveSetParam,
+    SaveLoadIcon,
+    SaveSaveIcon,
+    SaveSaveIconByPath,
+    SaveBackup,
+    Pwrite,
+    Ftruncate,
+    Fsync,
+    Mkdir,
+    Rmdir,
+    Rename,
+    Unlink,
+    PosixPwrite,
+    PosixFtruncate,
+    PosixMkdir,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1675,6 +1697,18 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < SAVE_DIRECTORY_REGISTRATIONS.len() {
+        entries[output] = SAVE_DIRECTORY_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
+    index = 0;
+    while index < SAVE_FILE_REGISTRATIONS.len() {
+        entries[output] = SAVE_FILE_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1770,6 +1804,8 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + CONFIGURED_MEMORY_REGISTRATIONS.len()
             + PAD_RUNTIME_REGISTRATIONS.len()
             + CONVERT_KEYCODE_REGISTRATIONS.len()
+            + SAVE_DIRECTORY_REGISTRATIONS.len()
+            + SAVE_FILE_REGISTRATIONS.len()
     },
 >();
 
@@ -4265,3 +4301,383 @@ pub fn resolve(
         })
         .map(|entry| entry.service)
 }
+
+// New exact pinned identities are appended; historic provider indices remain fixed.
+const SAVE_DIRECTORY_REGISTRATIONS: &[Registration] = &[
+    Registration {
+        service: Service::SaveTransferringMount,
+        nid: "WAzWTZm1H+I",
+        source_name: "SaveDataTransferringMount",
+        arguments: 2,
+        module: "libSceSaveData_native",
+        library: "libSceSaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveTransferringMount,
+        nid: "WAzWTZm1H+I",
+        source_name: "SaveDataTransferringMount",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveTransferringMount,
+        nid: "RjMlsR8EXrw",
+        source_name: "SaveDataTransferringMount",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveMount3,
+        nid: "ZP4e7rlzOUk",
+        source_name: "SaveDataMount3",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveUmount2,
+        nid: "uW4vfTwMQVo",
+        source_name: "SaveDataUmount2",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveGetMountInfo,
+        nid: "65VH0Qaaz6s",
+        source_name: "SaveDataGetMountInfo",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDirNameSearch,
+        nid: "dyIhnXq-0SM",
+        source_name: "SaveDataDirNameSearch",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDirNameSearch,
+        nid: "X4MYzukPc3g",
+        source_name: "SaveDataDirNameSearch",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDelete,
+        nid: "S1GkePI17zQ",
+        source_name: "SaveDataDelete",
+        arguments: 1,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveGetParam,
+        nid: "XgvSuIdnMlw",
+        source_name: "SaveDataGetParam",
+        arguments: 5,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSetParam,
+        nid: "85zul--eGXs",
+        source_name: "SaveDataSetParam",
+        arguments: 4,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveLoadIcon,
+        nid: "cGjO3wM3V28",
+        source_name: "SaveDataLoadIcon",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSaveIcon,
+        nid: "c88Yy54Mx0w",
+        source_name: "SaveDataSaveIcon",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSaveIconByPath,
+        nid: "Z7z6HXWORJY",
+        source_name: "SaveDataSaveIconByPath",
+        arguments: 2,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveBackup,
+        nid: "z1JA8-iJt3k",
+        source_name: "SaveDataBackup",
+        arguments: 1,
+        module: "SaveData",
+        library: "SaveData",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveTransferringMount,
+        nid: "WAzWTZm1H+I",
+        source_name: "SaveDataTransferringMount",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveTransferringMount,
+        nid: "RjMlsR8EXrw",
+        source_name: "SaveDataTransferringMount",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveMount3,
+        nid: "ZP4e7rlzOUk",
+        source_name: "SaveDataMount3",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveUmount2,
+        nid: "uW4vfTwMQVo",
+        source_name: "SaveDataUmount2",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveGetMountInfo,
+        nid: "65VH0Qaaz6s",
+        source_name: "SaveDataGetMountInfo",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDirNameSearch,
+        nid: "dyIhnXq-0SM",
+        source_name: "SaveDataDirNameSearch",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDirNameSearch,
+        nid: "X4MYzukPc3g",
+        source_name: "SaveDataDirNameSearch",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDelete,
+        nid: "S1GkePI17zQ",
+        source_name: "SaveDataDelete",
+        arguments: 1,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveGetParam,
+        nid: "XgvSuIdnMlw",
+        source_name: "SaveDataGetParam",
+        arguments: 5,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSetParam,
+        nid: "85zul--eGXs",
+        source_name: "SaveDataSetParam",
+        arguments: 4,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveLoadIcon,
+        nid: "cGjO3wM3V28",
+        source_name: "SaveDataLoadIcon",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSaveIcon,
+        nid: "c88Yy54Mx0w",
+        source_name: "SaveDataSaveIcon",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveSaveIconByPath,
+        nid: "Z7z6HXWORJY",
+        source_name: "SaveDataSaveIconByPath",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveBackup,
+        nid: "z1JA8-iJt3k",
+        source_name: "SaveDataBackup",
+        arguments: 1,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::SaveDirNameSearch,
+        nid: "PHnuI4LhuRk",
+        source_name: "SaveDataDirNameSearch",
+        arguments: 2,
+        module: "SaveData_native",
+        library: "SaveData_native",
+        ..BASE_REGISTRATIONS[0]
+    },
+];
+const SAVE_FILE_REGISTRATIONS: &[Registration] = &[
+    Registration {
+        service: Service::Pwrite,
+        nid: "nKWi-N2HBV4",
+        source_name: "KernelPwrite",
+        arguments: 4,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Fsync,
+        nid: "fTx66l5iWIA",
+        source_name: "KernelFsync",
+        arguments: 1,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Mkdir,
+        nid: "1-LFLmRFxxM",
+        source_name: "KernelMkdir",
+        arguments: 2,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Rmdir,
+        nid: "naInUjYt3so",
+        source_name: "KernelRmdir",
+        arguments: 1,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Rename,
+        nid: "52NcYU9+lEo",
+        source_name: "KernelRename",
+        arguments: 2,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Unlink,
+        nid: "AUXVxWeJU-A",
+        source_name: "KernelUnlink",
+        arguments: 1,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::Unlink,
+        nid: "VAzswvTOCzI",
+        source_name: "KernelUnlink",
+        arguments: 1,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixPwrite,
+        nid: "C2kJ-byS5rM",
+        source_name: "pwrite",
+        arguments: 4,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixFtruncate,
+        nid: "ih4CD9-gghM",
+        source_name: "ftruncate",
+        arguments: 2,
+        library: "Posix",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixFtruncate,
+        nid: "ih4CD9-gghM",
+        source_name: "ftruncate",
+        arguments: 2,
+        library: "libScePosix",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixMkdir,
+        nid: "JGMio+21L4c",
+        source_name: "mkdir",
+        arguments: 2,
+        library: "libkernel",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixMkdir,
+        nid: "JGMio+21L4c",
+        source_name: "mkdir",
+        arguments: 2,
+        library: "Posix",
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::PosixMkdir,
+        nid: "JGMio+21L4c",
+        source_name: "mkdir",
+        arguments: 2,
+        library: "libScePosix",
+        ..BASE_REGISTRATIONS[0]
+    },
+];

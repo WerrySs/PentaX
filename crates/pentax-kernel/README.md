@@ -278,7 +278,7 @@ evidence of a durable backup or a saved game.
 The preallocated queue retains the newest twenty 104-byte events. Reception ignores
 the source diagnostic parameter and atomically writes the full front event before
 consuming it; faults preserve the event, and an empty queue leaves output unchanged
-with the source not-found code. Termination clears this queue without resetting
+with the source not-found code. With no live directory mounts, termination clears this queue without resetting
 the transaction counter. Save-memory Setup2/Get2/Set2/Sync retain actual data and
 metadata with source range/error ordering, four live entries and a 32MiB aggregate
 logical limit including double buffering. Setup loads existing data or initializes
@@ -287,18 +287,47 @@ zeros; optional results report the actual prior size. Get publishes its data,
 Set validates all five possible descriptors and stages updates before persisting
 and publishing RAM. Sync reports actual storage errors through its return value
 or a bounded type-three completion event. Termination releases retained memory.
-Mount APIs remain unfinished and must share this owner's busy/cleanup state.
+The directory mount family shares this owner's busy and cleanup state.
+
+TransferringMount opens real existing saves, and Mount3 creates or opens saves
+according to the reviewed source mode and block limits. Sixteen process-owned
+slots expose `/savedata0` through `/savedata15`; duplicate saves return busy before
+the full-table error. Mount results preserve the source's initial zero store and
+error ordering. New metadata is staged and flushed before publication; a failed
+final guest output or filesystem admission rolls back a newly created save.
+Umount2 removes its resolver entry while already-open file descriptors retain
+their owned files. Live mounts block termination and conflicting save-memory
+setup/sync/delete operations. Mount information reports the source's stored
+block count in both block fields, not measured host free space.
+
+Only mounted save capabilities allow file creation and writes. Read-only package
+roots retain their restrictions. Save writes, positional writes, directory creation,
+rename, removal and descriptor flush operate within the selected save capability;
+Fsync performs an actual host flush, and reading a write-only descriptor fails.
+Parameter/search operations retain the reviewed layouts, wildcard language and
+partial-output ordering. Icons use original bounded, real sidecar persistence
+where the upstream implementations are stubs. Backup completion events retain
+their source behavior and do not prove that a backup was made.
 
 Persistence requires an explicit existing dedicated per-title directory capability
 (`probe-entry --save-directory <host-directory>`), separate from read-only game
-data roots. An exclusive OS file lock prevents concurrent sessions. PentaX writes
+data roots. An explicit `--save-title-id` binds launcher-supplied title metadata;
+the older capability constructor uses `UNKNOWN`. An exclusive OS file lock
+prevents concurrent sessions. PentaX writes
 one bounded checksummed bundle per numeric user/slot using an exclusively created
 temporary, file flush and same-directory replacement before RAM publication.
 Failed preparation/write/replacement preserves the old RAM and bundle; corrupted
 bundles return the source broken-data code. This is an original PentaX format,
 not an automatic import of upstream saves; file flush/replacement does not promise
-recovery from every storage-device or power failure. No directory enumeration,
-guest-derived host paths or writes to the game directory are required. Independent
+recovery from every storage-device or power failure. Directory saves use a
+separate `directories/t<hex-title>/d<hex-name>` namespace, with a numeric user
+child only for the four source save-memory names. Lowercase hexadecimal encoding
+preserves case and trailing-dot distinctions without Windows name aliases.
+Lookup rejects symlinks and reparse points; Unix also checks occupied-directory
+device/inode identity. Search and recursive metadata/delete traversal are bounded.
+The checked bundle format is not exposed as upstream `rawmemory.dat`; existing
+upstream saves are never discovered, imported or migrated automatically.
+No ambient host path or write to the game directory is granted. Independent
 retained-memory, persistent-I/O, scratch, work and guest-transfer policies apply.
 The adapter explicitly admits the full 32MiB output plus metadata while preserving
 complete native permission and physical-alias checks before any copy.
@@ -1009,7 +1038,7 @@ This getter does not decode a complete firmware process-parameter ABI.
 | --- | --- | --- |
 | Direct memory | Bounded first-fit physical ranges, source alignment/search validation, alias-preserving direct maps across allocated pieces, and whole/partial release that withdraws every affected alias subrange | The unchecked source wrapper's unowned-release no-op, pools, GPU/backend effects or flag profiles unsupported by the adapter remain explicit failures |
 | Flexible memory | Explicit configured pool, zeroed mappings, source name/protection/alignment checks, fixed/no-overwrite profile, whole or subrange unmap/protect, and optional transactional range/protection query outputs | No replacement of existing fixed maps or unsupported compatibility/cache behavior; unmap retains the aligned 16 KiB admission profile |
-| Files | Explicit read-only capability mounts; open/close/read/pread/seek/stat/fstat/reachability, real positional host reads, separate logical descriptor cursors, 120-byte source FileStat codec | No ambient host-path fallback, writable/device/archive/socket service or directory pread. Actual directory roots expose bounded source-packed enumeration/read/seek/status; inventories remain explicit regular-file sets |
+| Files | Explicit read-only package capabilities and separate owned writable save mounts; checked file IO, separate logical descriptor cursors and source FileStat codec | No ambient host-path fallback, writable package root, device/archive/socket service or directory pread. Actual directory roots expose bounded source-packed enumeration/read/seek/status; inventories remain explicit regular-file sets |
 | Semaphores | Owned counts/attributes, FIFO/priority cooperative waits, reserved grants, deadlines/remaining time and signal/cancel/delete/poll | Blocking requires the runtime continuation interface; negative signal count and creation options remain unsupported |
 | Event flags | Owned patterns, AND/OR, clear-none/all/bits, transactional pattern/time outputs, cooperative waits and cancel/delete cohort drains | Poll during an active drain is typed Unsupported; raw calls cannot block; unknown source-abort mode encodings remain Unsupported |
 | Time | Real std realtime/timeval, source monotonic aliases with a runtime-owned epoch, native TSC/process counters and frequencies through the bound adapter, process microseconds from the same TSC epoch, bounded host sleeps and checked nanosleep | CPU-time clocks and clock resolution remain Unsupported. Positive nanosleep with a remainder output is Unsupported because this trait cannot preflight a future write before elapsed host time |

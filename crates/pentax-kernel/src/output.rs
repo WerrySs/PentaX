@@ -66,9 +66,17 @@ impl Kernel {
         if address == 0 && (!compatibility || length != 0) {
             return Err(Errno::Fault.into());
         }
+        if descriptor >= 3 {
+            return self.files.write_save_file(
+                crate::Service::Write,
+                args.0,
+                guest,
+                &mut self.budget,
+            );
+        }
         if !(0..=2).contains(&descriptor) || descriptor == 0 && !compatibility {
-            // Every ordinary descriptor admitted by FileState is read-only;
-            // no writable file or socket can be referenced by this runtime yet.
+            // Saved-directory descriptors use their separate access checks;
+            // this branch retains the original standard-stream rejection.
             return Err(Errno::BadFd.into());
         }
         let count = usize::try_from(length).map_err(|_| Failure::Limit("output transfer"))?;

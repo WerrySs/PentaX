@@ -202,6 +202,14 @@ jobs:
       - name: Test affine trace worker observation and cold-cache boundaries
         run: >-
           cargo test --locked -p pentax-worker --bin pentax-worker -- native_session::affine_trace:: native_session::plan_cache::affine_tests:: affine_pairs_observe_each_priority_quantum_and_pending_switch_without_mutation --test-threads=1
+      - name: Test finite register trace admission and retirement
+        run: >-
+          cargo test --locked -p pentax-platform --lib register_loop_trace_tests:: -- --test-threads=1
+      - name: Test original register loops and durable save mounts
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe -- kernel_results::native_register_loop:: kernel_results::save_directories:: --test-threads=1
       - name: Test actual affine trace worker memory and bridge counts
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

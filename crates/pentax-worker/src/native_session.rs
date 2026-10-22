@@ -257,7 +257,7 @@ impl NativeSessionProgress {
             self.kernel_handles,
         );
         format!(
-            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}{private}{console}{contexts}{causality}",
+            "{}{}{}\tlibc_builtin_attempted_memcpy={}\tlibc_builtin_attempted_memmove={}\tlibc_builtin_attempted_memset={}\tlibc_builtin_completed_memcpy={}\tlibc_builtin_completed_memmove={}\tlibc_builtin_completed_memset={}\tlibc_builtin_bound_entries={}\taffine_loop_entries={}\taffine_loop_iterations={}\tregister_loop_entries={}\tregister_loop_iterations={}{private}{console}{contexts}{causality}",
             self.progress_fields(),
             self.profile.final_sample_fields(),
             self.scheduling.protocol_fields(),
@@ -270,6 +270,8 @@ impl NativeSessionProgress {
             self.libc_builtin_bound_entries,
             self.dispatch.affine_loop_entries,
             self.dispatch.affine_loop_iterations,
+            self.dispatch.register_loop_entries,
+            self.dispatch.register_loop_iterations,
         )
     }
 
@@ -966,7 +968,8 @@ fn execute_epoch<'plan, 'image>(
             policy
                 .with_independent_memory()
                 .with_partial_window_splits()
-                .with_affine_loop_trace(),
+                .with_affine_loop_trace()
+                .with_register_loop_trace(),
             limits.block,
             &mut state.admission_work,
             limits.max_admission_work,
@@ -1178,7 +1181,8 @@ fn execute_epoch<'plan, 'image>(
                 stop
             } else {
                 let trace = block.affine_loop_trace();
-                let maximum_span = if trace.is_some() {
+                let register_trace = block.register_loop_trace();
+                let maximum_span = if trace.is_some() || register_trace.is_some() {
                     affine_trace::Boundaries {
                         blocks: engine.usage().blocks,
                         turn_remaining: state.scheduling.trace_turn_remaining(
@@ -1220,13 +1224,24 @@ fn execute_epoch<'plan, 'image>(
                 // ends before service work; the process-wide bridge guard excludes
                 // concurrent entry. The checked engine derives ordinary accesses
                 // from current state and validates their live bounds/permissions.
-                // A source-bound forward trace additionally admits both iterations
-                // and excludes writes aliasing consumed source. Its caller span
+                // A source-bound forward trace admits both iterations: memory
+                // traces exclude writes aliasing consumed source, and register
+                // traces contain no memory operands. Its caller span
                 // leaves scheduling, frame, progress and sample positions intact.
                 let result = unsafe {
                     if maximum_span == 2 {
                         if let Some(trace) = trace {
                             match engine.try_step_affine_loop_checked(
+                                &mut paused,
+                                &trace,
+                                maximum_span,
+                            ) {
+                                Ok(Some(stop)) => Ok(stop),
+                                Ok(None) => engine.step_checked(&mut paused, block),
+                                Err(error) => Err(error),
+                            }
+                        } else if let Some(trace) = register_trace {
+                            match engine.try_step_register_loop_checked(
                                 &mut paused,
                                 &trace,
                                 maximum_span,

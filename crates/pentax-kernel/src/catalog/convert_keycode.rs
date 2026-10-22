@@ -23,8 +23,8 @@ mod tests {
 
     #[test]
     fn keyboard_type_appends_one_exact_binding_without_scope_fallbacks() {
-        assert_eq!(REGISTRATIONS.len(), 1326);
-        assert_eq!(&REGISTRATIONS[1325..], &CONVERT_KEYCODE_REGISTRATIONS);
+        assert_eq!(REGISTRATIONS.len(), 1369);
+        assert_eq!(&REGISTRATIONS[1325..1326], &CONVERT_KEYCODE_REGISTRATIONS);
         assert_eq!(
             Service::ConvertKeycodeGetImeKeyboardType as usize,
             Service::PadSetLightBar as usize + 1

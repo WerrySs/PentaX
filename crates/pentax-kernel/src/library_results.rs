@@ -16,7 +16,7 @@ fn error_domain(service: Service) -> Option<ErrorDomain> {
     use Service::*;
     match service {
         // fileSystem.h: these return int64_t and promote negative source ints.
-        Read | Write | Pread | Lseek => Some(ErrorDomain::KernelInt64),
+        Read | Write | Pread | Pwrite | Lseek => Some(ErrorDomain::KernelInt64),
         // fileSystem.h, memory.h, semaphore.h, eventFlag.h and pthread.h:
         // these exact registered functions return int, not a POSIX -1/errno.
         CreateEqueue
@@ -43,6 +43,12 @@ fn error_domain(service: Service) -> Option<ErrorDomain> {
         | Open
         | Close
         | Fstat
+        | Ftruncate
+        | Fsync
+        | Mkdir
+        | Rmdir
+        | Rename
+        | Unlink
         | Stat
         | CheckReachability
         | Getdirentries

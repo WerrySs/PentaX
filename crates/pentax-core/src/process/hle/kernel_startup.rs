@@ -850,13 +850,23 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         &mut self,
         directory: std::fs::File,
     ) -> Result<(), KernelStartupError> {
+        self.configure_save_storage_for_title(directory, "UNKNOWN")
+    }
+
+    /// Bind an explicit title identity inside the selected save capability.
+    /// This never discovers another title's storage outside that directory.
+    pub fn configure_save_storage_for_title(
+        &mut self,
+        directory: std::fs::File,
+        title: &str,
+    ) -> Result<(), KernelStartupError> {
         if self.native_service_requests != 0 {
             return Err(KernelStartupError::InvalidProvider(
                 "late save storage binding",
             ));
         }
-        let storage =
-            pentax_kernel::SaveStorage::directory(directory).map_err(KernelStartupError::Kernel)?;
+        let storage = pentax_kernel::SaveStorage::directory_for_title(directory, title)
+            .map_err(KernelStartupError::Kernel)?;
         self.kernel
             .configure_save_storage(storage)
             .map_err(KernelStartupError::Kernel)

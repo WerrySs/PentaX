@@ -149,6 +149,10 @@ pub struct NativeDispatchUsage {
     pub affine_loop_entries: u64,
     /// Logical iterations retired with a validated private one/two marker.
     pub affine_loop_iterations: u64,
+    /// Successful register-only finite trace entries, separate from memory traces.
+    pub register_loop_entries: u64,
+    /// Actual logical register-loop iterations completed by those entries.
+    pub register_loop_iterations: u64,
     /// Successfully attested and sealed native slot publications.
     pub cache_publications: u64,
     /// Exact byte/tail/cell matches in a previously published executable slot.
@@ -444,6 +448,8 @@ mod cache_hints;
 mod libc_builtin;
 #[path = "prepared/native_context.rs"]
 mod native_context;
+#[path = "prepared/register_trace.rs"]
+mod register_trace;
 pub use libc_builtin::NativeLibcBuiltin;
 #[path = "prepared/cpu_identification.rs"]
 mod cpu_identification;

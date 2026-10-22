@@ -28,6 +28,13 @@ fn direct_library_errno_widths_are_source_values_and_raw_invoke_stays_typed() {
         (Service::Read, [0; 6], 0xffff_ffff_8002_0001),
         (Service::Pread, [3, 0, 8, 0, 0, 0], 0xffff_ffff_8002_000e),
         (Service::Lseek, [0; 6], 0xffff_ffff_8002_0009),
+        (Service::Pwrite, [0; 6], 0xffff_ffff_8002_0001),
+        (Service::Ftruncate, [0; 6], 0x8002_0009),
+        (Service::Fsync, [0; 6], 0x8002_0009),
+        (Service::Mkdir, [0; 6], 0x8002_0016),
+        (Service::Rmdir, [0; 6], 0x8002_0016),
+        (Service::Rename, [0; 6], 0x8002_0016),
+        (Service::Unlink, [0; 6], 0x8002_0016),
         (Service::AllocateDirect, [0; 6], 0x8002_0016),
         (Service::ClockGettime, [3, ARG, 0, 0, 0, 0], 0x8002_0016),
         (Service::Gettimeofday, [0; 6], 0x8002_000e),
@@ -43,7 +50,7 @@ fn direct_library_errno_widths_are_source_values_and_raw_invoke_stays_typed() {
             "{service:?}"
         );
     }
-    assert_eq!(kernel.usage().attempts, 24);
+    assert_eq!(kernel.usage().attempts, 38);
     assert_eq!(kernel.usage().handles_live, 0);
     assert_eq!(guest.effects, 0);
 }

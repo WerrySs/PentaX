@@ -307,19 +307,40 @@ fn stop_after_seconds(args: &[OsString]) -> Result<Option<u32>, ()> {
     Ok(Some(seconds))
 }
 
+fn save_title_id(args: &[OsString]) -> Result<Option<pentax_config::TitleId>, ()> {
+    let mut values = args
+        .chunks_exact(2)
+        .filter(|pair| pair[0] == "--save-title-id");
+    let Some(pair) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some()
+        || !args
+            .chunks_exact(2)
+            .any(|argument| argument[0] == "--save-directory")
+    {
+        return Err(());
+    }
+    pentax_config::TitleId::new(pair[1].to_str().ok_or(())?)
+        .map(Some)
+        .map_err(|_| ())
+}
+
 pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
+    save_title_id(args).map_err(|()| "one valid --save-title-id requires --save-directory")?;
     stop_after_seconds(args).map_err(
         |()| "one --stop-after-seconds from 1 through 3600 requires the interactive profile",
     )?;
     if args.is_empty()
         || !args.len().is_multiple_of(2)
-        || args.len() / 2 > 125 + 256 + 11
+        || args.len() / 2 > 125 + 256 + 12
         || args
             .chunks_exact(2)
             .filter(|pair| {
                 pair[0] != "--data-file"
                     && pair[0] != "--config"
                     && pair[0] != "--save-directory"
+                    && pair[0] != "--save-title-id"
                     && pair[0] != "--physical-backing-directory"
                     && pair[0] != "--data-directory"
                     && pair[0] != "--memory-profile"
@@ -343,6 +364,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
             pair[0] != "--image"
                 && pair[0] != "--config"
                 && pair[0] != "--save-directory"
+                && pair[0] != "--save-title-id"
                 && pair[0] != "--physical-backing-directory"
                 && pair[0] != "--preload-libc"
                 && pair[0] != "--preload-libc-as"
@@ -423,7 +445,7 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
                 .any(|pair| pair[0] == "--preload-libc" || pair[0] == "--preload-libc-as"))
     {
         return Err(
-            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup|interactive] [--present-window yes|no] [--stop-after-seconds <1..3600, interactive only>] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--libc-memory-builtins off|checked] [--private-samples <fresh-file>] [--private-thread-states <fresh-file>] [--private-console <fresh-file>] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>]; first image is primary".into(),
+            "use probe-entry --image <path> [--memory-profile compact|runtime] [--physical-backing-directory <host-directory>] [--execution-profile probe|startup|extended-startup|long-startup|interactive] [--present-window yes|no] [--stop-after-seconds <1..3600, interactive only>] [--preload-libc <path> | --preload-libc-as <guest-path>=<host-path>] [--libc-memory-builtins off|checked] [--private-samples <fresh-file>] [--private-thread-states <fresh-file>] [--private-console <fresh-file>] [--image <path> ...] [--module-file <guest-path>=<host-path> ...] [--data-file <guest-path>=<host-path> ...] [--data-directory <guest-mount>=<host-directory> ...] [--save-directory <host-directory>] [--save-title-id <PPSAddddd>]; first image is primary".into(),
         );
     }
     if args
@@ -571,6 +593,54 @@ pub(super) fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn save_title_is_explicit_single_and_requires_its_directory_capability() {
+        let args = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| OsString::from(*value))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            save_title_id(&args(&["--image", "unused-original"])),
+            Ok(None)
+        );
+        let selected = args(&[
+            "--image",
+            "unused-original",
+            "--save-directory",
+            "unused-save",
+            "--save-title-id",
+            "PPSA12345",
+        ]);
+        assert_eq!(
+            save_title_id(&selected).unwrap().unwrap().as_str(),
+            "PPSA12345"
+        );
+        for invalid in [
+            "",
+            "../PPSA12345",
+            "PPSA1234",
+            "PPSA123456",
+            "ppsa12345",
+            "PPSA1234X",
+        ] {
+            assert!(
+                save_title_id(&args(&[
+                    "--save-directory",
+                    "unused-save",
+                    "--save-title-id",
+                    invalid
+                ]))
+                .is_err()
+            );
+        }
+        assert!(save_title_id(&args(&["--save-title-id", "PPSA12345"])).is_err());
+        let mut duplicate = selected;
+        duplicate.extend(["--save-title-id".into(), "PPSA12345".into()]);
+        assert!(save_title_id(&duplicate).is_err());
+    }
+
     #[test]
     fn observation_duration_is_single_bounded_decimal_and_interactive_only() {
         let arguments = |profile: Option<&str>, values: &[&str]| {

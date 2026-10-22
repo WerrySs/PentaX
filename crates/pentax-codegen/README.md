@@ -158,7 +158,7 @@ VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
 VMOVAPS/UPS/APD/UPD in both opcode directions and VAND/ANDN/OR/XOR PS/PD
 at both widths. The six approximate reciprocal forms additionally cover
 VRCPPS/VRSQRTPS at 128/256 bits and VRCPSS/VRSQRTSS at 128 bits.
-Every operand must be a same-width XMM0–15 or YMM0–15. This request alone excludes
+Every operand must be a same-width XMM0–15 or YMM0â€“15. This request alone excludes
 memory encodings, GPR transfers, scalar floating-point operations beyond those
 two estimate forms, other floating-point operations,
 vector-state control and EVEX. Existing legacy SSE2 admission is unchanged.
@@ -241,7 +241,7 @@ fallback for register arithmetic too. No guest CPUID or control authority grows.
 `with_native_packed_float_memory()` separately requests only the twelve VEX
 ADDPS/PD, SUBPS/PD and MULPS/PD reads at 128/256 bits. It requires the full-YMM
 request as well as declared and independently admitted actual AVX. Exactly three
-operands are accepted: same-width XMM0–15/YMM0–15 destination and logical source,
+operands are accepted: same-width XMM0–15/YMM0â€“15 destination and logical source,
 then one ordinary 64-bit memory operand of exactly 16/32 bytes. Source order and
 the existing masked MXCSR profile remain unchanged. Segment overrides, addr32
 (including displacement-only absolute SIB), VSIB, writes and other vector
@@ -604,3 +604,15 @@ published crate archive does not include that license file. The archive's
 `lazy_static` 1.5.1 dependency offers
 MIT OR Apache-2.0 licensing; see its packaged license files. No upstream
 implementation or guest instruction fixture is copied into this crate.
+
+Optional register-loop traces are a separate positive policy request. They
+retain an opaque source-bound product for at most two executions of an already
+admitted memory-free body ending in a conditional self-backedge. Only a forward
+internal branch and two private exits are emitted; ordinary block bytes and
+admission stay unchanged. Register aliases execute on actual preceding hardware
+results rather than a predicted second state. Memory, atomics, stack operands,
+privileged instructions and integer division are refused. A runtime still must
+prove current source, owner, CPU/vector mode, stack, both targets, cache bytes and
+all quotas before entry, and bound the logical span at every scheduling, frame,
+progress, sample and observation deadline. This is not general block chaining or
+an asserted improvement in commercial game performance.

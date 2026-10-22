@@ -76,6 +76,9 @@ mod affine_tests;
 #[path = "plan_cache/observation_tests.rs"]
 mod observation_tests;
 #[cfg(test)]
+#[path = "plan_cache/register_tests.rs"]
+mod register_tests;
+#[cfg(test)]
 #[path = "plan_cache/tests.rs"]
 mod tests;
 #[cfg(test)]
@@ -208,6 +211,22 @@ impl<'view, 'plan, 'image> PlanCache<'view, 'plan, 'image> {
                     .is_some_and(|left| reserved <= left)
             {
                 let spent = plan.prepare_affine_loop_trace(
+                    &self.limits,
+                    reserved,
+                    self.max_bytes.min(self.limits.max_allocation_bytes),
+                );
+                // The checked exclusive reservation above guarantees this
+                // original monotonic commit cannot refuse after preparation.
+                charge(work, spent, work_limit, "admission work")?;
+            }
+            if plan.retained_allocation_bytes() <= self.max_bytes
+                && let Some(reserved) = plan.register_loop_trace_work_bound(&self.limits)
+                && work_limit
+                    .checked_sub(*work)
+                    .and_then(|left| left.checked_sub(SLOTS as u64))
+                    .is_some_and(|left| reserved <= left)
+            {
+                let spent = plan.prepare_register_loop_trace(
                     &self.limits,
                     reserved,
                     self.max_bytes.min(self.limits.max_allocation_bytes),

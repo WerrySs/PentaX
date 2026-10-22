@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2021 InoriRus
-// Modified 2026 for PentaX: complete flat graphics submission admission.
+// Modified 2026 for PentaX: complete owned graphics submission admission.
 // Source: pinned agc.cpp submit_command_buffer and graphicsRun.cpp Submit;
 // draw/state contracts are documented by pentax-gpu/src/graphics/README.md.
 
@@ -26,7 +26,7 @@ impl Driver {
     ) -> Result<u64, Failure> {
         self.submit_graphics_with_context(memory, ranges, None, None)
     }
-    /// Snapshot and plan every root stream before executing any draw. The
+    /// Snapshot and plan every root and nested stream before executing any draw. The
     /// source has one graphics processor, independent of its 56 ACB queues.
     /// Unknown reset registers remain unknown, rather than invented defaults.
     pub(super) fn submit_graphics_with_context(
@@ -72,149 +72,147 @@ impl Driver {
         if count > commands.max_buffers {
             return Err(Failure::Limit);
         }
-        // Both bytes and descriptor storage are admitted before allocation or
-        // copying. Capacity is checked again against the actual allocator result.
-        let mut total = 0;
-        for range in ranges
-            .iter()
-            .filter(|range| range.address != 0 && range.size != 0)
-        {
-            total = add(total, range.size, commands.max_command_bytes as u64)?;
-        }
-        let next_bytes = add(
-            self.usage.command_bytes,
-            total,
-            self.limits.max_command_bytes,
-        )?;
-        let next_buffers = add(
-            self.usage.command_buffers,
-            count as u64,
-            self.limits.max_command_buffers,
-        )?;
-        let metadata = count
-            .checked_mul(
-                size_of::<Vec<u8>>() + size_of::<&[u8]>() + size_of::<compute::CommandRange>(),
+        // The GPU capture admits the entire root/IB closure against the
+        // remaining session bytes and buffers before any command effect.
+        commands.max_command_bytes = commands.max_command_bytes.min(
+            usize::try_from(
+                self.limits
+                    .max_command_bytes
+                    .saturating_sub(self.usage.command_bytes),
             )
-            .and_then(|bytes| {
-                // The caller retains its already-admitted range vector while
-                // this helper runs; its capacity is bounded by max_batch_buffers.
-                (self.limits.max_batch_buffers as usize)
-                    .checked_mul(size_of::<NativeRange>())
-                    .and_then(|ranges| bytes.checked_add(ranges))
-            })
+            .unwrap_or(usize::MAX),
+        );
+        commands.max_buffers = commands.max_buffers.min(
+            usize::try_from(
+                self.limits
+                    .max_command_buffers
+                    .saturating_sub(self.usage.command_buffers),
+            )
+            .unwrap_or(usize::MAX),
+        );
+        if count > commands.max_buffers {
+            return Err(Failure::Limit);
+        }
+        // The caller's admitted NativeRange vector coexists with capture and
+        // planning. The temporary root descriptors coexist with capture only.
+        let caller_bytes = (self.limits.max_batch_buffers as usize)
+            .checked_mul(size_of::<NativeRange>())
             .ok_or(Failure::Limit)?;
-        let mut held = host_add(
-            metadata,
-            usize::try_from(total).map_err(|_| Failure::Limit)?,
-            command_host_bytes,
-        )?;
+        let metadata = count
+            .checked_mul(size_of::<compute::CommandRange>())
+            .and_then(|bytes| bytes.checked_add(caller_bytes))
+            .ok_or(Failure::Limit)?;
+        let mut held = host_add(0, metadata, command_host_bytes)?;
         self.usage.preparation_work = add(
             self.usage.preparation_work,
-            total.checked_add(metadata as u64).ok_or(Failure::Limit)?,
+            metadata as u64,
             self.limits.max_preparation_work,
         )?;
-        self.usage.command_bytes = next_bytes;
-        self.usage.command_buffers = next_buffers;
-        let mut snapshots = Vec::<Vec<u8>>::new();
-        let mut sources = Vec::<compute::CommandRange>::new();
-        let mut buffers = Vec::<&[u8]>::new();
-        snapshots
+        let mut roots = Vec::<compute::CommandRange>::new();
+        roots
             .try_reserve_exact(count)
             .map_err(|_| Failure::Allocation)?;
-        sources
-            .try_reserve_exact(count)
-            .map_err(|_| Failure::Allocation)?;
-        buffers
-            .try_reserve_exact(count)
-            .map_err(|_| Failure::Allocation)?;
-        for (capacity, size) in [
-            (snapshots.capacity(), size_of::<Vec<u8>>()),
-            (sources.capacity(), size_of::<compute::CommandRange>()),
-            (buffers.capacity(), size_of::<&[u8]>()),
-        ] {
-            held = host_add(
-                held,
-                capacity
-                    .checked_sub(count)
-                    .and_then(|n| n.checked_mul(size))
-                    .ok_or(Failure::Limit)?,
-                command_host_bytes,
-            )?;
-        }
+        held = host_add(
+            held,
+            roots
+                .capacity()
+                .checked_sub(count)
+                .and_then(|n| n.checked_mul(size_of::<compute::CommandRange>()))
+                .ok_or(Failure::Limit)?,
+            command_host_bytes,
+        )?;
         for range in ranges
             .iter()
             .filter(|range| range.address != 0 && range.size != 0)
         {
-            let size = usize::try_from(range.size).map_err(|_| Failure::Limit)?;
-            let mut bytes = Vec::new();
-            bytes
-                .try_reserve_exact(size)
-                .map_err(|_| Failure::Allocation)?;
-            held = host_add(
-                held,
-                bytes.capacity().checked_sub(size).ok_or(Failure::Limit)?,
-                command_host_bytes,
-            )?;
-            bytes.resize(size, 0);
-            memory
-                .read_gpu(range.address, &mut bytes)
-                .map_err(|_| Failure::Memory)?;
-            snapshots.push(bytes);
-            sources.push(compute::CommandRange {
+            roots.push(compute::CommandRange {
                 address: range.address,
                 size: range.size,
             });
         }
-        for bytes in &snapshots {
-            buffers.push(bytes);
-        }
-        commands.max_host_bytes = commands
+        let mut capture_limits = commands;
+        capture_limits.max_host_bytes = capture_limits
             .max_host_bytes
             .min(command_host_bytes.checked_sub(held).ok_or(Failure::Limit)?);
-        commands.max_work = commands.max_work.min(
+        capture_limits.max_work = capture_limits.max_work.min(
             self.limits
                 .max_preparation_work
                 .saturating_sub(self.usage.preparation_work),
         );
+        let captured_attempt = draw::CapturedCommands::capture_attempt(
+            &roots,
+            &super::super::Memory(memory),
+            &capture_limits,
+        );
+        // A refused nested capture has already read/parsed an admitted prefix.
+        // Preserve its attempted usage before returning the causal failure;
+        // retrying malformed input cannot reset cumulative session budgets.
+        let capture = match &captured_attempt {
+            Ok(captured) => captured.usage(),
+            Err(failure) => failure.usage,
+        };
+        self.usage.command_bytes = add(
+            self.usage.command_bytes,
+            capture.command_bytes as u64,
+            self.limits.max_command_bytes,
+        )?;
+        self.usage.command_buffers = add(
+            self.usage.command_buffers,
+            capture.captured_buffers as u64,
+            self.limits.max_command_buffers,
+        )?;
+        self.usage.indirect_buffers = self
+            .usage
+            .indirect_buffers
+            .checked_add(capture.indirect_buffers as u64)
+            .ok_or(Failure::Limit)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            capture.work,
+            self.limits.max_preparation_work,
+        )?;
+        let mut captured = captured_attempt.map_err(|failure| match failure.error {
+            draw::Error::Memory(_) => Failure::Memory,
+            error => Failure::GraphicsPreparation(error),
+        })?;
+        drop(roots);
+        // Capture storage and the returned plan coexist during preparation.
+        // Its bounded peak includes immutable expanded bytes and provenance;
+        // planning receives only the remaining independent host/work envelope.
+        let planning_held = host_add(caller_bytes, capture.host_bytes, command_host_bytes)?;
+        commands.max_host_bytes = commands
+            .max_host_bytes
+            .checked_sub(capture.host_bytes)
+            .ok_or(Failure::Limit)?
+            .min(
+                command_host_bytes
+                    .checked_sub(planning_held)
+                    .ok_or(Failure::Limit)?,
+            );
+        commands.max_work = commands
+            .max_work
+            .checked_sub(capture.work)
+            .ok_or(Failure::Limit)?
+            .min(
+                self.limits
+                    .max_preparation_work
+                    .saturating_sub(self.usage.preparation_work),
+            );
         let initial = if self.frame.reset_before_graphics {
             draw::GraphicsState::empty()
         } else {
             self.graphics
         };
-        self.usage.preparation_work = add(
-            self.usage.preparation_work,
-            total,
-            self.limits.max_preparation_work,
-        )?;
-        commands.max_work = commands.max_work.min(
-            self.limits
-                .max_preparation_work
-                .saturating_sub(self.usage.preparation_work),
-        );
-        let mut ordered = false;
-        for (buffer, bytes) in buffers.iter().enumerate() {
-            ordered |= pentax_gpu::contains_indirect_registers(&[bytes]).map_err(|error| {
-                Failure::GraphicsPreparation(match error {
-                    compute::Error::Packet { dword, reason } => draw::Error::Packet {
-                        buffer,
-                        dword,
-                        reason,
-                    },
-                    compute::Error::Limit(reason) => draw::Error::Limit(reason),
-                    compute::Error::Allocation => draw::Error::Allocation,
-                    compute::Error::Unsupported(reason) => draw::Error::Unsupported(reason),
-                    _ => draw::Error::Unsupported("graphics packet classification"),
-                })
-            })?;
-        }
-        let mut plan = if ordered {
+        let mut plan = if captured.contains_arrays() {
             GraphicsCommands::Ordered(
-                draw::OrderedCommands::prepare(&buffers, &sources, initial, &commands)
+                captured
+                    .prepare_ordered(initial, &commands)
                     .map_err(Failure::GraphicsPreparation)?,
             )
         } else {
             GraphicsCommands::Static {
-                plan: draw::plan_commands(&buffers, initial, &commands)
+                plan: captured
+                    .plan(initial, &commands)
                     .map_err(Failure::GraphicsPreparation)?,
                 action: 0,
             }
@@ -224,10 +222,10 @@ impl Driver {
             plan.usage().work,
             self.limits.max_preparation_work,
         )?;
-        // The plan owns its state snapshots. Guest bytes are not retained as a
-        // replay cache; all requested command bytes are freshly fetched per call.
-        drop(buffers);
-        drop(snapshots);
+        // Moving the complete captured source ranges allocates nothing. Static
+        // execution keeps them for write exclusions; ordered execution owns
+        // its independent ranges, including dynamically resolved arrays.
+        let sources = captured.into_command_ranges();
         let retained = plan
             .usage()
             .host_bytes
@@ -474,6 +472,9 @@ fn host_add(held: usize, count: usize, maximum: usize) -> Result<usize, Failure>
         .ok_or(Failure::Limit)
 }
 
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "graphics_indirect_tests.rs"]
+mod indirect_tests;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "graphics_tests.rs"]
 mod tests;

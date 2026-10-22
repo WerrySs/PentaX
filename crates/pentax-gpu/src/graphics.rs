@@ -15,12 +15,16 @@ use pentax_shader_compiler::CompiledShader;
 use std::fmt;
 
 mod commands;
+mod indirect;
+pub use indirect::{CaptureFailure, CaptureUsage, CapturedCommands};
 mod ordered;
 pub use ordered::{OrderedCommands, OrderedStep};
 mod linkage;
 mod prepare;
 mod state;
-pub use commands::{Action, CommandLimits, CommandPlan, CommandUsage, Draw, Flip, plan_commands};
+pub use commands::{
+    Action, CommandLimits, CommandLocation, CommandPlan, CommandUsage, Draw, Flip, plan_commands,
+};
 pub use linkage::{ShaderInterfaces, validate_shader_interfaces};
 pub use prepare::prepare_draw;
 pub use prepare::prepare_draw_with_target;
@@ -31,6 +35,15 @@ pub enum Error {
     Limit(&'static str),
     Allocation,
     Memory(MemoryError),
+    SourceMemory {
+        address: u64,
+        error: MemoryError,
+    },
+    SourcePacket {
+        address: u64,
+        dword: usize,
+        reason: &'static str,
+    },
     Packet {
         buffer: usize,
         dword: usize,

@@ -105,6 +105,14 @@ pub struct CommandPlan {
     memory: Vec<MemoryAction>,
     final_state: GraphicsState,
     usage: CommandUsage,
+    origins: Vec<super::indirect::Origin>,
+}
+
+/// Original command location. This carries no memory or execution authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandLocation {
+    pub address: u64,
+    pub dword: usize,
 }
 impl fmt::Debug for CommandPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -115,6 +123,44 @@ impl fmt::Debug for CommandPlan {
     }
 }
 impl CommandPlan {
+    pub(super) fn provenance_bytes(&self) -> usize {
+        self.origins.capacity() * size_of::<super::indirect::Origin>()
+    }
+    pub(super) fn retain_origins(
+        &mut self,
+        origins: Vec<super::indirect::Origin>,
+    ) -> Result<(), Error> {
+        let bytes = origins
+            .capacity()
+            .checked_mul(size_of::<super::indirect::Origin>())
+            .ok_or(Error::Limit("graphics provenance capacity"))?;
+        self.usage.host_bytes = self
+            .usage
+            .host_bytes
+            .checked_add(bytes)
+            .ok_or(Error::Limit("graphics provenance capacity"))?;
+        self.origins = origins;
+        Ok(())
+    }
+    pub fn command_location(&self, expanded_dword: usize) -> Option<CommandLocation> {
+        let at = expanded_dword.checked_mul(4)?;
+        let index = self
+            .origins
+            .partition_point(|origin| origin.at <= at)
+            .checked_sub(1)?;
+        let origin = self.origins.get(index)?;
+        if !origin.emitted || (at - origin.at) / 4 >= origin.words {
+            return None;
+        }
+        Some(CommandLocation {
+            address: origin.address,
+            dword: origin.dword + (at - origin.at) / 4,
+        })
+    }
+    pub(super) fn source_usage(&mut self, command_bytes: usize, packets: u64) {
+        self.usage.command_bytes = command_bytes;
+        self.usage.packets = packets;
+    }
     pub fn draws(&self) -> &[Draw] {
         &self.draws
     }
@@ -534,6 +580,7 @@ pub fn plan_commands(
         memory,
         final_state: state,
         usage,
+        origins: Vec::new(),
     })
 }
 

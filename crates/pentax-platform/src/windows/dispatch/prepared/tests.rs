@@ -113,6 +113,8 @@ mod packed_vectors;
 mod permute_vectors;
 #[path = "tests/precision_convert.rs"]
 mod precision_convert;
+#[path = "tests/register_loop_trace.rs"]
+mod register_loop_trace_tests;
 #[path = "tests/scalar_elements.rs"]
 mod scalar_elements;
 #[path = "tests/scalar_vectors.rs"]

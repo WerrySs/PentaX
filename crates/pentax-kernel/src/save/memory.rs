@@ -17,6 +17,7 @@ const INVALID_USER: u64 = 0x809f_0011;
 const NOT_READY: u64 = 0x809f_0012;
 const LIMITATION: u64 = 0x809f_0017;
 
+#[derive(Debug)]
 pub(super) enum Error {
     Code(u64),
     Policy(Failure),
@@ -81,6 +82,23 @@ fn range(descriptor: &[u8], length: usize) -> Result<(u64, usize, usize), Error>
     Ok((buffer, offset as usize, size as usize))
 }
 impl SaveMemory {
+    pub(super) fn storage(&self) -> Option<&SaveStorage> {
+        self.storage.as_ref()
+    }
+    pub(super) fn contains_directory(
+        &self,
+        key: &super::directories::SaveKey,
+        current: Option<[u8; 10]>,
+    ) -> bool {
+        let (Some(slot), Some(user)) = (key.memory_slot(), key.user) else {
+            return false;
+        };
+        current == Some(key.title)
+            && self
+                .entries
+                .iter()
+                .any(|entry| entry.user == user && entry.slot == slot)
+    }
     pub(super) fn new() -> Result<Self, Failure> {
         let mut entries = Vec::new();
         entries
@@ -110,8 +128,9 @@ impl SaveMemory {
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
         events: &mut VecDeque<[u8; EVENT_BYTES]>,
+        directories: &super::directories::DirectoryState,
     ) -> Result<u64, Failure> {
-        match self.dispatch(service, args, guest, budget, events) {
+        match self.dispatch(service, args, guest, budget, events, directories) {
             Ok(value) | Err(Error::Code(value)) => Ok(value),
             Err(Error::Policy(error)) => Err(error),
         }
@@ -123,15 +142,16 @@ impl SaveMemory {
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
         events: &mut VecDeque<[u8; EVENT_BYTES]>,
+        directories: &super::directories::DirectoryState,
     ) -> Result<u64, Error> {
         if args.0[0] == 0 {
             return Err(Error::Code(PARAMETER));
         }
         match service {
-            Service::SaveMemorySetup => self.setup(args, guest, budget),
+            Service::SaveMemorySetup => self.setup(args, guest, budget, directories),
             Service::SaveMemoryGet => self.get(args.0[0], guest, budget),
             Service::SaveMemorySet => self.set(args.0[0], guest, budget),
-            Service::SaveMemorySync => self.sync(args.0[0], guest, budget, events),
+            Service::SaveMemorySync => self.sync(args.0[0], guest, budget, events, directories),
             _ => Err(Failure::Unsupported("save memory service").into()),
         }
     }
@@ -140,6 +160,7 @@ impl SaveMemory {
         args: CallArgs,
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
+        directories: &super::directories::DirectoryState,
     ) -> Result<u64, Error> {
         let input = read::<44>(guest, budget, args.0[0])?;
         let option = u32_at(&input, 0);
@@ -151,6 +172,13 @@ impl SaveMemory {
         }
         if user < 0 {
             return Err(Error::Code(INVALID_USER));
+        }
+        if self
+            .storage
+            .as_ref()
+            .is_some_and(|storage| directories.memory_busy(storage.current_title(), user, slot))
+        {
+            return Err(Error::Code(BUSY));
         }
         if self
             .entries
@@ -336,6 +364,7 @@ impl SaveMemory {
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
         events: &mut VecDeque<[u8; EVENT_BYTES]>,
+        directories: &super::directories::DirectoryState,
     ) -> Result<u64, Error> {
         let input = read::<12>(guest, budget, address)?;
         let user = u32_at(&input, 0) as i32;
@@ -348,6 +377,13 @@ impl SaveMemory {
             return Err(Error::Code(INVALID_USER));
         }
         let entry = &self.entries[self.index(user, slot)?];
+        if self
+            .storage
+            .as_ref()
+            .is_some_and(|storage| directories.memory_busy(storage.current_title(), user, slot))
+        {
+            return Err(Error::Code(BUSY));
+        }
         let mut event = [0; EVENT_BYTES];
         if option == 0 {
             budget.scratch(EVENT_BYTES)?;
@@ -355,7 +391,13 @@ impl SaveMemory {
             budget.record_scratch(EVENT_BYTES);
             event[..4].copy_from_slice(&3_u32.to_le_bytes());
             event[8..12].copy_from_slice(&user.to_le_bytes());
-            event[16..24].copy_from_slice(b"UNKNOWN\0");
+            event[16..26].copy_from_slice(
+                &self
+                    .storage
+                    .as_ref()
+                    .ok_or(Failure::Unsupported("bound save storage"))?
+                    .current_title(),
+            );
             let name = if slot == 0 {
                 "sce_sdmemory".to_owned()
             } else {
@@ -388,6 +430,7 @@ impl crate::Kernel {
     /// Bind an explicitly selected per-title writable directory before save use.
     pub fn configure_save_storage(&mut self, storage: SaveStorage) -> Result<(), Failure> {
         if self.save.initialized
+            || self.save.directories.live()
             || self.save.memory.storage.is_some()
             || !self.save.memory.entries.is_empty()
         {

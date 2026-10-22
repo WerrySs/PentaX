@@ -19,6 +19,7 @@ mod memory;
 mod model;
 mod plan;
 mod policy;
+mod register_loop_trace;
 mod source;
 #[cfg(test)]
 mod tests;
@@ -39,3 +40,4 @@ pub use memory::{
 pub use model::*;
 pub use plan::plan_block;
 pub use policy::{CpuFeatures, TranslationPolicy};
+pub use register_loop_trace::RegisterLoopTrace;

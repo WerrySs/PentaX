@@ -24,7 +24,7 @@ mod tests {
 
     #[test]
     fn privacy_ws1_appends_one_exact_two_argument_qualified_binding() {
-        assert_eq!(REGISTRATIONS.len(), 1326);
+        assert_eq!(REGISTRATIONS.len(), 1369);
         assert_eq!(&REGISTRATIONS[1316..1317], &USER_PRIVACY_REGISTRATIONS);
         assert_eq!(
             Service::UserGetPlatformPrivacyWs1 as usize,

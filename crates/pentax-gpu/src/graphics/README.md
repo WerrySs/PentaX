@@ -7,8 +7,9 @@ graphics `SET_CONTEXT_REG`, `SET_SH_REG`, `SET_UCONFIG_REG`, `NUM_INSTANCES`,
 packets described below. Each draw retains its
 own known register snapshot and real vertex/instance counts. State-only streams
 are supported. Zero-count draws consume their command position without shader
-reads or a render product. Predicates, use-opaque counts, indirect buffers,
-indirect draws, unported barriers and unknown registers are refused. Selected
+reads or a render product. This flat API refuses indirect buffers; the separate
+bounded capture API below expands ordinary IB calls/chains. Predicates,
+use-opaque counts, indirect draws, unported barriers and unknown registers are refused. Selected
 ordered memory operations are described below.
 No reset register value is invented. Final state is published by a queue owner
 only after execution; a failed plan returns no executable prefix.
@@ -271,3 +272,46 @@ Array scratch, immutable command snapshots, range metadata and actions share
 the existing host/work ceilings. Unknown registers and future writes aliasing
 captured command/array sources are refused. No Vulkan execution or commercial
 first frame is implied by a CPU command plan or shader-preparation fixture.
+
+`CapturedCommands::capture` snapshots complete root and ordinary indirect
+command buffers through the caller's read-only paused-memory adapter, before
+planning or effects. Its exact four-DWORD `INDIRECT_BUFFER` profile retains
+the full64-bit address,20-bit DWORD count and bit20 call/chain semantics. A call
+returns to its parent continuation; a chain replaces its current frame and
+discards that frame's continuation. Zero counts read no indirect backing.
+Conditional IBs, predicates and unknown nonzero control profiles are refused.
+
+Capture uses an iterative frame stack and active call/chain lineage. A repeated
+source after a prior call returns remains legal; an active cycle is refused.
+The unchanged `max_buffers` bounds aggregate root/IB captures, call depth and
+chain lineage. All raw snapshot bytes, expanded packets, provenance, transient
+allocation capacities and copy work remain within the existing byte/packet/
+host/work ceilings. Source ranges include whole captured buffers, including
+tails skipped by a chain, for later physical write/source exclusion.
+
+The sealed capture feeds the existing static or ordered-array planner.
+Register arrays remain execution-time reads after prior writes/draws; expanding
+an IB does not prefetch arrays or invent shader/target state. Packet admission
+errors map to original root buffer/dword or nested source address/dword.
+The existing origin allocation moves into the successful plan, without another
+allocation; read-only location accessors retain original packet provenance
+through ordered execution and late failures. A capture prepares only one plan.
+Adjacent emitted packets from the same source coalesce only when original and
+expanded DWORD spans are both contiguous; every IB and source boundary remains
+explicit. This retains exact location translation without per-packet overhead
+for the existing full-size flat NOP profile.
+`CaptureUsage` is charged separately from plan usage, so a caller must subtract
+the capture's host/work bounds while preparing the plan. Moved provenance
+capacity transfers from capture host usage to plan host usage; work is not
+charged a second time for the move. Both products own their retained data.
+`into_command_ranges` moves complete source metadata
+without another allocation. Original CPU fixtures cover call/chain order,
+fresh immutable snapshots, address/permission refusal, cycles and aggregate
+caps, and nested WriteData/array/draw ordering; source coverage is not a
+commercial compatibility or first-frame claim.
+
+Stateful submission uses `capture_attempt`, whose refusal retains all admitted
+attempt byte/buffer/work counters with the causal error. These counters are
+committed to the session on both success and failure before returning; repeated
+malformed or unreadable nested buffers cannot reset the attempted prefix's
+budget. The failure contains no command product or executable prefix.

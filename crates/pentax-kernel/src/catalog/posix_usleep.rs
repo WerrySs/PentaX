@@ -24,7 +24,7 @@ mod tests {
 
     #[test]
     fn usleep_appends_only_the_demonstrated_posix_library_identity() {
-        assert_eq!(REGISTRATIONS.len(), 1326);
+        assert_eq!(REGISTRATIONS.len(), 1369);
         assert_eq!(&REGISTRATIONS[1315..1316], &POSIX_USLEEP_REGISTRATIONS);
         assert_eq!(
             resolve("libkernel", (1, 1), "libScePosix", 1, "QcteRwbsnV0"),

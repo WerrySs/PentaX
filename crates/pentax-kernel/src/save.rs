@@ -11,7 +11,9 @@ const PARAMETER: u64 = 0x809f_0000;
 const NOT_FOUND: u64 = 0x809f_0008;
 const EVENT_BYTES: usize = 104;
 const EVENT_COUNT: usize = 20;
+mod directories;
 mod memory;
+mod metadata;
 mod storage;
 pub use storage::SaveStorage;
 
@@ -20,6 +22,7 @@ pub(crate) struct SaveState {
     next_transaction: u32,
     events: VecDeque<[u8; EVENT_BYTES]>,
     memory: memory::SaveMemory,
+    directories: directories::DirectoryState,
 }
 impl SaveState {
     pub(crate) fn new() -> Result<Self, Failure> {
@@ -32,6 +35,7 @@ impl SaveState {
             next_transaction: 1,
             events,
             memory: memory::SaveMemory::new()?,
+            directories: directories::DirectoryState::new(),
         })
     }
     pub(crate) fn invoke(
@@ -51,8 +55,11 @@ impl SaveState {
                 Ok(0)
             }
             SaveTerminate => {
-                // Drop actual retained memory after complete cleanup admission.
-                // Future mount APIs must share this owner's busy/cleanup check.
+                if self.directories.live() {
+                    return Ok(directories::BUSY);
+                }
+                // A live directory mount blocks cleanup before events, memory,
+                // initialization or the filesystem namespace can be changed.
                 budget.work(self.events.len() as u64)?;
                 self.memory.clear(budget)?;
                 self.events.clear();
@@ -125,11 +132,38 @@ impl SaveState {
                 self.events.pop_front();
                 Ok(0)
             }
-            SaveMemorySetup | SaveMemoryGet | SaveMemorySet | SaveMemorySync => {
-                self.memory
-                    .invoke(service, args, guest, budget, &mut self.events)
-            }
+            SaveMemorySetup | SaveMemoryGet | SaveMemorySet | SaveMemorySync => self.memory.invoke(
+                service,
+                args,
+                guest,
+                budget,
+                &mut self.events,
+                &self.directories,
+            ),
             _ => Err(Failure::Unsupported("save state service")),
+        }
+    }
+    pub(crate) fn invoke_directory(
+        &mut self,
+        service: Service,
+        args: CallArgs,
+        guest: &mut impl GuestAccess,
+        budget: &mut Budget,
+        files: &mut crate::filesystem::FileState,
+    ) -> Result<u64, Failure> {
+        budget.work(1)?;
+        match self.directories.invoke(
+            service,
+            args,
+            guest,
+            budget,
+            self.memory.storage(),
+            &self.memory,
+            &mut self.events,
+            files,
+        ) {
+            Ok(value) | Err(memory::Error::Code(value)) => Ok(value),
+            Err(memory::Error::Policy(error)) => Err(error),
         }
     }
 }

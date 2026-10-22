@@ -1149,6 +1149,21 @@ impl Kernel {
             }
             AmprMeasureReadFile => ampr::AmprState::measure_read(args),
             CommonDialogInitialize | CommonDialogIsUsed => self.dialogs.invoke(service),
+            SaveTransferringMount
+            | SaveMount3
+            | SaveUmount2
+            | SaveGetMountInfo
+            | SaveDirNameSearch
+            | SaveDelete
+            | SaveGetParam
+            | SaveSetParam
+            | SaveLoadIcon
+            | SaveSaveIcon
+            | SaveSaveIconByPath
+            | SaveBackup => {
+                self.save
+                    .invoke_directory(service, args, guest, &mut self.budget, &mut self.files)
+            }
             SaveInitialize
             | SaveTerminate
             | SaveCreateTransaction
@@ -1323,6 +1338,9 @@ impl Kernel {
             | PosixClose
             | PosixRead
             | PosixPread
+            | PosixPwrite
+            | PosixFtruncate
+            | PosixMkdir
             | PosixLseek
             | PosixFstat
             | PosixStat
@@ -1422,7 +1440,8 @@ impl Kernel {
                 self.calendar(service, args, guest)
             }
             Open | Close | Read | Pread | Lseek | Fstat | Stat | CheckReachability
-            | Getdirentries | Getdents => self.files.invoke(service, args, guest, &mut self.budget),
+            | Getdirentries | Getdents | Pwrite | Ftruncate | Fsync | Mkdir | Rmdir | Rename
+            | Unlink => self.files.invoke(service, args, guest, &mut self.budget),
             AllocateDirect
             | AllocateMainDirect
             | ReleaseDirect

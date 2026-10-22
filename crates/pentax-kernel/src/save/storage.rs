@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 //! Explicit directory capability and atomic PentaX save bundles.
-//! File names contain only validated numeric user/slot keys, never guest paths.
+//! Bundle names use numeric user/slot keys; directory names encode validated
+//! title/save components within the selected capability, never ambient paths.
 
 use super::memory::{Error, PARAM_BYTES, SOURCE_MAX};
 use crate::Failure;
@@ -11,6 +12,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod directories;
 mod trophy;
 
 const MAGIC: &[u8; 8] = b"PXSAVE1\0";
@@ -20,6 +22,7 @@ static TEMP_ID: AtomicU64 = AtomicU64::new(1);
 pub struct SaveStorage {
     directory: Dir,
     _lock: File,
+    title: [u8; 10],
     #[cfg(test)]
     failure: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -27,6 +30,16 @@ impl SaveStorage {
     /// Select an existing dedicated per-title directory. Exclusive OS locking
     /// prevents concurrent PentaX sessions from overwriting each other's saves.
     pub fn directory(directory: File) -> Result<Self, Failure> {
+        Self::directory_for_title(directory, "UNKNOWN")
+    }
+    /// Bind an owner-supplied title identity to this existing directory capability.
+    /// The identity names only a private encoded child namespace, never a host path.
+    pub fn directory_for_title(directory: File, title: &str) -> Result<Self, Failure> {
+        if title.len() >= 10 || !super::directories::valid_component(title.as_bytes()) {
+            return Err(Failure::Unsupported("save title identity"));
+        }
+        let mut title_bytes = [0; 10];
+        title_bytes[..title.len()].copy_from_slice(title.as_bytes());
         let directory = Dir::reopen_dir(&directory)
             .map_err(|_| Failure::Unsupported("save directory capability"))?;
         let lock = directory
@@ -41,6 +54,7 @@ impl SaveStorage {
         Ok(Self {
             directory,
             _lock: lock,
+            title: title_bytes,
             #[cfg(test)]
             failure: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })

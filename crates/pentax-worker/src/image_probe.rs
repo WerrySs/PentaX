@@ -308,6 +308,7 @@ struct Intake {
     private_thread_states: Option<File>,
     private_console: Option<File>,
     save_directory: Option<File>,
+    save_title_id: Option<pentax_config::TitleId>,
     backing_directory: Option<backing::BackingDirectory>,
     system: pentax_kernel::SystemConfig,
     user: pentax_kernel::UserConfig,
@@ -326,13 +327,14 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             > limits
                 .max_images
                 .saturating_add(limits.startup.kernel.max_handles)
-                .saturating_add(11)
+                .saturating_add(12)
         || args
             .chunks_exact(2)
             .filter(|pair| {
                 pair[0] != "--data-file"
                     && pair[0] != "--config"
                     && pair[0] != "--save-directory"
+                    && pair[0] != "--save-title-id"
                     && pair[0] != "--physical-backing-directory"
                     && pair[0] != "--data-directory"
                     && pair[0] != "--memory-profile"
@@ -356,6 +358,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
             pair[0] != "--image"
                 && pair[0] != "--config"
                 && pair[0] != "--save-directory"
+                && pair[0] != "--save-title-id"
                 && pair[0] != "--physical-backing-directory"
                 && pair[0] != "--preload-libc"
                 && pair[0] != "--preload-libc-as"
@@ -459,8 +462,18 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
     {
         return Err(ProbeError::Input("image-arguments"));
     }
+    if args
+        .chunks_exact(2)
+        .any(|pair| pair[0] == "--save-title-id")
+        && !args
+            .chunks_exact(2)
+            .any(|pair| pair[0] == "--save-directory")
+    {
+        return Err(ProbeError::Input("save-title-without-directory"));
+    }
     let mut system = pentax_kernel::SystemConfig::default();
     let mut save_directory = None;
+    let mut save_title_id = None;
     let mut backing_directory = None;
     let mut user = pentax_kernel::UserConfig::default();
     let mut opened = Vec::new();
@@ -476,6 +489,17 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         .try_reserve_exact(args.len() / 2)
         .map_err(|_| ProbeError::Input("input-allocation"))?;
     for pair in args.chunks_exact(2) {
+        if pair[0] == "--save-title-id" {
+            if save_title_id.is_some() {
+                return Err(ProbeError::Input("duplicate-save-title-id"));
+            }
+            let title = pair[1].to_str().ok_or(ProbeError::Input("save-title-id"))?;
+            save_title_id = Some(
+                pentax_config::TitleId::new(title)
+                    .map_err(|_| ProbeError::Input("save-title-id"))?,
+            );
+            continue;
+        }
         if pair[0] == "--physical-backing-directory" {
             backing_directory = Some(backing::BackingDirectory::open(args, &pair[1])?);
             continue;
@@ -685,6 +709,7 @@ fn intake(args: &[OsString], limits: &NativeImageLimits) -> Result<Intake, Probe
         private_thread_states,
         private_console,
         save_directory,
+        save_title_id,
         backing_directory,
         system,
         user,
@@ -790,7 +815,11 @@ pub(super) fn run(args: &[OsString]) -> ProbeOutcome {
             |session, layout| {
                 unavailable_functions = Some(layout.unavailable_functions);
                 if let Some(directory) = intake.save_directory.take() {
-                    session.configure_save_storage(directory)?;
+                    if let Some(title) = intake.save_title_id.as_ref() {
+                        session.configure_save_storage_for_title(directory, title.as_str())?;
+                    } else {
+                        session.configure_save_storage(directory)?;
+                    }
                 }
                 if let (Some(module), Some(path)) =
                     (intake.startup_libc, intake.module_binding.as_deref())

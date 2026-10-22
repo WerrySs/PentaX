@@ -130,6 +130,18 @@ impl Kernel {
                     true,
                 )
             }
+            PosixPwrite => (
+                self.files.invoke(Pwrite, args, guest, &mut self.budget),
+                true,
+            ),
+            PosixFtruncate => (
+                self.files.invoke(Ftruncate, args, guest, &mut self.budget),
+                false,
+            ),
+            PosixMkdir => (
+                self.files.invoke(Mkdir, args, guest, &mut self.budget),
+                false,
+            ),
             PosixPread => (
                 self.files.invoke(Pread, args, guest, &mut self.budget),
                 true,
