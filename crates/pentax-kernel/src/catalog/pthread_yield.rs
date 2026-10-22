@@ -23,7 +23,10 @@ mod tests {
 
     #[test]
     fn observed_yield_has_one_exact_zero_argument_binding_without_unobserved_aliases() {
-        assert_eq!(REGISTRATIONS.last(), Some(&PTHREAD_YIELD_REGISTRATIONS[0]));
+        assert_eq!(
+            REGISTRATIONS.get(1395),
+            Some(&PTHREAD_YIELD_REGISTRATIONS[0])
+        );
         assert_eq!(
             REGISTRATIONS
                 .iter()
