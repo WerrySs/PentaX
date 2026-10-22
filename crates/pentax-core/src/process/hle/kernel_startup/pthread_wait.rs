@@ -273,6 +273,28 @@ impl PreparedNativeKernelStartup<'_, '_> {
         .map_err(KernelStartupError::Kernel)
     }
 
+    /// Eligibility only: no wait, guest output or ticket is consumed here.
+    pub fn thread_wait_has_vblank(
+        &mut self,
+        pending: &PendingThreadWait,
+    ) -> Result<bool, KernelStartupError> {
+        if pending.owner != self.pause()?.owner_id() {
+            return Err(KernelStartupError::InvalidProvider("thread wait owner"));
+        }
+        let Ticket::EventQueue(ticket) = &pending.ticket else {
+            return Ok(false);
+        };
+        let generations = std::array::from_fn(|slot| {
+            self.graphics
+                .as_ref()
+                .and_then(|driver| driver.video_port(slot as i32 + 1))
+                .map(|port| port.generation)
+        });
+        self.kernel
+            .event_queue_wait_has_vblank(ticket, generations)
+            .map_err(KernelStartupError::Kernel)
+    }
+
     pub fn thread_wait_delay(
         &mut self,
         pending: &PendingThreadWait,

@@ -23,7 +23,10 @@ mod tests {
 
     #[test]
     fn observed_posix_detach_appends_one_exact_errno_domain_binding() {
-        assert_eq!(REGISTRATIONS.last(), Some(&PTHREAD_DETACH_REGISTRATIONS[0]));
+        assert_eq!(
+            REGISTRATIONS.get(1390),
+            Some(&PTHREAD_DETACH_REGISTRATIONS[0])
+        );
         assert_eq!(
             REGISTRATIONS
                 .iter()

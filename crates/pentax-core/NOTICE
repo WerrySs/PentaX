@@ -517,3 +517,22 @@ PentaX resolves retained runtime lifecycle and registered owner handles before
 detachment. It protects accepted Join claims, preserves actual cleanup/return
 provenance, and retains bounded stacks/TLS/contexts until owner teardown.
 Original Rust state checks and native guest programs contain no commercial data.
+
+Module unwind-information adaptation: src/libs/libSysmodule.cpp and
+src/libs/libKernel.cpp, ModuleInfoForUnwind/KernelGetModuleInfoForUnwind,
+from WerrySs/KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+PentaX supplies checked current owned guest extents and table metadata instead
+of host Program pointers or guessed host-return boundaries. Existing provider
+authentication and work/guest-memory bounds remain required. Original fixtures
+validate real mappings and source-bound provider requests without guest execution.
+
+The vblank status and color-setting family additionally adapts the retained
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de,
+  src/graphics/presentation/videoOut.cpp/h and src/libs/libVideoOut.cpp.
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original MIT grant
+continue to apply. PentaX modifications2026: checked XMM0 argument transport,
+source four-byte gamma updates and NaN comparisons, owned40-byte status,
+per-open monotonic display epochs, atomic fixed-port rebasing, coalesced elapsed
+boundary publication and pre-pixels cooperative wait wakeup. Display periods do
+not establish actual presentation, host color correction or measured frame rate.

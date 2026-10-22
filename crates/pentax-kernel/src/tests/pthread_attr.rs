@@ -185,7 +185,7 @@ fn thread_attribute_outputs_and_lifetime_publish_atomically_and_reject_stale_or_
         );
         assert_eq!(guest.get(ARG + 32, 16), [0x55; 16]);
     }
-    for service in [ThreadAttrInit, MutexInit, RwlockAttrInit] {
+    for service in [MutexInit] {
         assert!(matches!(
             library(&mut owner, &mut guest, service, &[ARG]),
             Err(Failure::Unsupported(_))
@@ -245,6 +245,170 @@ fn thread_attribute_outputs_and_lifetime_publish_atomically_and_reject_stale_or_
         ),
         Err(Failure::Unsupported(_))
     ));
+}
+
+#[test]
+fn thread_attribute_init_overwrites_arbitrary_write_only_outputs_without_reading_them() {
+    for service in [ThreadAttrInit, PosixThreadAttrInit] {
+        let mut owner = kernel(Default::default());
+        let mut guest = TestGuest::new();
+        guest.regions[0].bytes.fill(0xa5);
+        guest.put(9, &u64::MAX.to_le_bytes());
+        guest.regions[0].protection = 2; // Writable, deliberately unreadable.
+        let bytes_read = owner.usage().bytes_read;
+        assert_eq!(library(&mut owner, &mut guest, service, &[ARG + 9]), Ok(0));
+        assert_eq!(owner.usage().bytes_read, bytes_read);
+        guest.regions[0].protection = 3;
+        let id = guest.u64(9);
+        let mut expected = vec![0xa5; PAGE as usize];
+        expected[9..17].copy_from_slice(&id.to_le_bytes());
+        assert_eq!(guest.regions[0].bytes, expected);
+        assert_eq!(guest.get(id, 64), [0; 64]);
+        assert_eq!(
+            library(
+                &mut owner,
+                &mut guest,
+                ThreadAttrGetStackSize,
+                &[ARG + 9, ARG + 32]
+            ),
+            Ok(0)
+        );
+        assert_eq!(guest.u64(32), 0x100000);
+        assert_eq!(
+            library(&mut owner, &mut guest, ThreadAttrDestroy, &[ARG + 9]),
+            Ok(0)
+        );
+        assert_eq!(owner.usage().handles_live, 0);
+    }
+}
+
+#[test]
+fn thread_attribute_init_preserves_old_attribute_and_other_kind_owners_through_copied_slots() {
+    for service in [ThreadAttrInit, PosixThreadAttrInit] {
+        let mut owner = kernel(Default::default());
+        let mut guest = TestGuest::new();
+        assert_eq!(library(&mut owner, &mut guest, service, &[ARG]), Ok(0));
+        let old = guest.u64(0);
+        guest.put(8, &old.to_le_bytes());
+        assert_eq!(
+            library(
+                &mut owner,
+                &mut guest,
+                ThreadAttrSetStackSize,
+                &[ARG, 2 * PAGE]
+            ),
+            Ok(0)
+        );
+        assert_eq!(library(&mut owner, &mut guest, service, &[ARG]), Ok(0));
+        assert_ne!(guest.u64(0), old);
+        assert_eq!(owner.usage().handles_live, 2);
+        for (slot, expected) in [(ARG, 0x100000), (ARG + 8, 2 * PAGE)] {
+            assert_eq!(
+                library(
+                    &mut owner,
+                    &mut guest,
+                    ThreadAttrGetStackSize,
+                    &[slot, ARG + 32]
+                ),
+                Ok(0)
+            );
+            assert_eq!(guest.u64(32), expected);
+        }
+        assert_eq!(
+            library(&mut owner, &mut guest, MutexAttrInit, &[ARG + 16]),
+            Ok(0)
+        );
+        let other = guest.u64(16);
+        guest.put(24, &other.to_le_bytes());
+        assert_eq!(library(&mut owner, &mut guest, service, &[ARG + 16]), Ok(0));
+        assert_ne!(guest.u64(16), other);
+        assert_eq!(owner.usage().handles_live, 4);
+        assert_eq!(guest.get(other, 64), [0; 64]);
+        assert_eq!(
+            library(&mut owner, &mut guest, MutexAttrDestroy, &[ARG + 24]),
+            Ok(0)
+        );
+        assert_eq!(guest.read(other, &mut [0]), Err(GuestError::Unmapped));
+        for slot in [ARG, ARG + 8, ARG + 16] {
+            assert_eq!(
+                library(&mut owner, &mut guest, ThreadAttrDestroy, &[slot]),
+                Ok(0)
+            );
+        }
+        assert_eq!(
+            (owner.usage().handles_live, owner.usage().mapped_bytes),
+            (0, 0)
+        );
+    }
+}
+
+#[test]
+fn thread_attribute_overwrite_refusals_preserve_the_old_slot_metadata_and_backing() {
+    for service in [ThreadAttrInit, PosixThreadAttrInit] {
+        for refusal in [0, 1, 2] {
+            let mut owner = kernel(Default::default());
+            let mut guest = TestGuest::new();
+            assert_eq!(library(&mut owner, &mut guest, service, &[ARG]), Ok(0));
+            let old = guest.u64(0);
+            assert_eq!(
+                library(
+                    &mut owner,
+                    &mut guest,
+                    ThreadAttrSetStackSize,
+                    &[ARG, 2 * PAGE]
+                ),
+                Ok(0)
+            );
+            let before = (
+                owner.usage().handles_live,
+                owner.usage().mapped_bytes,
+                guest.regions.len(),
+                guest.effects,
+            );
+            match refusal {
+                0 => guest.regions[0].protection = 1,
+                1 => guest.refuse = true,
+                _ => owner.budget.limits.max_handles = owner.usage().handles_live,
+            }
+            let expected = if refusal == 2 {
+                Failure::Limit("handles")
+            } else {
+                Failure::Guest(GuestError::WriteDenied)
+            };
+            assert_eq!(
+                library(&mut owner, &mut guest, service, &[ARG]),
+                Err(expected)
+            );
+            assert_eq!(
+                (
+                    owner.usage().handles_live,
+                    owner.usage().mapped_bytes,
+                    guest.regions.len(),
+                    guest.effects
+                ),
+                before
+            );
+            guest.regions[0].protection = 3;
+            guest.refuse = false;
+            assert_eq!(guest.u64(0), old);
+            assert_eq!(guest.get(old, 64), [0; 64]);
+            assert_eq!(
+                library(
+                    &mut owner,
+                    &mut guest,
+                    ThreadAttrGetStackSize,
+                    &[ARG, ARG + 32]
+                ),
+                Ok(0)
+            );
+            assert_eq!(guest.u64(32), 2 * PAGE);
+            assert_eq!(
+                library(&mut owner, &mut guest, ThreadAttrDestroy, &[ARG]),
+                Ok(0)
+            );
+            assert_eq!(owner.usage().handles_live, 0);
+        }
+    }
 }
 
 #[test]

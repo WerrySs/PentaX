@@ -273,6 +273,9 @@ impl MemoryState {
             Service::ConfiguredFlexibleMemorySize => {
                 self.configured_flexible_size(a[0], guest, budget)
             }
+            Service::AvailableFlexibleMemorySize => {
+                self.available_flexible_size(a[0], guest, budget)
+            }
             Service::AllocateDirect => self.allocate(
                 a[0] as i64,
                 a[1] as i64,

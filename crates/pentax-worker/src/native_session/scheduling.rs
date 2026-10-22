@@ -213,6 +213,25 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         Ok(())
     }
 
+    /// Complete an admitted source-void call and request the existing bounded
+    /// round-robin scan before the next guest block. With no eligible peer the
+    /// caller remains runnable; no host sleep or guest wait is introduced.
+    pub(super) fn yield_thread(
+        &mut self,
+        engine: &mut NativeBlockStepper<'_, '_, '_>,
+        token: PreSyscallToken,
+    ) -> Result<(), NativeSessionError> {
+        if engine.thread_index() != self.active || self.active_blocked() {
+            return Err(NativeSessionError::FixtureInvariant("thread yield phase"));
+        }
+        // The source has no integer return domain. Preserve unspecified RAX
+        // while the platform validates and completes this exact pending token.
+        let unspecified = engine.state().gpr[0];
+        engine.complete_syscall(token, unspecified)?;
+        self.force_switch = true;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn rotate(
         &mut self,
@@ -231,6 +250,9 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         {
             return Ok(true);
         }
+        // Materialize the owned display epoch before testing queue readiness.
+        // This also runs while every CPU is parked and before the first pixels.
+        let display_delay = session.graphics_video_poll_vblank()?;
         self.force_switch = false;
         self.last_switch = blocks;
         let mut next = None;
@@ -256,11 +278,18 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
             if self.threads[self.active].waiting.is_some() || self.threads[self.active].returned {
                 let mut earliest = None;
                 for thread in &self.threads {
-                    if let Some((pending, _)) = &thread.waiting
-                        && let Some(delay) = session.thread_wait_delay(pending)?
-                    {
-                        earliest =
-                            Some(earliest.map_or(delay, |old: std::time::Duration| old.min(delay)));
+                    if let Some((pending, _)) = &thread.waiting {
+                        let mut delay = session.thread_wait_delay(pending)?;
+                        if let Some(display) = display_delay
+                            && session.thread_wait_has_vblank(pending)?
+                        {
+                            delay = Some(delay.map_or(display, |old| old.min(display)));
+                        }
+                        if let Some(delay) = delay {
+                            earliest = Some(
+                                earliest.map_or(delay, |old: std::time::Duration| old.min(delay)),
+                            );
+                        }
                     }
                 }
                 if let Some((sleep, external_maximum)) = idle_slice(earliest, external) {

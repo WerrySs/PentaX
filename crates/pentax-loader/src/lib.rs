@@ -4,7 +4,8 @@
 //!
 //! Parsing exposes metadata and the initialized bytes of each load segment. It
 //! does not allocate guest memory, resolve imports, decrypt containers, or execute
-//! instructions. Section headers are intentionally outside this module's scope.
+//! instructions. Ordinary loading ignores section headers; the explicit bounded
+//! unwind-metadata query separately validates allocated `.eh_frame` sections.
 //!
 //! Layout and validation follow the ELF specification's
 //! [ELF header](https://gabi.xinuos.com/elf/02-eheader.html) and
@@ -24,8 +25,9 @@ pub use executable::{
     DynamicAddress, DynamicEntry, DynamicError, DynamicRegion, DynamicTable, ExecutableFormat,
     ExecutableImage, ExecutableMetadata, ExecutableView, HeaderDisposition, HeaderPurpose,
     MetadataPurpose, ProgramHeaderMetadata, RUNTIME_PAGE_SIZE, ResolvedPayload, RuntimeError,
-    RuntimeLoadPlan, SelfError, SelfMetadata, SelfSegmentMetadata, TlsTemplate, VirtualRange,
-    inspect_executable, open_executable, parse_dynamic, parse_executable,
+    RuntimeLoadPlan, SelfError, SelfMetadata, SelfSegmentMetadata, TlsTemplate, UnwindError,
+    UnwindMetadata, VirtualRange, inspect_executable, open_executable, parse_dynamic,
+    parse_executable,
 };
 
 const ELF_MAGIC: [u8; 4] = *b"\x7fELF";

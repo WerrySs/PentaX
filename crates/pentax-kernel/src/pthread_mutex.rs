@@ -188,7 +188,8 @@ impl MutexState {
                 if a[0] == 0 {
                     return Err(Failure::Unsupported("source-null pthread attribute slot"));
                 }
-                Self::new_slot(a[0], memory, guest, budget)?;
+                // Attribute initialization overwrites its output without
+                // inspecting old bytes; lock initialization keeps new_slot.
                 let id = memory.create_pthread_object(
                     PthreadObjectKind::Attribute,
                     a[0],

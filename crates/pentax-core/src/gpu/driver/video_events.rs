@@ -154,15 +154,13 @@ impl Driver {
         *completion = None;
         Ok(())
     }
-    pub(crate) fn video_observe_vblank(
-        &mut self,
+    pub(crate) fn video_preflight_vblank(
+        &self,
         memory: &PausedNativeMemory<'_>,
-        kernel: &mut pentax_kernel::Kernel,
         handle: i32,
         generation: u64,
         tick: u64,
-        tsc: u64,
-    ) -> Result<(), Failure> {
+    ) -> Result<usize, Failure> {
         if self.poisoned {
             return Err(Failure::Poisoned);
         }
@@ -179,20 +177,32 @@ impl Driver {
             .ok()
             .filter(|i| *i < 3)
             .ok_or(Failure::UnsupportedVideo)?;
-        let count = match self.video_ticks[slot] {
-            Some((old_generation, old_tick, count)) if old_generation == generation => {
-                if tick <= old_tick {
-                    return Err(Failure::UnsupportedVideo);
-                }
-                count.checked_add(tick - old_tick).ok_or(Failure::Limit)?
-            }
-            _ => 1,
-        };
-        kernel
-            .prepare_video_interrupt(handle, generation, VideoEventKind::Vblank, count, tsc)
-            .map_err(Failure::Kernel)?
-            .complete();
-        self.video_ticks[slot] = Some((generation, tick, count));
+        if self.video_ticks[slot].is_some_and(|(old_generation, old_tick)| {
+            old_generation == generation && tick <= old_tick
+        }) {
+            return Err(Failure::UnsupportedVideo);
+        }
+        Ok(slot)
+    }
+    pub(crate) fn video_observe_vblank(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        kernel: &mut pentax_kernel::Kernel,
+        handle: i32,
+        generation: u64,
+        tick: u64,
+        clock: pentax_kernel::DisplayClock,
+    ) -> Result<(), Failure> {
+        let slot = self.video_preflight_vblank(memory, handle, generation, tick)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            super::super::video::State::grid_work(),
+            self.limits.max_preparation_work,
+        )?;
+        self.video_materialize(memory, kernel, clock, None)?;
+        // Consumer tick numbers authenticate notification order only. Display
+        // periods come from the same grid as headless scheduling/query pumps.
+        self.video_ticks[slot] = Some((generation, tick));
         Ok(())
     }
 }

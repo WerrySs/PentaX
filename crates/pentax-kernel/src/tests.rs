@@ -51,6 +51,8 @@ mod save_memory;
 #[path = "tests/sysmodule.rs"]
 mod sysmodule;
 
+#[path = "tests/available_memory.rs"]
+mod available_memory;
 #[path = "tests/configured_memory.rs"]
 mod configured_memory;
 #[path = "tests/convert_keycode.rs"]
@@ -78,6 +80,8 @@ mod pthread_condition;
 mod pthread_condition_wait;
 #[path = "tests/pthread_mutex.rs"]
 mod pthread_mutex;
+#[path = "tests/pthread_output_init.rs"]
+mod pthread_output_init;
 #[path = "tests/pthread_rwlock.rs"]
 mod pthread_rwlock;
 #[path = "tests/pthread_semaphore.rs"]

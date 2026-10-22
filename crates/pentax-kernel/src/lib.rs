@@ -29,7 +29,9 @@ mod http2;
 mod ime;
 mod library_results;
 mod memory;
+mod module_unwind;
 mod mspace;
+pub use module_unwind::ModuleUnwindInfo;
 mod net_ctl;
 mod network;
 mod np;
@@ -51,6 +53,7 @@ mod pthread_mutex;
 mod pthread_once;
 mod pthread_rwlock;
 mod pthread_semaphore;
+mod pthread_yield;
 mod raw_input;
 mod rudp;
 mod runtime_data;
@@ -77,8 +80,8 @@ pub use catalog::{Registration, Service, resolve};
 pub use dialog::CommonDialogStatus;
 pub use entitlement::{LocalAddcont, LocalEntitlements};
 pub use event_queue::{
-    EventQueueWait, EventQueueWaitAction, GraphicsInterrupt, VideoClose, VideoEventKind,
-    VideoInterrupt,
+    EventQueueWait, EventQueueWaitAction, GraphicsInterrupt, VideoBoundary, VideoBoundaryBatch,
+    VideoClose, VideoEventKind, VideoInterrupt,
 };
 pub use fiber::{AdmittedFiberTransfer, FiberAction, FiberKey, FiberTransferKind};
 pub use filesystem::{ReadOnlyFile, ReadOnlyRoot};
@@ -102,7 +105,7 @@ pub use save::SaveStorage;
 pub use sync::{EventFlagWait, EventFlagWaitAction, SemaphoreWait, SemaphoreWaitAction};
 pub use thread_exit::{AdmittedThreadExitCallback, ThreadExitAction};
 pub use thread_priority::ThreadPriorityClass;
-pub use time::{ProcessClock, TimeWait, TimeWaitAction};
+pub use time::{DisplayClock, ProcessClock, TimeWait, TimeWaitAction};
 
 /// The six AMD64 SysV **library-call** integer register arguments, in order.
 ///
@@ -420,6 +423,12 @@ pub trait GuestAccess {
     fn module_symbol(&mut self, _handle: i32, _name: &str) -> Result<Option<u64>, Failure> {
         Err(Failure::Unsupported("image-bound module symbols"))
     }
+    /// Return metadata for a currently mapped, owned guest module containing
+    /// this address. None is known absence; no host-address boundary is valid.
+    /// The adapter precharges its metadata/page work and verifies live extents.
+    fn module_unwind_info(&mut self, _address: u64) -> Result<Option<ModuleUnwindInfo>, Failure> {
+        Err(Failure::Unsupported("image-bound module unwind metadata"))
+    }
     /// Retain one explicitly file-bound, already initialized module. The owner
     /// must validate the actual binding/lifecycle, write optional int32 zero and
     /// increment its real load count atomically. A refusal changes neither.
@@ -640,6 +649,11 @@ impl Kernel {
     /// Observe paired process ticks and microseconds from one validated sample
     /// in the guest services' existing epoch. Trusted callers pre-admit their
     /// operation; no HLE attempt, guest I/O or fresh work quota is consumed here.
+    /// Internal display consumer of the existing process counter authority.
+    pub fn display_clock(&mut self, guest: &impl GuestAccess) -> Result<DisplayClock, Failure> {
+        self.time.display_clock(guest)
+    }
+
     pub fn process_clock(&mut self, guest: &impl GuestAccess) -> Result<ProcessClock, Failure> {
         self.time.process_clock(guest)
     }
@@ -1457,6 +1471,7 @@ impl Kernel {
             | PthreadSemTimedWait | PthreadSemPost | PthreadSemGetValue => {
                 self.pthread_semaphore(service, args, guest)
             }
+            ModuleInfoForUnwind => module_unwind::invoke(args, guest, &mut self.budget),
             SysmoduleLoad | SysmoduleUnload | SysmoduleIsLoaded | SysmoduleLoadInternal => self
                 .sysmodules
                 .invoke(service, args, guest, &mut self.budget),
@@ -1471,6 +1486,7 @@ impl Kernel {
             | ReleaseDirect
             | DirectMemorySize
             | ConfiguredFlexibleMemorySize
+            | AvailableFlexibleMemorySize
             | MapDirect
             | MapFlexible
             | MapNamedFlexible
@@ -1530,6 +1546,7 @@ impl Kernel {
             | PosixPthreadDetach => {
                 Err(Failure::Unsupported("guest-thread execution and lifecycle"))
             }
+            PthreadYield => Err(Failure::Unsupported("cooperative guest-thread yield")),
             GetProcParam => guest.process_parameters(),
             Dlsym => {
                 let [handle, name, output, ..] = args.0;

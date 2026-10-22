@@ -146,3 +146,116 @@ fn output_quota_generation_and_close_refusals_do_not_consume_or_reorder_notifica
         Ok(0)
     );
 }
+
+#[test]
+fn elapsed_display_boundaries_coalesce_without_iteration_and_dropped_batch_has_no_effect() {
+    let (mut kernel, mut guest, queue) = setup();
+    kernel
+        .add_video_event(queue, 1, 9, VideoEventKind::Vblank, 27)
+        .unwrap();
+    let boundary = VideoBoundary {
+        handle: 1,
+        generation: 9,
+        count: 1_000_000,
+        tsc: 0x3456,
+        occurrences: 1_000_000,
+    };
+    {
+        let _uncommitted = kernel
+            .prepare_video_boundaries([Some(boundary), None, None])
+            .unwrap();
+    }
+    assert_eq!(poll(&mut kernel, &mut guest, queue), Ok(0x8002_003c));
+    kernel
+        .prepare_video_boundaries([Some(boundary), None, None])
+        .unwrap()
+        .complete();
+    assert_eq!(poll(&mut kernel, &mut guest, queue), Ok(0));
+    let event = guest.get(ARG + 512, 32);
+    assert_eq!(u64::from_le_bytes(event[..8].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(event[12..16].try_into().unwrap()), 15);
+    assert_eq!(
+        u64::from_le_bytes(event[16..24].try_into().unwrap()),
+        (1_000_000_u64 << 16) | 0xf456
+    );
+    assert_eq!(u64::from_le_bytes(event[24..].try_into().unwrap()), 27);
+    assert_eq!(poll(&mut kernel, &mut guest, queue), Ok(0x8002_003c));
+    kernel
+        .prepare_video_boundary_close([Some(boundary), None, None], Some((1, 9)))
+        .unwrap()
+        .complete();
+    assert_eq!(kernel.video_vblank_subscription_count(1, 9), 0);
+    assert_eq!(poll(&mut kernel, &mut guest, queue), Ok(0x8002_003c));
+}
+
+#[test]
+fn display_deadline_membership_requires_the_exact_waiter_queue_and_live_generation() {
+    let (mut kernel, mut guest, first) = setup();
+    guest.put(128, b"other-original-video-queue\0");
+    assert_eq!(
+        kernel.invoke_library(
+            Service::CreateEqueue,
+            CallArgs([ARG + 8, ARG + 128, 0, 0, 0, 0]),
+            &mut guest
+        ),
+        Ok(0)
+    );
+    let other = guest.u64(8);
+    kernel
+        .add_video_event(other, 1, 9, VideoEventKind::Vblank, 27)
+        .unwrap();
+    let args = CallArgs([first, ARG + 512, 1, ARG + 32, 0, 0]);
+    let EventQueueWaitAction::Waiting(ticket) =
+        kernel.begin_event_queue_wait(args, &mut guest).unwrap()
+    else {
+        panic!("inactive queue must park")
+    };
+    assert!(
+        !kernel
+            .event_queue_wait_has_vblank(&ticket, [Some(9), None, None])
+            .unwrap()
+    );
+    kernel
+        .add_video_event(first, 1, 9, VideoEventKind::Vblank, 27)
+        .unwrap();
+    assert!(
+        !kernel
+            .event_queue_wait_has_vblank(&ticket, [Some(10), None, None])
+            .unwrap()
+    );
+    assert!(
+        !kernel
+            .event_queue_wait_has_vblank(&ticket, [None, Some(9), None])
+            .unwrap()
+    );
+    assert!(
+        kernel
+            .event_queue_wait_has_vblank(&ticket, [Some(9), None, None])
+            .unwrap()
+    );
+    assert!(!kernel.event_queue_wait_ready(&ticket).unwrap());
+    kernel
+        .prepare_video_boundaries([
+            Some(VideoBoundary {
+                handle: 1,
+                generation: 9,
+                count: 1,
+                tsc: 1,
+                occurrences: 1,
+            }),
+            None,
+            None,
+        ])
+        .unwrap()
+        .complete();
+    assert!(kernel.event_queue_wait_ready(&ticket).unwrap());
+    assert_eq!(
+        kernel.complete_event_queue_wait(&ticket, &mut guest),
+        Ok(Some(0))
+    );
+    assert!(
+        kernel
+            .event_queue_wait_has_vblank(&ticket, [Some(9), None, None])
+            .is_err()
+    );
+}

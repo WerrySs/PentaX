@@ -671,6 +671,9 @@ pub enum Service {
     AprResolveFilepathsWithPrefixToIdsForEach,
     AprResolveFilepathsWithPrefixToIdsAndFileSizesForEach,
     PosixPthreadDetach,
+    AvailableFlexibleMemorySize,
+    ModuleInfoForUnwind,
+    PthreadYield,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1744,6 +1747,24 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < AVAILABLE_MEMORY_REGISTRATIONS.len() {
+        entries[output] = AVAILABLE_MEMORY_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
+    index = 0;
+    while index < MODULE_UNWIND_REGISTRATIONS.len() {
+        entries[output] = MODULE_UNWIND_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
+    index = 0;
+    while index < PTHREAD_YIELD_REGISTRATIONS.len() {
+        entries[output] = PTHREAD_YIELD_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1844,12 +1865,23 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + FIBER_EXECUTION_REGISTRATIONS.len()
             + APR_IMPORT_REGISTRATIONS.len()
             + PTHREAD_DETACH_REGISTRATIONS.len()
+            + AVAILABLE_MEMORY_REGISTRATIONS.len()
+            + MODULE_UNWIND_REGISTRATIONS.len()
+            + PTHREAD_YIELD_REGISTRATIONS.len()
     },
 >();
 
 #[path = "catalog/pthread_detach.rs"]
 mod pthread_detach;
 use pthread_detach::PTHREAD_DETACH_REGISTRATIONS;
+
+#[path = "catalog/available_memory.rs"]
+mod available_memory;
+use available_memory::AVAILABLE_MEMORY_REGISTRATIONS;
+
+#[path = "catalog/pthread_yield.rs"]
+mod pthread_yield;
+use pthread_yield::PTHREAD_YIELD_REGISTRATIONS;
 
 #[path = "catalog/font.rs"]
 mod font;
@@ -4725,6 +4757,36 @@ const SAVE_FILE_REGISTRATIONS: &[Registration] = &[
         arguments: 2,
         library: "libScePosix",
         ..BASE_REGISTRATIONS[0]
+    },
+];
+
+const MODULE_UNWIND_REGISTRATIONS: [Registration; 3] = [
+    Registration {
+        service: Service::ModuleInfoForUnwind,
+        nid: "RpQJJVKTiFM",
+        source_name: "KernelGetModuleInfoForUnwind",
+        arguments: 3,
+        ..BASE_REGISTRATIONS[0]
+    },
+    Registration {
+        service: Service::ModuleInfoForUnwind,
+        nid: "4fU5yvOkVG4",
+        source_name: "SysmoduleGetModuleInfoForUnwind",
+        arguments: 3,
+        module: "Sysmodule",
+        library: "Sysmodule",
+        module_version: (1, 1),
+        library_version: 1,
+    },
+    Registration {
+        service: Service::ModuleInfoForUnwind,
+        nid: "4fU5yvOkVG4",
+        source_name: "SysmoduleGetModuleInfoForUnwind",
+        arguments: 3,
+        module: "libSceSysmodule",
+        library: "libSceSysmodule",
+        module_version: (1, 1),
+        library_version: 1,
     },
 ];
 

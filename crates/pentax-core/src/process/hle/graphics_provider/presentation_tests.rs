@@ -16,8 +16,8 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"VideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 222);
-    assert_eq!(metadata.link().symbols().len(), 223);
+    assert_eq!(provider.function_count(), 225);
+    assert_eq!(metadata.link().symbols().len(), 226);
     for (index, nid) in [
         "HXzjK9yI30k",
         "-Ozn0F1AFRg",
@@ -60,4 +60,29 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
         (0x5058_476c, 0x7b0, Function::AgcDcbSetFlip)
     );
     assert!(SYMBOLS_AT + metadata.link().symbols().len() * 24 <= provider.image().len());
+}
+
+#[test]
+fn video_state_exports_append_only_three_exact_canonical_markers() {
+    let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+    for (offset, (nid, function)) in [
+        ("1FZBKy8HeNU", Function::VideoGetVblankStatus),
+        ("DYhhWbJSeRg", Function::VideoColorSettingsSetGamma),
+        ("pv9CI5VC+R0", Function::VideoAdjustColor),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let ordinal = 222 + offset;
+        assert_eq!(ENTRIES[ordinal], (nid, function, 3, 3));
+        assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 1);
+        let marker = provider.markers().nth(ordinal).unwrap();
+        assert_eq!(marker.function, function);
+        assert_eq!(marker.rva(), 0x100 + ordinal as u64 * 16);
+        assert_eq!(marker.id(), 0x5058_4701 + ordinal as u32);
+    }
+    assert_eq!(
+        provider.markers().nth(221).unwrap().function,
+        Function::AgcSetUcRegIndirectPatchAddRegisters
+    );
 }

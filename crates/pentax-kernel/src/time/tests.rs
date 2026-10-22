@@ -225,3 +225,41 @@ fn paired_process_clock_checks_both_samples_and_conversion_before_epoch_publicat
         assert_eq!(kernel.usage(), usage);
     }
 }
+
+#[test]
+fn display_sample_shares_process_epoch_and_refuses_changed_or_backward_counter() {
+    let clock = Clock {
+        ticks: Cell::new(100),
+        frequency: Cell::new(2_000_000),
+    };
+    let mut state = TimeState::new();
+    assert_eq!(
+        state.display_clock(&clock),
+        Ok(DisplayClock {
+            counter: 50,
+            microseconds: 25,
+            raw_ticks: 150,
+            frequency: 2_000_000
+        })
+    );
+    assert_eq!(state.process_time_counter(&clock), Ok(100));
+    assert_eq!(
+        state.display_clock(&clock),
+        Ok(DisplayClock {
+            counter: 150,
+            microseconds: 75,
+            raw_ticks: 250,
+            frequency: 2_000_000
+        })
+    );
+    assert_eq!(clock.ticks.get(), 300);
+    clock.frequency.set(3_000_000);
+    assert!(state.display_clock(&clock).is_err());
+    assert_eq!(state.counter_epoch.unwrap().ticks, 100);
+    clock.frequency.set(2_000_000);
+    clock.ticks.set(99);
+    assert!(state.display_clock(&clock).is_err());
+    assert_eq!(state.counter_epoch.unwrap().ticks, 100);
+    clock.ticks.set(400);
+    assert_eq!(state.display_clock(&clock).unwrap().counter, 300);
+}

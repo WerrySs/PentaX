@@ -4,7 +4,8 @@
 // Adapted from pinned graphics/presentation/videoOut.cpp; see NOTICE.
 
 //! Owned ports, registered surfaces and checked CPU flip snapshots. Actual
-//! consumer acknowledgement advances flip completion; no vblank clock is invented.
+//! consumer acknowledgement advances flip completion. Display periods use the
+//! independent owned monotonic grid; they are not presented-frame evidence.
 use super::driver::{Failure, Function};
 use pentax_platform::native_memory::{
     NativeMemoryWrite, NativeTransactionLimits, PausedNativeMemory,
@@ -14,6 +15,7 @@ mod buffers;
 pub use buffers::{Compression, PixelFormat, Surface};
 mod pixels;
 mod presentation;
+mod state;
 pub use pixels::{
     ImageLayout, PresentationLimits, SurfaceLayout, detile_32, retile_32, retile_32_into,
 };
@@ -21,6 +23,8 @@ pub use presentation::{
     FlipCompletion, FlipObservations, FlipSource, FlipStatus, FlipSubmission, FlipTicket, Frame,
     ReadyFrameMetadata,
 };
+pub(crate) use state::ClockedCall;
+pub use state::VblankStatus;
 
 const INVALID_VALUE: u64 = 0x8029_0001;
 const INVALID_ADDRESS: u64 = 0x8029_0002;
@@ -59,6 +63,8 @@ pub struct PortState {
     pub output_mode: u64,
     pub master_handle: Option<i32>,
     pub slave_count: u32,
+    /// Retained source color setting; not proof of host display correction.
+    pub gamma_bits: u32,
 }
 impl Default for PortState {
     fn default() -> Self {
@@ -68,14 +74,28 @@ impl Default for PortState {
             output_mode: 1,
             master_handle: None,
             slave_count: 0,
+            gamma_bits: 0x3f80_0000,
         }
     }
 }
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct Port {
     state: PortState,
     open: bool,
     buffers: buffers::Buffers,
+    vblank: VblankStatus,
+    grid: Option<state::DisplayGrid>,
+}
+impl Default for Port {
+    fn default() -> Self {
+        Self {
+            state: PortState::default(),
+            open: false,
+            buffers: Default::default(),
+            vblank: VblankStatus::default(),
+            grid: None,
+        }
+    }
 }
 #[derive(Default)]
 pub(crate) struct State {
@@ -177,9 +197,12 @@ impl State {
                 open: true,
                 state: PortState {
                     generation,
+                    gamma_bits: self.ports[slot].state.gamma_bits,
                     ..Default::default()
                 },
                 buffers: Default::default(),
+                vblank: VblankStatus::default(),
+                grid: None,
             };
             self.presentation.reset(slot);
             // The optional source parameter is ignored, never dereferenced.
@@ -258,9 +281,12 @@ impl State {
                     open: false,
                     state: PortState {
                         generation,
+                        gamma_bits: self.ports[slot].state.gamma_bits,
                         ..Default::default()
                     },
                     buffers: Default::default(),
+                    vblank: VblankStatus::default(),
+                    grid: None,
                 };
                 if let Some(i) = master_slot {
                     self.ports[i].state.slave_count -= 1;

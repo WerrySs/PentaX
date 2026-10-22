@@ -33,6 +33,8 @@ mod presentation;
 mod register_execution;
 #[path = "driver/video_events.rs"]
 mod video_events;
+#[path = "driver/video_state.rs"]
+mod video_state;
 pub(crate) type GraphicsClock =
     fn(&mut pentax_kernel::Kernel, &mut PausedNativeMemory<'_>) -> Result<u64, Failure>;
 
@@ -134,6 +136,9 @@ pub enum Function {
     AgcSetCxRegIndirectPatchAddRegisters,
     AgcSetShRegIndirectPatchAddRegisters,
     AgcSetUcRegIndirectPatchAddRegisters,
+    VideoGetVblankStatus,
+    VideoColorSettingsSetGamma,
+    VideoAdjustColor,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -262,7 +267,7 @@ pub(crate) struct Driver {
     frame: FrameState,
     video: super::video::State,
     consumer: Option<ConsumerBudget>,
-    video_ticks: [Option<(u64, u64, u64)>; 3],
+    video_ticks: [Option<(u64, u64)>; 3],
     defaults: Option<(pentax_platform::native_memory::NativeOwnerId, u64)>,
     shaders: super::shaders::State,
 }
@@ -444,6 +449,14 @@ impl Driver {
         }
         self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
         self.function_profile.record(function);
+        if matches!(
+            function,
+            Function::VideoGetVblankStatus
+                | Function::VideoColorSettingsSetGamma
+                | Function::VideoAdjustColor
+        ) {
+            return self.video_state_call(memory, function, args, None);
+        }
         if matches!(
             function,
             Function::VideoAddFlipEvent

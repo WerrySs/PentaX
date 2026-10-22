@@ -131,6 +131,15 @@ pub struct ProcessClock {
     pub microseconds: u64,
 }
 
+/// A single validated sample for the owned display grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplayClock {
+    pub counter: u64,
+    pub microseconds: u64,
+    pub raw_ticks: u64,
+    pub frequency: u64,
+}
+
 pub(crate) struct TimeState {
     epoch: Instant,
     counter_epoch: Option<TimeCounterSample>,
@@ -229,6 +238,34 @@ impl TimeState {
         Ok(ProcessClock {
             counter: elapsed,
             microseconds,
+        })
+    }
+
+    pub(crate) fn display_clock(
+        &mut self,
+        guest: &impl GuestAccess,
+    ) -> Result<DisplayClock, Failure> {
+        let sample = counter_sample(guest)?;
+        let initial = self.counter_epoch.unwrap_or(sample);
+        let current = if self.counter_epoch.is_none() {
+            counter_sample(guest)?
+        } else {
+            sample
+        };
+        if current.frequency != initial.frequency {
+            return Err(Failure::Unsupported("changed native TSC frequency"));
+        }
+        let counter = current
+            .ticks
+            .checked_sub(initial.ticks)
+            .ok_or(Failure::Unsupported("backward display counter"))?;
+        let microseconds = process_microseconds(counter, current.frequency)?;
+        self.counter_epoch = Some(initial);
+        Ok(DisplayClock {
+            counter,
+            microseconds,
+            raw_ticks: current.ticks,
+            frequency: current.frequency,
         })
     }
 

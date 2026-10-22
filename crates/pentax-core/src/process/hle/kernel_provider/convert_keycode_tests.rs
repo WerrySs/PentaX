@@ -13,12 +13,12 @@ fn keyboard_type_binds_one_version_one_zero_marker_and_rejects_scope_type_and_ve
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1391, 69, 71)
+        (1396, 69, 71)
     );
-    assert_eq!(provider.code_bytes().len(), 0x2c78);
+    assert_eq!(provider.code_bytes().len(), 0x2ca0);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1392, 0x10000)
+        (1397, 0x10000)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(

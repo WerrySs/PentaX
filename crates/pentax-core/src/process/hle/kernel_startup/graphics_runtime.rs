@@ -223,7 +223,23 @@ pub(super) fn stop(
             ),
         );
     }
-    if marker.function == driver::Function::VideoSubmitFlip {
+    if marker.function == driver::Function::VideoColorSettingsSetGamma {
+        driver.submit_video_gamma(&mut paused, request.args, request.vector_args)
+    } else if matches!(
+        marker.function,
+        driver::Function::VideoOpen
+            | driver::Function::VideoClose
+            | driver::Function::VideoConfigureOutput
+            | driver::Function::VideoGetVblankStatus
+    ) {
+        driver.submit_video_clocked(
+            &mut paused,
+            marker.function,
+            request.args,
+            &mut session.kernel,
+            display_clock,
+        )
+    } else if marker.function == driver::Function::VideoSubmitFlip {
         driver.submit_video_flip_with_clock(&mut paused, request.args, |paused| {
             let guest = super::super::kernel_adapter::KernelMemory {
                 paused,
@@ -300,6 +316,25 @@ pub(super) fn stop(
     .map_err(KernelStartupError::Graphics)
     .map(NativeServiceAction::Returned)
 }
+fn display_clock(
+    kernel: &mut pentax_kernel::Kernel,
+    paused: &mut pentax_platform::native_memory::PausedNativeMemory<'_>,
+) -> Result<pentax_kernel::DisplayClock, driver::Failure> {
+    let guest = super::super::kernel_adapter::KernelMemory {
+        paused,
+        source: None,
+        supplied_modules: 0,
+        lookup_limits: None,
+        lookup_work: None,
+        loaded_modules: None,
+        thread_tls: None,
+        initial_entry: None,
+    };
+    kernel
+        .display_clock(&guest)
+        .map_err(driver::Failure::Kernel)
+}
+
 impl PreparedNativeKernelStartup<'_, '_> {
     /// Final diagnostics: open ports, committed buffer registrations and retained
     /// vblank subscriptions for those exact live port generations. Registration
@@ -489,7 +524,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
         generation: u64,
         tick: u64,
     ) -> Result<(), KernelStartupError> {
-        let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
         let driver = self
             .graphics
             .as_mut()
@@ -502,11 +537,35 @@ impl PreparedNativeKernelStartup<'_, '_> {
         {
             return Err(KernelStartupError::NativeOwnerMismatch);
         }
-        let tsc = pentax_platform::time_counter::sample()
-            .map_err(|_| KernelStartupError::InvalidProvider("video event counter"))?
-            .ticks;
         driver
-            .video_observe_vblank(&paused, &mut self.kernel, handle, generation, tick, tsc)
+            .video_preflight_vblank(&paused, handle, generation, tick)
+            .map_err(KernelStartupError::Graphics)?;
+        let clock =
+            display_clock(&mut self.kernel, &mut paused).map_err(KernelStartupError::Graphics)?;
+        driver
+            .video_observe_vblank(
+                &mut paused,
+                &mut self.kernel,
+                handle,
+                generation,
+                tick,
+                clock,
+            )
+            .map_err(KernelStartupError::Graphics)
+    }
+
+    /// Paused scheduling and queue waits use this same grid even before any
+    /// pixels or window configuration exist. Returned delay is a future display
+    /// boundary, never a guest wait completion or a presentation acknowledgement.
+    pub fn graphics_video_poll_vblank(
+        &mut self,
+    ) -> Result<Option<std::time::Duration>, KernelStartupError> {
+        let Some(driver) = self.graphics.as_mut() else {
+            return Ok(None);
+        };
+        let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        driver
+            .video_poll_clocked(&mut paused, &mut self.kernel, display_clock)
             .map_err(KernelStartupError::Graphics)
     }
 
@@ -657,7 +716,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 222);
+            assert_eq!(binding.factory.function_count(), 225);
             let open = binding
                 .factory
                 .markers()

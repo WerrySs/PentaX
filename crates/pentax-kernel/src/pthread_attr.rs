@@ -117,10 +117,10 @@ impl AttributeState {
             if a[0] == 0 {
                 return Err(Failure::Unsupported("source-null thread attribute slot"));
             }
-            let previous = budget.u64(guest, a[0])?;
-            if memory.owns_pthread_object(previous, budget)? {
-                return Err(Failure::Unsupported("reinitializing live pthread object"));
-            }
+            // Pinned PthreadAttrInit unconditionally overwrites *attr. Its
+            // destination may contain arbitrary bytes and need not be readable.
+            // An old referenced object retains its bounded independent owner;
+            // overwriting this slot does not destroy it or any copied alias.
             let id = memory.create_pthread_object(
                 PthreadObjectKind::ThreadAttribute,
                 a[0],

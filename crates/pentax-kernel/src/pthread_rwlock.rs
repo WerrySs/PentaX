@@ -219,11 +219,8 @@ impl RwlockState {
                         Err(Failure::Unsupported("source-null rwlock attribute slot"))
                     };
                 }
-                let previous = budget.u64(guest, a[0])?;
-                if memory.owns_pthread_object(previous, budget)? {
-                    return Err(Failure::Unsupported("reinitializing live pthread object"));
-                }
                 if service == RwlockAttrInit {
+                    // Attribute output has no input-token or lock lifecycle.
                     let id = memory.create_pthread_object(
                         PthreadObjectKind::RwlockAttribute,
                         a[0],
@@ -232,6 +229,10 @@ impl RwlockState {
                     )?;
                     self.attributes.push(Attribute { id, _kind: 1 });
                 } else {
+                    let previous = budget.u64(guest, a[0])?;
+                    if memory.owns_pthread_object(previous, budget)? {
+                        return Err(Failure::Unsupported("reinitializing live pthread object"));
+                    }
                     // Pinned PthreadRwlockInitNamed ignores attr; never read it.
                     let name = if a[2] == 0 {
                         String::new()

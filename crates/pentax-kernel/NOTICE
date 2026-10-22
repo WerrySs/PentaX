@@ -664,8 +664,9 @@ policy and packed VideoOut next-state rules, consistent with PentaX's existing
 bounded event queue profile. They are not claimed identical to public7b, whose
 legacy path queues additional copies. PentaX modifications 2026: exact live
 port-generation subscriptions, allocation-free preadmitted trigger/close tokens,
-bounded default coalescing, and output-atomic delivery. Only actual consumer
-observations trigger these events; no host refresh or presentation is invented.
+bounded default coalescing, and output-atomic delivery. Flip completion still requires actual consumer evidence. Vblank notifications
+may also represent elapsed boundaries from the separately documented owned
+display epoch; neither path invents host presentation.
 
 The stateless WS1 user getter additionally adapts PUBLIC AnyPS5, by the AnyPS5
 contributors, revision 80565c59424190cd0f660f8097945443a0017c42:
@@ -704,7 +705,20 @@ PentaX modifications, 2026: immutable explicit compact/runtime capacities,
 validated resource policy, precharged checked eight-byte output and dedicated
 pre-effect flexible mapping admission. A private membership flag survives
 range splits and excludes direct, internal and imported image mappings.
-No available-memory API, host RAM query or metadata-driven pool setter is added.
+No host RAM query or metadata-driven pool setter is added.
+
+KernelAvailableFlexibleMemorySize additionally adapts the already pinned
+KytyPS5-Performance revision 209dffe9032d72749257ce18680d506b891284de,
+src/libs/libKernel.cpp:3241 and src/kernel/memory.cpp:2707-2711,4404-4424.
+Copyright (c) 2021 InoriRus; the retained GPL-2.0-only and Kyty MIT terms apply.
+PentaX preserves the one-pointer ABI, null-before-pool-query validation and
+eight-byte remaining-capacity output. Its bounded checked census shares the
+actual flexible-mapping admission state and retains transactional guest output;
+an impossible accounting underflow remains an explicit internal limit failure.
+Direct aliases, internal pages and imported image mappings consume no flexible
+capacity. The single canonical libkernel1.1/library1 binding is append-only.
+Original fixtures cover live accounting, successful and refused releases,
+independent owners and real native map/protect/subrange-unmap consumers.
 
 The seven Pad runtime roles additionally adapt PUBLIC AnyPS5, by the AnyPS5
 contributors, revision 80565c59424190cd0f660f8097945443a0017c42:
@@ -771,3 +785,46 @@ PentaX retains null validation, repeated-success flag updates and the separate
 kernel/positive POSIX error domains. Registered-handle checks, Join-claim
 protection, owner-lifetime resource retention and original fixtures are PentaX
 safety policies; no host detach, immediate free or resource reuse is claimed.
+
+Module unwind-information adaptation: src/libs/libSysmodule.cpp and
+src/libs/libKernel.cpp, ModuleInfoForUnwind/KernelGetModuleInfoForUnwind,
+from WerrySs/KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+The 304-byte structure, flag/size/error ordering and exact service identities
+are retained. PentaX adds owner-bound live module/table validation and atomic
+guest output. No synthetic host-boundary module is implemented. Original
+bounded ELF, ABI and provider-request fixtures contain no commercial data.
+
+Pthread attribute initialization additionally preserves the unconditional output
+overwrite in the already pinned KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de, src/kernel/pthread.cpp:2031-2064,
+and its POSIX wrapper at 4330-4333. The same source semantics apply to
+PthreadMutexattrInit at 1744-1763, PthreadRwlockattrInit at 2783-2798 and
+PthreadCondattrInit at 2843-2858. Copyright (c) 2021 InoriRus; the retained
+GPL-2.0-only and original Kyty MIT terms continue to apply.
+PentaX never reads the old output contents during this initialization. New
+backing and the output slot publish atomically under shared resource limits;
+previous objects and copied aliases retain their independent bounded owners.
+Overwriting the output does not free or reuse an old object. Original kernel
+and native fixtures cover arbitrary output contents, retained cross-kind and
+attribute aliases, write-only guest outputs and transactional output refusal.
+Mutex defaults are checked by consuming both retained recursive metadata and
+fresh defaults through actual lock operations. Lock and condition initializers
+retain their existing guards and active wait/lifecycle behavior.
+
+The owned display-grid consumer additionally follows the retained authorized
+209dffe9032d72749257ce18680d506b891284de videoOut.cpp VblankBegin/VblankEnd
+and GuestRefreshHz contracts, Copyright (c) 2021 InoriRus, GPL-2.0-only with the
+original MIT grant retained above. PentaX modifications2026: one validated sample
+of the existing process counter/frequency, fixed-three-port batch preadmission,
+constant-work missed-boundary coalescing and generation-qualified close cleanup.
+No new host clock, fabricated frame or physical-display timing claim is added.
+
+The cooperative PthreadYield binding additionally adapts the already retained
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de,
+src/libs/libKernel.cpp:3331 and src/kernel/pthread.cpp:3788, declaration in
+src/kernel/pthread.h:110. Copyright (c) 2021 InoriRus; GPL-2.0-only and the
+retained original MIT grant apply. PentaX modifications2026: exact zero-argument
+source-void binding and owner-checked cooperative scheduling through existing
+CPU/TLS contexts. No host sleep/backoff, alternate NID or host-policy change is
+inferred.

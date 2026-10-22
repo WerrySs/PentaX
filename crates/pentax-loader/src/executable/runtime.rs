@@ -16,9 +16,11 @@ use crate::{
 };
 
 mod dynamic;
+mod unwind;
 pub use dynamic::{
     DynamicAddress, DynamicEntry, DynamicError, DynamicRegion, DynamicTable, parse_dynamic,
 };
+pub use unwind::{UnwindError, UnwindMetadata};
 
 const PT_TLS: u32 = 7;
 const PT_SCE_DYNLIBDATA: u32 = 0x61000000;

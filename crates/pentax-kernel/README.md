@@ -956,7 +956,7 @@ destruction refuses while any condition waiter still retains it; condition
 destruction refuses while unnotified waiters remain. Timed waits, targeted wakeups,
 signal dispatch and module-unload cleanup remain unsupported. Destruction revokes
 backing and clears the slot atomically. Stale or
-cross-kind slots, reinitializing live objects and failed publication retain
+cross-kind consumers, reinitializing live locks or conditions and failed publication retain
 explicit refusal/rollback behavior. POSIX wrappers return positive errno values
 without changing the errno cell; the same signal identifier has distinct direct
 kernel and Posix-library result domains. Only pinned scopes are registered.
@@ -1087,6 +1087,18 @@ releases its mapped extent. Direct aliases, internal runtime pages and adopted
 image-protection records remain outside the pool. Mapping, protection and unmap
 never change the configured value. Existing aggregate, host, virtual-address,
 handle, scratch and work limits remain independent and can refuse earlier.
+
+`KernelAvailableFlexibleMemorySize` has one exact libkernel module 1.1 /
+libkernel library 1 registration, NID `aNz11fnnzi4`. Its one argument receives
+the configured capacity minus the current owned flexible mapping extents as
+eight little-endian bytes. Named maps and protection splits retain their pool
+membership; only successful unmaps restore capacity. Null returns kernel int32
+EINVAL before the pool census; refused output leaves mappings and pool usage
+unchanged. The query shares admission accounting and its bounded work charge.
+Host RAM, direct aliases, internal pages and adopted image mappings do not
+determine this result. Other resource limits can still refuse a new map even
+when the query reports remaining flexible capacity.
+
 Physical allocation preserves the source's zero-alignment rule: the search
 start is unchanged even when it is not page aligned. Explicit physical
 alignment and virtual mapping alignment retain their separate checks.
@@ -1120,9 +1132,17 @@ Rust metadata with a zeroed 64-byte guest prefix. Stack/affinity/guard values us
 full guest widths; priority and policy retain exact signed values. Stack setters
 store configuration without mapping or dereferencing the proposed stack. The
 minimum configured size is 16 KiB. Getstack publishes both outputs atomically.
-Creation/destruction share the bounded pthread mapping owner and reject stale,
-cross-kind and live reinitialization attempts. POSIX wrappers return positive
+Creation/destruction share the bounded pthread mapping owner. Attribute
+initialization, like mutex, condition and rwlock attribute initialization,
+unconditionally writes a fresh owner pointer without reading old output bytes,
+including a live attribute or other object pointer. Copied
+aliases retain the old owner and its metadata until explicit destruction or
+owner teardown; overwriting a slot neither frees nor reuses it. Allocation,
+backing and output refusals preserve the slot and all old owners. Destruction
+rejects stale and cross-kind tokens. POSIX wrappers return positive
 errors without changing errno; source-fatal encodings remain Unsupported.
+Actual mutex, condition and rwlock initialization retains its existing live
+object guards and lock/wait policies.
 
 AttrGet supports the actual initial-thread identity and copies its prepared
 stack geometry after rechecking owned RW/NX pages and both unmapped guards.

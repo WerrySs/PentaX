@@ -28,6 +28,7 @@ pub(super) struct KernelMemory<'borrow, 'owner, 'image> {
 mod game_intent_tests;
 mod image_memory;
 mod module_symbols;
+mod module_unwind;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod mspace_tests;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
@@ -206,6 +207,12 @@ impl GuestAccess for KernelMemory<'_, '_, '_> {
     }
     fn module_symbol(&mut self, handle: i32, name: &str) -> Result<Option<u64>, Failure> {
         module_symbols::lookup(self, handle, name)
+    }
+    fn module_unwind_info(
+        &mut self,
+        address: u64,
+    ) -> Result<Option<pentax_kernel::ModuleUnwindInfo>, Failure> {
+        module_unwind::lookup(self, address)
     }
     fn process_parameters(&self) -> Result<u64, Failure> {
         let source = self

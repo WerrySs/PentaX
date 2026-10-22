@@ -115,6 +115,9 @@ catalogue!(
     AgcSetCxRegIndirectPatchAddRegisters,
     AgcSetShRegIndirectPatchAddRegisters,
     AgcSetUcRegIndirectPatchAddRegisters,
+    VideoGetVblankStatus,
+    VideoColorSettingsSetGamma,
+    VideoAdjustColor,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

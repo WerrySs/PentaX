@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn posix_usleep_binds_one_real_got_site_and_preserves_all_existing_marker_addresses() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1391);
+    assert_eq!(provider.registration_count(), 1396);
     assert_eq!((MODULES.len(), LIBRARIES.len()), (69, 71));
     for (index, marker) in provider.markers()[..1315].iter().enumerate() {
         assert_eq!(

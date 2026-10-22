@@ -48,6 +48,9 @@ impl LoadedModules {
             .and_then(|index| self.handles.get(index))
             .copied()
     }
+    pub(crate) fn contains_guest_module(&self, module: usize) -> bool {
+        self.handles.contains(&module)
+    }
 }
 
 fn valid_path(path: &str) -> bool {

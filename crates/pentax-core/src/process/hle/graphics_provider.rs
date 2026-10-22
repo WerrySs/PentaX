@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 222] = {
+const ENTRIES: [(&str, Function, usize, usize); 225] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 222] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 222];
+    let mut entries = [BASE_ENTRIES[0]; 225];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -158,6 +158,9 @@ const ENTRIES: [(&str, Function, usize, usize); 222] = {
         entries[119 + builder * 2] = (nid, function, 2, 2);
         builder += 1;
     }
+    entries[222] = ("1FZBKy8HeNU", Function::VideoGetVblankStatus, 3, 3);
+    entries[223] = ("DYhhWbJSeRg", Function::VideoColorSettingsSetGamma, 3, 3);
+    entries[224] = ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3);
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -361,7 +364,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 222);
+        assert_eq!(provider.function_count(), 225);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));

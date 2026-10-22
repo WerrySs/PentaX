@@ -39,6 +39,8 @@ pub enum NativeServiceAction {
     ImeCallback(super::super::PreparedImeCallback),
     CreateThread(super::super::PendingThreadCreate),
     WaitThread(super::super::PendingThreadWait),
+    /// Source-void yield; the native owner must rotate before guest re-entry.
+    YieldThread,
 }
 /// Private owner/source/file admission consumed by its bounded file read.
 ///

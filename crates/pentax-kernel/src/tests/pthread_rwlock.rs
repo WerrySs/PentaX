@@ -117,7 +117,7 @@ fn rwlock_lazy_slots_attributes_and_failed_lifetime_transactions_preserve_state(
     );
     let id = guest.u64(0);
     assert_ne!(id, 0);
-    for init in [MutexInit, CondInit, RwlockInit, RwlockAttrInit] {
+    for init in [MutexInit, CondInit, RwlockInit] {
         assert!(matches!(
             library(&mut owner, &mut guest, init, &[ARG, 0, 0]),
             Err(Failure::Unsupported(_))

@@ -127,11 +127,8 @@ impl ConditionState {
                         Err(Failure::Unsupported("source-null condition attribute slot"))
                     };
                 }
-                let previous = budget.u64(guest, a[0])?;
-                if memory.owns_pthread_object(previous, budget)? {
-                    return Err(Failure::Unsupported("reinitializing live pthread object"));
-                }
                 if service == CondAttrInit {
+                    // The source unconditionally overwrites this output.
                     let id = memory.create_pthread_object(
                         PthreadObjectKind::ConditionAttribute,
                         a[0],
@@ -140,6 +137,10 @@ impl ConditionState {
                     )?;
                     self.attributes.push(Attribute { id, clock: 0 });
                 } else {
+                    let previous = budget.u64(guest, a[0])?;
+                    if memory.owns_pthread_object(previous, budget)? {
+                        return Err(Failure::Unsupported("reinitializing live pthread object"));
+                    }
                     let clock = if a[1] == 0 {
                         0
                     } else {

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 mod wait;
 use wait::Waiter;
 mod video;
-pub use video::{VideoClose, VideoEventKind, VideoInterrupt};
+pub use video::{VideoBoundary, VideoBoundaryBatch, VideoClose, VideoEventKind, VideoInterrupt};
 
 /// One admitted interrupt bound by an exclusive borrow to its real queue owner.
 /// Only a successfully retired graphics command may publish this notification.

@@ -1593,6 +1593,9 @@ fn execute_epoch<'plan, 'image>(
                         NativeServiceAction::WaitThread(pending) => {
                             state.scheduling.wait(session, pending, token)?;
                         }
+                        NativeServiceAction::YieldThread => {
+                            state.scheduling.yield_thread(&mut engine, token)?;
+                        }
                         NativeServiceAction::CreateThread(pending) => {
                             state
                                 .scheduling

@@ -29,6 +29,14 @@ pub(super) struct Waiter {
     deadline: Option<Instant>,
 }
 impl EventQueues {
+    pub(super) fn waiter_queue(
+        &self,
+        ticket: &EventQueueWait,
+        budget: &mut Budget,
+    ) -> Result<u64, Failure> {
+        let index = self.waiter_index(ticket, budget)?;
+        Ok(self.waiters[index].args.0[0])
+    }
     fn waiter_index(&self, ticket: &EventQueueWait, budget: &mut Budget) -> Result<usize, Failure> {
         budget.work(self.waiters.len() as u64 + 1)?;
         self.waiters

@@ -313,6 +313,7 @@ mod configured_memory;
 mod entry;
 mod event_flag_wait;
 mod module_symbols;
+mod module_unwind;
 mod mutex_wait;
 #[path = "tests/pad_runtime.rs"]
 mod pad_runtime;
@@ -440,7 +441,7 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
                 plan.kernel_bindings(),
                 plan.hle.provider_bindings()
             ),
-            (1391, 1, 1)
+            (1396, 1, 1)
         );
         assert_eq!(
             (

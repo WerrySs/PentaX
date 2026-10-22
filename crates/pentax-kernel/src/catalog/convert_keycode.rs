@@ -23,7 +23,7 @@ mod tests {
 
     #[test]
     fn keyboard_type_appends_one_exact_binding_without_scope_fallbacks() {
-        assert_eq!(REGISTRATIONS.len(), 1391);
+        assert_eq!(REGISTRATIONS.len(), 1396);
         assert_eq!(&REGISTRATIONS[1325..1326], &CONVERT_KEYCODE_REGISTRATIONS);
         assert_eq!(
             Service::ConvertKeycodeGetImeKeyboardType as usize,

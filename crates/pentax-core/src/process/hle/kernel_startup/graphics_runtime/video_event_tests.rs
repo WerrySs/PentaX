@@ -193,7 +193,17 @@ fn actual_owned_flip_completion_delivers_video_events_once_after_ack_and_preserv
                     .graphics_video_observe_vblank(1, metadata.generation(), 10)
                     .is_err()
             );
-            assert_eq!(poll(session, scratch, queue), 0);
+            // A numeric consumer notification cannot invent a display period.
+            // Wait only for the same owned clock used by the headless scheduler.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            loop {
+                session.graphics_video_poll_vblank().unwrap();
+                if poll(session, scratch, queue) == 0 {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             assert_eq!(u64::from_le_bytes(read(session, scratch + 384)), 1);
             let frame = session.graphics_video_take_frame(10).unwrap().unwrap();
             assert_eq!(session.graphics_video_flip_observations().presenting, 1);

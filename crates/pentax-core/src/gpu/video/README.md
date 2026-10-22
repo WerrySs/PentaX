@@ -67,10 +67,10 @@ once, records real caller process clocks and returns a noncopyable completion
 receipt containing the exact owner, generation and event argument. The source
 128-byte flip-status layout is encoded with zero reserved fields.
 
-The queue does not create a vblank clock, deliver kernel equeue events, present a
-desktop texture or implement IPC. Those integrations must retain actual event
-owners, bound outstanding frame capacities and acknowledge only real consumer
-presentation. Master/slave compositing and explicit black/blank flip indices
+The flip queue does not advance the display clock or acknowledge a frame from
+a numeric tick. The driver separately materializes an owned monotonic display
+grid and delivers bounded kernel equeue events. The window/IPC integration must
+still bound outstanding frame capacities and acknowledge real presentation. Master/slave compositing and explicit black/blank flip indices
 remain typed refusals. No window, real game image, frame rate, display
 acknowledgement or kernel event delivery is established by GPU readiness.
 
@@ -80,3 +80,31 @@ The exact R_FLIP route follows public KytyPS5/KytyPS5 revision
 `src/graphics/presentation/videoOut.cpp` and
 `src/graphics/host_gpu/renderer/sync.cpp`. Exact blobs and retained licensing
 are recorded in the core NOTICE and upstream provenance document.
+
+The canonical GetVblankStatus, ColorSettingsSetGamma and AdjustColor exports
+retain the pinned 209dffe source layouts and error order. Gamma is the actual
+captured XMM0 float argument. Range checks accept unordered NaNs exactly as the
+source comparisons do; only four settings bytes change. AdjustColor reads only
+that field after validating the owned open handle. The retained gamma survives
+close/reopen as in the source; it does not attest host color correction.
+
+Each opened port has its own display epoch using the existing kernel process
+counter and validated native frequency. The configured display policy selects
+the source 60/120 Hz cadence or the explicitly configured follow-vblank rate.
+Queries and paused scheduler readiness boundaries materialize elapsed periods
+with fixed three-port arithmetic. Same-time queries cannot create periods. Mode
+changes and main-port closure first materialize the old cadence, then rebase
+at the same clock sample without retroactively applying the new rate.
+
+The exact 40-byte status records the latest elapsed boundary, including process
+microseconds, raw counter and process counter; flags/phase/padding stay zero.
+Missed periods coalesce into existing bounded event counters without a per-period
+loop. Event admission and optional guest output precede metadata/event commit;
+failed output leaves that batch unconsumed. A parked WaitEqueue can wake before
+any registered surface, prepared pixels or window exists. The scheduler uses
+its existing bounded idle slices and one display-clock authority. Only an
+authenticated waiter on the exact generation-matched subscribed equeue gains a
+display wake deadline; unrelated waits retain their deadlock/error behavior.
+Consumer tick
+numbers retain generation/replay checks but cannot double-count periods. These
+counts describe emulated display boundaries, not rendered frames or measured FPS.

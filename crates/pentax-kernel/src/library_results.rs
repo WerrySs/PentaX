@@ -41,6 +41,7 @@ fn error_domain(service: Service) -> Option<ErrorDomain> {
         // Source KernelErrorU64 explicitly zero-extends its int32 error bits.
         | AmprMeasureReadFile
         | Open
+        | ModuleInfoForUnwind
         | Close
         | Fstat
         | Ftruncate
@@ -56,6 +57,7 @@ fn error_domain(service: Service) -> Option<ErrorDomain> {
         | AllocateDirect
         | AllocateMainDirect
         | ConfiguredFlexibleMemorySize
+        | AvailableFlexibleMemorySize
         | ReleaseDirect
         | MapDirect
         | MapNamedDirect

@@ -57,16 +57,17 @@ fn runtime_stop_identifies_the_failed_admitted_call() {
     let registrations = pentax_kernel::Service::registrations();
     let registration = registrations
         .iter()
-        .find(|entry| entry.service == pentax_kernel::Service::PthreadJoin)
+        .find(|entry| entry.service == pentax_kernel::Service::ThreadAttrInit)
         .unwrap();
     let mut p = Program::new();
+    p.reg(7, 0);
     p.call(0);
     let (code, _) = p.finish(None);
     let main = image(&code, &[registration.nid]);
     let (status, fields, text) = probe(&main);
     assert_eq!(status, 2, "{text}");
     assert_eq!(fields["code"], "runtime-service");
-    assert_eq!(fields["runtime_failure"], "thread-lifecycle");
+    assert_eq!(fields["runtime_failure"], "unsupported-service");
     assert_eq!(fields["public_function"], registration.source_name);
     assert!(!fields.contains_key("value"));
 }
@@ -152,6 +153,8 @@ mod pthread_attr;
 mod pthread_condition;
 #[path = "pthread_mutex.rs"]
 mod pthread_mutex;
+#[path = "pthread_output_init.rs"]
+mod pthread_output_init;
 #[path = "pthread_rwlock.rs"]
 mod pthread_rwlock;
 #[path = "pthread_semaphore.rs"]
@@ -182,6 +185,8 @@ mod apr_imports;
 mod audio_out2;
 #[path = "audio_out2_lifecycle.rs"]
 mod audio_out2_lifecycle;
+#[path = "available_flexible_memory.rs"]
+mod available_flexible_memory;
 #[path = "calendar.rs"]
 mod calendar;
 #[path = "configured_flexible_memory.rs"]
@@ -244,6 +249,8 @@ mod system_events;
 mod user;
 #[path = "video.rs"]
 mod video;
+#[path = "video_state.rs"]
+mod video_state;
 
 #[path = "agc_fusion.rs"]
 mod agc_fusion;
@@ -289,6 +296,8 @@ mod physical_memory;
 mod precision_vectors;
 #[path = "pthread_once.rs"]
 mod pthread_once;
+#[path = "pthread_yield.rs"]
+mod pthread_yield;
 #[path = "string_instructions.rs"]
 mod string_instructions;
 #[path = "vector_instructions.rs"]

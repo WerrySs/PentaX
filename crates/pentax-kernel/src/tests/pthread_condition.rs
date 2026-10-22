@@ -127,7 +127,7 @@ fn condition_lazy_publication_destruction_and_cross_kind_failures_are_transactio
     );
     let id = guest.u64(0);
     assert_eq!(id, Limits::default().virtual_base);
-    for service in [MutexInit, MutexAttrInit, CondInit, CondAttrInit] {
+    for service in [MutexInit, CondInit] {
         assert!(matches!(
             library(&mut owner, &mut guest, service, &[ARG, 0, 0]),
             Err(Failure::Unsupported(_))

@@ -53,7 +53,11 @@ mod pthread_create;
 pub use pthread_create::{PendingThreadCreate, PreparedThreadStart, ThreadEntryLayout};
 mod pthread_wait;
 pub use pthread_wait::PendingThreadWait;
+
 mod native_entry;
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "kernel_startup/pthread_yield_tests.rs"]
+mod pthread_yield_tests;
 pub use native_entry::{
     NativeEntryError, NativeEntryLayout, NativeEntryLimits, NativeEntryPolicy, NativeEntryRequest,
     PreparedNativeEntry,
@@ -828,7 +832,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)
             | NativeServiceAction::CreateThread(_)
-            | NativeServiceAction::WaitThread(_) => {
+            | NativeServiceAction::WaitThread(_)
+            | NativeServiceAction::YieldThread => {
                 Err(KernelStartupError::InvalidProvider("pending module load"))
             }
         }
@@ -1025,6 +1030,11 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 .map_err(KernelStartupError::Kernel)?;
             module_lifecycle::prepare_action(&mut memory, request, stop.syscall_pc, stop.service_id)
                 .map_err(KernelStartupError::Kernel)
+        } else if actions && marker.registration.service == pentax_kernel::Service::PthreadYield {
+            self.kernel
+                .admit_pthread_yield()
+                .map_err(KernelStartupError::Kernel)?;
+            Ok(NativeServiceAction::YieldThread)
         } else if actions
             && matches!(
                 marker.registration.service,

@@ -238,7 +238,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)
             | NativeServiceAction::CreateThread(_)
-            | NativeServiceAction::WaitThread(_) => {
+            | NativeServiceAction::WaitThread(_)
+            | NativeServiceAction::YieldThread => {
                 Err(KernelStartupError::InvalidProvider("pending module load"))
             }
         }

@@ -904,3 +904,12 @@ validation and work admission precede infallible kernel/created-record updates.
 No guest output, errno cell, host pthread or backing mapping is modified by
 detach. Real entry execution and cleanup continue under the existing scheduler,
 with bounded stack/TLS/context retention until owner teardown.
+
+VideoOut's canonical vblank status and color-setting exports retain owned
+40-byte status and four-byte gamma semantics. The captured SysV XMM0 argument
+is independent of GPR values. A per-open display epoch shares the validated
+kernel process clock and explicit display cadence. Paused scheduling can deliver
+coalesced vblank events before the first pixels, while mode changes rebase the
+same grid atomically. Numeric consumer ticks do not create additional periods.
+This display count remains separate from real draw, frame and acknowledgement
+evidence. Detailed source/error/ownership scope is in src/gpu/video/README.md.

@@ -12,14 +12,14 @@ fn audio_out2_exact_bindings_append_eight_rows_and_keep_all_old_sites_and_data()
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1391, 69, 71)
+        (1396, 69, 71)
     );
     assert_eq!(
         (
             provider.code_bytes().len(),
             provider.metadata_mapped_bytes()
         ),
-        (0x2c78, 4 * PAGE_SIZE)
+        (0x2ca0, 4 * PAGE_SIZE)
     );
     assert_eq!(
         &MODULES[66..68],
@@ -32,11 +32,11 @@ fn audio_out2_exact_bindings_append_eight_rows_and_keep_all_old_sites_and_data()
     assert_eq!((MAX_REGISTRATIONS, CODE_MAPPED_BYTES), (2048, 0x10000));
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1392, 0x10000)
+        (1397, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1393, 0x10008)
+        (1398, 0x10008)
     );
     assert_eq!(PROGRAM_NAME_BUFFER_RVA, 0x10010);
     for (index, marker) in provider.markers()[..1283].iter().enumerate() {
@@ -145,7 +145,7 @@ fn audio_out2_refuses_unproven_scopes_versions_types_and_speaker_array_creation(
 #[test]
 fn audio_out2_lifecycle_exact_pairs_append_without_moving_any_old_marker() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1391);
+    assert_eq!(provider.registration_count(), 1396);
     for (index, marker) in provider.markers()[..1291].iter().enumerate() {
         assert_eq!(
             (marker.symbol, marker.service_id, marker.rva),
