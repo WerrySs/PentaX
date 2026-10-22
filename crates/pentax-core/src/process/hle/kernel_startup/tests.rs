@@ -497,7 +497,7 @@ fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
                 .iter()
                 .filter(|m| m.registration.arguments == 6)
                 .count(),
-            15
+            17
         );
     });
 }
