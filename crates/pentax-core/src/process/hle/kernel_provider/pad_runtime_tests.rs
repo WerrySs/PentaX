@@ -11,16 +11,16 @@ fn pad_runtime_binds_seven_new_markers_and_preserves_all_historical_sites() {
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1369, 69, 71)
+        (1381, 69, 71)
     );
-    assert_eq!(provider.code_bytes().len(), 0x2bc8);
+    assert_eq!(provider.code_bytes().len(), 0x2c28);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1370, 0x10000)
+        (1382, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1371, 0x10008)
+        (1383, 0x10008)
     );
     for (index, marker) in provider.markers().iter().enumerate() {
         assert_eq!(
