@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //! Exact integer-only x87 loads and stack transfers over retained physical state.
-//! Narrowing stores and disputed extended SNaN/pseudo/unnormal
-//! payloads remain explicit stops. No guest state is installed on the host FPU.
+//! Narrowing memory stores use the separate checked x87_float_store module.
+//! Disputed extended SNaN/pseudo/unnormal transfer payloads remain explicit stops. No guest state is installed on the host FPU.
 use super::{NativeCpuState, NativeDispatchError, NativeX87State};
 use crate::native_memory::PausedNativeMemory;
 use pentax_codegen::{Code, Instruction, OpKind, Register};

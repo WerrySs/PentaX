@@ -1584,3 +1584,9 @@ mod x87_comparison;
 
 #[path = "tests/x87_integer.rs"]
 mod x87_integer;
+
+#[path = "tests/x87_conditional_move.rs"]
+mod x87_conditional_move;
+
+#[path = "tests/x87_float_store.rs"]
+mod x87_float_store;

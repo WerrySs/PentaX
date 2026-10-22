@@ -372,6 +372,8 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || x87_arithmetic::supported(instruction.code())
         || x87_comparison::supported(instruction.code())
         || x87_integer::supported(instruction.code())
+        || x87_conditional_move::supported(instruction.code())
+        || x87_float_store::supported(instruction.code())
         || mask_layout(instruction.code()).is_some()
         || test_width(instruction.code()).is_some()
         || packed_vectors::supported(instruction.code())
@@ -656,6 +658,15 @@ impl NativeBlockStepper<'_, '_, '_> {
         let mut transferred = 0;
         if x87_control::supported(instruction.code()) {
             transferred = x87_control::execute(
+                instruction,
+                &mut next,
+                memory,
+                self.machine.usage.vector_bytes,
+            )?;
+        } else if x87_conditional_move::supported(instruction.code()) {
+            transferred = x87_conditional_move::execute(instruction, &mut next, memory)?;
+        } else if x87_float_store::supported(instruction.code()) {
+            transferred = x87_float_store::execute(
                 instruction,
                 &mut next,
                 memory,

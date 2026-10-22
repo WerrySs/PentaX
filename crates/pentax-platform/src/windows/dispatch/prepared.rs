@@ -494,10 +494,14 @@ mod vectors;
 mod x87_arithmetic;
 #[path = "prepared/x87_comparison.rs"]
 mod x87_comparison;
+#[path = "prepared/x87_conditional_move.rs"]
+mod x87_conditional_move;
 #[path = "prepared/x87_control.rs"]
 mod x87_control;
 #[path = "prepared/x87_data.rs"]
 mod x87_data;
+#[path = "prepared/x87_float_store.rs"]
+mod x87_float_store;
 #[path = "prepared/x87_integer.rs"]
 mod x87_integer;
 pub use threads::NativeThreadContext;
