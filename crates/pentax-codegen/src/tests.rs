@@ -872,3 +872,5 @@ fn partial_source_patch_intersections_use_the_same_retained_write_bytes() {
     assert_eq!(plan.exit().kind(), ExitKind::Return { adjust: 0 });
     assert_eq!(bytes, before);
 }
+
+mod signed_comparisons;

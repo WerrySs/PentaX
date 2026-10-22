@@ -167,9 +167,14 @@ fn private_samples_opt_in_exports_completed_relative_rows_and_preserves_guest_ou
             "sample_plan_ns",
             "sample_dispatch_ns",
             "service_ns",
+            "service_other_ns",
+            "service_overflow_ns",
+            "service_unattributed_ns",
         ] {
             assert!(fields.remove(key).unwrap().parse::<u64>().is_ok());
         }
+        // The ranking embeds measured nanoseconds rather than deterministic counts.
+        assert!(fields.remove("service_time_top").is_some());
     }
     assert_eq!(on_fields, off_fields);
 

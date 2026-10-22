@@ -361,7 +361,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || shuffle_layout(instruction.code()).is_some()
         || broadcast_widths(instruction.code()).is_some()
         || binary_width(instruction.code()).is_some()
-        || qword_comparison(instruction.code()).is_some()
+        || signed_comparison(instruction.code()).is_some()
         || align_right::form(instruction.code()).is_some()
         || saturating_packs::form(instruction.code()).is_some()
         || multiply_add_words::form(instruction.code()).is_some()
@@ -496,12 +496,19 @@ fn equality_width(mnemonic: Mnemonic) -> Option<usize> {
     }
 }
 
-// Exact non-EVEX signed-qword comparisons: vector bytes and destructive legacy form.
-fn qword_comparison(code: Code) -> Option<(usize, bool)> {
+// Exact signed comparisons: vector bytes, element bytes and destructive legacy form.
+// Only the existing qword legacy form is modeled here; MMX and EVEX stay closed.
+fn signed_comparison(code: Code) -> Option<(usize, usize, bool)> {
     match code {
-        Code::Pcmpgtq_xmm_xmmm128 => Some((16, true)),
-        Code::VEX_Vpcmpgtq_xmm_xmm_xmmm128 => Some((16, false)),
-        Code::VEX_Vpcmpgtq_ymm_ymm_ymmm256 => Some((32, false)),
+        Code::Pcmpgtq_xmm_xmmm128 => Some((16, 8, true)),
+        Code::VEX_Vpcmpgtb_xmm_xmm_xmmm128 => Some((16, 1, false)),
+        Code::VEX_Vpcmpgtw_xmm_xmm_xmmm128 => Some((16, 2, false)),
+        Code::VEX_Vpcmpgtd_xmm_xmm_xmmm128 => Some((16, 4, false)),
+        Code::VEX_Vpcmpgtq_xmm_xmm_xmmm128 => Some((16, 8, false)),
+        Code::VEX_Vpcmpgtb_ymm_ymm_ymmm256 => Some((32, 1, false)),
+        Code::VEX_Vpcmpgtw_ymm_ymm_ymmm256 => Some((32, 2, false)),
+        Code::VEX_Vpcmpgtd_ymm_ymm_ymmm256 => Some((32, 4, false)),
+        Code::VEX_Vpcmpgtq_ymm_ymm_ymmm256 => Some((32, 8, false)),
         _ => None,
     }
 }
@@ -828,7 +835,7 @@ impl NativeBlockStepper<'_, '_, '_> {
             if !form.legacy {
                 next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
             }
-        } else if let Some((size, legacy)) = qword_comparison(instruction.code()) {
+        } else if let Some((size, width, legacy)) = signed_comparison(instruction.code()) {
             let right_operand = if legacy { 1 } else { 2 };
             if instruction.op_count() != right_operand + 1 {
                 return Err(NativeDispatchError::UnsupportedVectorInstruction);
@@ -859,15 +866,21 @@ impl NativeBlockStepper<'_, '_, '_> {
                 vector_register(instruction, right_operand, size, &next)?
             };
             let mut output = [0; 32];
-            for start in (0..size).step_by(8) {
-                let a = i64::from_le_bytes(left[start..start + 8].try_into().unwrap());
-                let b = i64::from_le_bytes(right[start..start + 8].try_into().unwrap());
-                output[start..start + 8].fill(if a > b { 0xff } else { 0 });
+            // Sign-bit bias maps each complete signed lane onto unsigned
+            // ordering, including i64::MIN, without changing flags or MXCSR.
+            let bias = 1_u64 << (width * 8 - 1);
+            for start in (0..size).step_by(width) {
+                let mut a = [0; 8];
+                let mut b = [0; 8];
+                a[..width].copy_from_slice(&left[start..start + width]);
+                b[..width].copy_from_slice(&right[start..start + width]);
+                let greater = (u64::from_le_bytes(a) ^ bias) > (u64::from_le_bytes(b) ^ bias);
+                output[start..start + width].fill(if greater { 0xff } else { 0 });
             }
             next.xmm[destination..destination + 16].copy_from_slice(&output[..16]);
             if !legacy {
                 // Initialized output zeros upper YMM for VEX.128; VEX.256
-                // replaces all four signed-qword lanes independently.
+                // replaces every signed element of the full vector.
                 next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
             }
         } else if let Some(form) = mask_comparisons::form(instruction.code()) {

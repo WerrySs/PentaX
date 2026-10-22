@@ -107,9 +107,14 @@ fn without_durations(mut fields: HashMap<String, String>) -> HashMap<String, Str
         "sample_plan_ns",
         "sample_dispatch_ns",
         "service_ns",
+        "service_other_ns",
+        "service_overflow_ns",
+        "service_unattributed_ns",
     ] {
         assert!(fields.remove(name).unwrap().parse::<u64>().is_ok());
     }
+    // The ranking embeds measured nanoseconds rather than deterministic counts.
+    assert!(fields.remove("service_time_top").is_some());
     fields
 }
 

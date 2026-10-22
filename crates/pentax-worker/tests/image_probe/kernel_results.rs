@@ -944,3 +944,6 @@ fn native_application_heap_registration_accepts_a_real_table_and_stops_on_invali
 mod gpu_window;
 #[path = "present_window.rs"]
 mod present_window;
+
+#[path = "signed_comparisons.rs"]
+mod signed_comparisons;

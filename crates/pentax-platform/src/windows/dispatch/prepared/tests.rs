@@ -1569,3 +1569,6 @@ fn nested_call_preserves_caller_red_zone_and_data_only_return_cannot_resume_its_
         assert_eq!(engine.machine.suspended.len(), 1);
     });
 }
+
+#[path = "tests/signed_comparisons.rs"]
+mod signed_comparisons;

@@ -53,6 +53,28 @@ impl PausedNativeMemory<'_> {
             .ok_or(NativeMemoryError::BudgetExceeded)?;
         self.owner.check(left.address, left.size, None)?;
         self.owner.check(right.address, right.size, None)?;
+        // The full mapped checks and original conservative charge precede every
+        // shortcut. Any virtual overlap necessarily shares actual backing bytes.
+        if left.address < right_end && right.address < left_end {
+            return Err(NativeMemoryError::Overlap);
+        }
+        let (first, end) = if lp <= rp {
+            (left_first, left_end)
+        } else {
+            (right_first, right_end)
+        };
+        // An exclusively owned private page has coordinate (false, virtual),
+        // never a shared-section coordinate. Inspect every touched CURRENT page;
+        // no first-page inference or retained mapping/permission proof is used.
+        // Even if the final classification fails and the old Cartesian loop runs,
+        // mapped checks lp+rp, outer coordinates lp and classification min(lp,rp)
+        // total <=3*(lp+rp). The original lp*rp+3*(lp+rp)+1 charge stays intact.
+        if (first..end)
+            .step_by(NATIVE_GUEST_PAGE as usize)
+            .all(|page| matches!(self.owner.region(page).kind, RegionKind::Private))
+        {
+            return Ok(work);
+        }
         for page in (left_first..left_end).step_by(NATIVE_GUEST_PAGE as usize) {
             let at = page.max(left.address);
             let length = left_end.min(page + NATIVE_GUEST_PAGE) - at;
@@ -513,3 +535,6 @@ fn chunks(write: &NativeMemoryWrite<'_>) -> impl Iterator<Item = (u64, u64)> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod private_disjoint_tests;
