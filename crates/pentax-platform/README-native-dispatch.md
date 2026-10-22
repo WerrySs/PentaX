@@ -647,3 +647,20 @@ and the [Volume2C FMA entries](https://www.intel.com/content/dam/www/public/us/e
 Original hardware references are test-only and capability-guarded; analytic
 software checks run without host FMA. EVEX/FMA4 and unmasked SIMD exceptions
 remain outside this admission.
+
+### Owned fiber context exchange
+
+`NativeFiberContext` parks a non-cloneable continuation of one exact owner and
+executor. Preparation validates actual immutable RX source, the full RW/NX stack,
+its marker and live pthread stack separation. Selection rechecks those live
+properties. Guest object bytes cannot construct the context or entry-origin token.
+
+The exchange restores owned GPR, flags, XMM/YMM, MXCSR, x87, REP and nested-call
+state while retaining the selected pthread index and its current modeled FS/GS.
+This complete CPU transport is an explicit PentaX policy: the pinned Fiber ASM
+saves only ten GPR/continuation words, not floating/vector state. No host FS/GS or
+FPU control is installed by exchanging copied values. Idle continuations may
+migrate between admitted pthreads. Suspended HLE callbacks refuse thread/TLS
+migration before exchange, preserving their sealed tokens. Live parked contexts
+share the existing finite thread-context cap; dropping an invalid generation
+releases its slot. These operations execute no guest code.

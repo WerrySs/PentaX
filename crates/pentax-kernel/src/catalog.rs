@@ -87,6 +87,13 @@ pub enum Service {
     FiberFinalize,
     FiberGetInfo,
     FiberRename,
+    FiberRun,
+    FiberSwitch,
+    FiberReturnToThread,
+    FiberGetSelf,
+    FiberStartContextSizeCheck,
+    FiberStopContextSizeCheck,
+    FiberGetThreadFramePointerAddress,
     Open,
     Close,
     Read,
@@ -1709,6 +1716,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < FIBER_EXECUTION_REGISTRATIONS.len() {
+        entries[output] = FIBER_EXECUTION_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1806,6 +1819,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + CONVERT_KEYCODE_REGISTRATIONS.len()
             + SAVE_DIRECTORY_REGISTRATIONS.len()
             + SAVE_FILE_REGISTRATIONS.len()
+            + FIBER_EXECUTION_REGISTRATIONS.len()
     },
 >();
 
@@ -4681,3 +4695,63 @@ const SAVE_FILE_REGISTRATIONS: &[Registration] = &[
         ..BASE_REGISTRATIONS[0]
     },
 ];
+
+// Execution additions preserve all preexisting provider row ordinals. Only the
+// three observed paired-prefix execution aliases augment canonical source NIDs.
+const FIBER_EXECUTION_REGISTRATIONS: [Registration; 12] = {
+    let run = fiber_registration(Service::FiberRun, "a0LLrZWac0M", "FiberRun", 3);
+    let switch = fiber_registration(Service::FiberSwitch, "PFT2S-tJ7Uk", "FiberSwitch", 3);
+    let ret = fiber_registration(
+        Service::FiberReturnToThread,
+        "B0ZX2hx9DMw",
+        "FiberReturnToThread",
+        2,
+    );
+    [
+        run,
+        Registration {
+            nid: "avfGJ94g36Q",
+            ..run
+        },
+        switch,
+        Registration {
+            nid: "ZqhZFuzKT6U",
+            ..switch
+        },
+        ret,
+        fiber_registration(Service::FiberGetSelf, "p+zLIOg27zU", "FiberGetSelf", 1),
+        fiber_registration(
+            Service::FiberStartContextSizeCheck,
+            "Lcqty+QNWFc",
+            "FiberStartContextSizeCheck",
+            1,
+        ),
+        fiber_registration(
+            Service::FiberStopContextSizeCheck,
+            "Kj4nXMpnM8Y",
+            "FiberStopContextSizeCheck",
+            0,
+        ),
+        fiber_registration(
+            Service::FiberGetThreadFramePointerAddress,
+            "0dy4JtMUcMQ",
+            "FiberGetThreadFramePointerAddress",
+            1,
+        ),
+        Registration {
+            module: "libSceFiber",
+            library: "libSceFiber",
+            ..run
+        },
+        Registration {
+            module: "libSceFiber",
+            library: "libSceFiber",
+            ..switch
+        },
+        Registration {
+            module: "libSceFiber",
+            library: "libSceFiber",
+            ..ret
+        },
+    ]
+};

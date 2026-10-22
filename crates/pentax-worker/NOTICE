@@ -1,0 +1,16 @@
+PentaX worker Fiber continuation integration and original native fixtures
+Copyright (c) 2026 PentaX contributors
+SPDX-License-Identifier: GPL-2.0-only
+
+The worker integration and synthetic guest programs are original PentaX code.
+Fiber ABI behavior was checked against the public KytyPS5-Performance
+libKernel.cpp Fiber namespace, revision
+209dffe9032d72749257ce18680d506b891284de:
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/libs/libKernel.cpp
+The corresponding adapted kernel implementation retains its upstream notices.
+No upstream native context-switch assembly, proprietary SDK code, commercial
+game instructions, guest captures or private machine data are included here.
+
+The full owned CPU continuation policy is specific to PentaX and is distinct
+from the source assembly's callee-saved GPR continuation. Source-only review of
+the original fixtures is not evidence that a title or a rendered frame ran.

@@ -78,6 +78,7 @@ pub use event_queue::{
     EventQueueWait, EventQueueWaitAction, GraphicsInterrupt, VideoClose, VideoEventKind,
     VideoInterrupt,
 };
+pub use fiber::{AdmittedFiberTransfer, FiberAction, FiberKey, FiberTransferKind};
 pub use filesystem::{ReadOnlyFile, ReadOnlyRoot};
 pub use font::{AdmittedFontParser, FontParserAction};
 pub use handle_usage::HandleUsage;
@@ -1216,10 +1217,21 @@ impl Kernel {
             | FiberOptParamInitialize
             | FiberFinalize
             | FiberGetInfo
-            | FiberRename => {
-                self.fibers
-                    .invoke(service, args, stack_pointer, guest, &mut self.budget)
-            }
+            | FiberRename
+            | FiberRun
+            | FiberSwitch
+            | FiberReturnToThread
+            | FiberGetSelf
+            | FiberStartContextSizeCheck
+            | FiberStopContextSizeCheck
+            | FiberGetThreadFramePointerAddress => self.fibers.invoke(
+                service,
+                self.threads.active().context(),
+                args,
+                stack_pointer,
+                guest,
+                &mut self.budget,
+            ),
             MapNamedDirect => {
                 let stack =
                     stack_pointer.ok_or(Failure::Unsupported("missing library stack arguments"))?;

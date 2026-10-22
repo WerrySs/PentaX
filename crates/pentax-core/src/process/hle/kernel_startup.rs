@@ -22,6 +22,10 @@ use std::fmt;
 mod libc_builtin;
 mod native_execution;
 pub use libc_builtin::{LibcBuiltinError, LibcBuiltinUsage, PreparedLibcBuiltins};
+mod fiber_runtime;
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+pub use fiber_runtime::FiberEntryLayout;
+pub use fiber_runtime::PreparedFiberAction;
 mod pthread_once;
 pub use pthread_once::PreparedPthreadOnce;
 mod netctl_callback;
@@ -719,6 +723,7 @@ pub struct PreparedNativeKernelStartup<'plan, 'image> {
     initial_entry: Option<NativeEntryLayout>,
     active_tls: usize,
     thread_runtime: pthread_create::ThreadRuntime,
+    fiber_runtime: fiber_runtime::FiberRuntime,
 }
 
 impl fmt::Debug for PreparedNativeKernelStartup<'_, '_> {
@@ -815,7 +820,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         }
         match self.kernel_stop_for(source, stop, false, None)? {
             NativeServiceAction::Returned(value) => Ok(value),
-            NativeServiceAction::Load(_)
+            NativeServiceAction::Fiber(_)
+            | NativeServiceAction::Load(_)
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
             | NativeServiceAction::FontParser(_)
@@ -964,7 +970,32 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 None
             },
         };
-        if matches!(
+        if actions
+            && matches!(
+                marker.registration.service,
+                pentax_kernel::Service::FiberRun
+                    | pentax_kernel::Service::FiberSwitch
+                    | pentax_kernel::Service::FiberReturnToThread
+            )
+        {
+            let action = self
+                .kernel
+                .admit_fiber_transfer(marker.registration.service, stop.args, &memory)
+                .map_err(KernelStartupError::Kernel)?;
+            fiber_runtime::prepare(
+                &mut memory,
+                &mut self.kernel,
+                &mut self.fiber_runtime,
+                &mut self.thread_runtime,
+                action,
+                stop.syscall_pc,
+                stop.service_id,
+                stop.args.0,
+                stack_pointer,
+                self.active_tls,
+                self.initial_entry,
+            )
+        } else if matches!(
             marker.registration.service,
             pentax_kernel::Service::SysmoduleLoad | pentax_kernel::Service::SysmoduleLoadInternal
         ) && module_lifecycle::has_game_module(&memory, stop.args.0[0] as u16)
@@ -1205,6 +1236,10 @@ fn prepare_in<'plan, 'image>(
         initial_entry: None,
         active_tls: 0,
         thread_runtime: pthread_create::ThreadRuntime::new(plan.limits.kernel.max_thread_contexts)?,
+        fiber_runtime: fiber_runtime::FiberRuntime::new(
+            plan.limits.kernel.max_handles,
+            plan.limits.kernel.max_thread_contexts,
+        )?,
     })
 }
 

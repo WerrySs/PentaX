@@ -19,6 +19,7 @@ pub struct NativeThreadContext {
     suspended: Vec<SuspendedCall>,
     observed_return: Option<CallObservation>,
     string_repeat: Option<strings::RepeatState>,
+    fiber_origin: Option<NativeFiberOrigin>,
 }
 
 impl std::fmt::Debug for NativeThreadContext {
@@ -121,6 +122,7 @@ impl NativeBlockStepper<'_, '_, '_> {
             suspended: Vec::new(),
             observed_return: None,
             string_repeat: None,
+            fiber_origin: None,
         })
     }
 
@@ -161,10 +163,11 @@ impl NativeBlockStepper<'_, '_, '_> {
             &mut parked.observed_return,
         );
         swap(&mut self.machine.string_repeat, &mut parked.string_repeat);
+        swap(&mut self.machine.fiber_origin, &mut parked.fiber_origin);
         Ok(())
     }
 
-    fn validate_thread_state(
+    pub(super) fn validate_thread_state(
         &mut self,
         memory: &PausedNativeMemory<'_>,
         state: &NativeCpuState,

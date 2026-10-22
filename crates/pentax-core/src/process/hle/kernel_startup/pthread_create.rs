@@ -48,12 +48,15 @@ struct Record {
     exit: Option<thread_exit::Exit>,
 }
 pub(super) struct ThreadRuntime {
-    window: Option<NativeRange>,
-    next: u64,
+    pub(super) window: Option<NativeRange>,
+    pub(super) next: u64,
     records: Vec<Record>,
     maximum: usize,
 }
 impl ThreadRuntime {
+    pub(super) fn stack_ranges(&self) -> impl Iterator<Item = NativeRange> + '_ {
+        self.records.iter().map(|record| record.layout.stack)
+    }
     pub(super) fn new(maximum: usize) -> Result<Self, KernelStartupError> {
         let mut records = Vec::new();
         records
@@ -311,6 +314,16 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         self.pause()?
             .preflight_reserved_unmapped(start, next - start)
             .map_err(memory)?;
+        if borrowed {
+            let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+            self.fiber_runtime.preflight_thread_stack(
+                &paused,
+                layout.stack,
+                &self.kernel,
+                &mut self.provider_work,
+                self.plan.limits.max_provider_work,
+            )?;
+        }
         if borrowed {
             // The game retains every byte and the original mapping. Guard-size
             // attributes are ignored for user stacks in the pinned source.

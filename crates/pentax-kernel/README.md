@@ -1395,3 +1395,20 @@ returns 0x80bc0010. Nonnegative IDs write exactly four zero bytes through
 checked guest backing. This stateless local type does not enumerate a host
 keyboard, initialize IME or claim text conversion. Only the explicit
 libSceConvertKeycode module1.0/library1 pair is registered.
+
+### Fiber transfers
+
+The Fiber profile includes Run, Switch, ReturnToThread, GetSelf, context-size
+checks and the source frame-pointer query alongside initialization and lifecycle.
+Transfers retain generation-bound objects and per-thread Run roots. Idle fibers
+may resume on another guest pthread; RUNNING ownership remains exclusive. Saved
+80-byte ABI records are observations, never native execution authority. The
+native owner separately proves executable entry, owned stack and continuation,
+then publishes object and optional result writes atomically after leaving the
+old stack. A saved output pointer is checked again when its fiber resumes.
+
+Only canonical source NIDs and the three observed paired-prefix execution
+aliases are added. Original provider ordinals remain unchanged. Context-size
+checks and the zero frame-pointer result reproduce the pinned implementation.
+Object records retain the existing lifetime handle cap; reinitializing an object
+reuses its slot with a fresh generation. No commercial compatibility follows.

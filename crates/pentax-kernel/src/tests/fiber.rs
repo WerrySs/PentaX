@@ -255,3 +255,6 @@ fn fiber_names_observe_zeroing_aliases_and_missing_or_truncated_call_frames_refu
         None
     );
 }
+
+#[path = "fiber/runtime.rs"]
+mod runtime;

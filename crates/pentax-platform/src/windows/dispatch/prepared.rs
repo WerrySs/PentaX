@@ -453,6 +453,8 @@ mod register_trace;
 pub use libc_builtin::NativeLibcBuiltin;
 #[path = "prepared/cpu_identification.rs"]
 mod cpu_identification;
+#[path = "prepared/fibers.rs"]
+mod fibers;
 #[path = "prepared/float_ops.rs"]
 mod float_ops;
 #[path = "prepared/fused_float.rs"]
@@ -479,6 +481,7 @@ mod segments;
 mod strings;
 #[path = "prepared/threads.rs"]
 mod threads;
+pub use fibers::{NativeFiberContext, NativeFiberOrigin};
 #[path = "prepared/timestamp_counter.rs"]
 mod timestamp_counter;
 #[path = "prepared/vector_shifts.rs"]
@@ -600,6 +603,8 @@ pub struct NativeBlockMachine {
     declarations: Vec<pentax_codegen::DeclaredAppliedWrite>,
     thread_index: usize,
     thread_stacks: Vec<NativeStackFrame>,
+    fiber_origin: Option<NativeFiberOrigin>,
+    fiber_slots: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 impl std::fmt::Debug for NativeBlockMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -910,6 +915,8 @@ impl<'view, 'plan, 'image> NativeBlockStepper<'view, 'plan, 'image> {
                 declarations,
                 thread_index: 0,
                 thread_stacks,
+                fiber_origin: None,
+                fiber_slots: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             },
         })
     }

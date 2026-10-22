@@ -402,6 +402,14 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe native_acm_context_creation_binds_exact_scopes_and_writes_sequential_u32_handles -- --test-threads=1
+      - name: Test owned fiber context exchange and refusal boundaries
+        run: >-
+          cargo test --locked -p pentax-platform --lib tests::fibers:: -- --test-threads=1
+      - name: Test original native fiber execution and retained lifecycle
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe -- kernel_results::fiber_execution:: kernel_results::fiber:: --test-threads=1
       - name: Test native event-flag parking and complete thread context restoration
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

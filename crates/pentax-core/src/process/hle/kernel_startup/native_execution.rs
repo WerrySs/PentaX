@@ -230,7 +230,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         }
         match self.service_for(source, request, false)? {
             NativeServiceAction::Returned(value) => Ok(value),
-            NativeServiceAction::Load(_)
+            NativeServiceAction::Fiber(_)
+            | NativeServiceAction::Load(_)
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
             | NativeServiceAction::FontParser(_)

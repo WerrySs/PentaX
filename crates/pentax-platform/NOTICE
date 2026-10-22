@@ -22,3 +22,13 @@ The adapted implementation is distributed under GPL-2.0-only; the full license
 is in ../../LICENSE. Existing original files retain their individual SPDX
 grants. The Vulkan adaptation has its separate notice in src/vulkan/NOTICE;
 this notice does not replace that attribution or dependency license notices.
+
+Fiber execution adaptation: src/libs/libKernel.cpp, Fiber namespace and
+FiberSaveContext/FiberRestoreContext, from KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+Verified source Git blob b02a4d77404f839371d96d1f549b53043e77d25e.
+PentaX adds generation-bound service admission, opaque owner/executor contexts,
+checked guest stack/source selection, atomic ABI publication, per-thread roots,
+bounded migration policy and original fixtures. Full CPU/control-state transport
+and lazy bounded contextless stacks are PentaX policies, not claims that the
+reference assembly saves floating/vector state or implements these safety checks.

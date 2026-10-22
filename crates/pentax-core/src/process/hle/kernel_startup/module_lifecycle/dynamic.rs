@@ -25,9 +25,12 @@ const MAX_WORK: u64 = 64 * 1024 * 1024 * 1024;
 const GRANULE: u64 = 65_536;
 
 /// An admitted service result or an owned request that must suspend its caller.
+// The one pending opaque fiber ticket stays inline and allocation-free.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum NativeServiceAction {
     Returned(u64),
+    Fiber(super::super::PreparedFiberAction),
     Load(PendingModuleLoad),
     Once(super::super::PreparedPthreadOnce),
     NetCtl(super::super::PreparedNetCtlCallback),

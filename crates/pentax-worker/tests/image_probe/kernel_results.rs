@@ -192,6 +192,8 @@ mod dialog;
 mod entitlement;
 #[path = "fiber.rs"]
 mod fiber;
+#[path = "fiber_execution.rs"]
+mod fiber_execution;
 #[path = "font_native.rs"]
 mod font_native;
 #[path = "handle_capacity.rs"]

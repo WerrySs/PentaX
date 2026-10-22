@@ -848,3 +848,28 @@ marker and its exact module/library descriptors. Existing function markers,
 object RVAs, 2048-function ceiling and image/mapped metadata bounds remain
 unchanged. Original consumers cover qualified linking, current whole-span
 write rights, cross-page refusal, and forged-site rejection.
+
+### Prepared fiber continuations
+
+Fiber actions bind the current source epoch and memory owner to actual opaque
+executor contexts. Fresh entries require initialized immutable RX source, exact
+RW/NX stack bounds and a checked native return marker. Saved guest context bytes
+cannot select host state. Run roots belong to the currently selected pthread;
+idle fibers can migrate without replacing that thread's TLS or errno identity.
+Actual root-entry RET is distinguished from nested HLE callback return by a
+sealed entry/call/stack origin. Only the actual entry return terminates a fiber.
+
+Provided contexts keep their exact bounds. A contextless fiber lazily receives a
+256 KiB RW/NX stack with unmapped guards in the explicitly configured reserved
+thread-storage capability. One bounded stack slot is retained per initialized
+object address and reused by later generations. This avoids the reference
+implementation's environment-dependent small-stack host workaround. Current
+stack/object and pthread/fiber physical-backing separation is rechecked before
+selection; read/write permissions alone cannot authorize a remapped alias.
+
+The worker exchanges CPU contexts without executing code, then commits atomic
+ABI/results before destination entry. A failure after exchange stops execution
+terminally; it is not a completed or unchanged service return. Suspended HLE
+callbacks retain their existing thread/TLS bindings: their cross-thread migration
+is explicitly unsupported. Ordinary idle fiber migration remains supported.
+These source and original-fixture contracts do not establish a game frame.

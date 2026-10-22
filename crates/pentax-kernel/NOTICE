@@ -739,3 +739,13 @@ ABI, null-before-user validation, signed int32 user ID and uint32 output.
 The exact libSceConvertKeycode module1.0/library1 pair is an explicit PentaX
 compatibility binding; the upstream source registers ConvertKeycode.
 No upstream full-prefix registration or additional conversion API is claimed.
+
+Fiber execution adaptation: src/libs/libKernel.cpp, Fiber namespace and
+FiberSaveContext/FiberRestoreContext, from KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+Verified source Git blob b02a4d77404f839371d96d1f549b53043e77d25e.
+PentaX adds generation-bound service admission, opaque owner/executor contexts,
+checked guest stack/source selection, atomic ABI publication, per-thread roots,
+bounded migration policy and original fixtures. Full CPU/control-state transport
+and lazy bounded contextless stacks are PentaX policies, not claims that the
+reference assembly saves floating/vector state or implements these safety checks.

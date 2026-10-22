@@ -26,6 +26,7 @@ use std::sync::OnceLock;
 mod affine_trace;
 mod causality;
 mod dispatch_context;
+mod fiber_runtime;
 // The optional local window runs on this supervised worker thread, outside
 // every guest entry and memory pause. Ordinary probes retain no consumer.
 pub(crate) mod frame_bridge;
@@ -666,6 +667,10 @@ fn run_prepared_consumer_inner<'plan, 'image>(
             limits.stop_after_seconds,
             limits.interactive,
         )?,
+        fibers: fiber_runtime::Fibers::new(
+            session.fiber_context_limit(),
+            limits.dispatch.max_thread_contexts,
+        ),
     };
     state
         .frames
@@ -829,6 +834,7 @@ struct RunState<'plan, 'image> {
     report: Option<NativeSessionReport>,
     frame_pump_blocks: Option<u64>,
     observation_stop: observation_stop::ObservationStop,
+    fibers: fiber_runtime::Fibers,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1305,6 +1311,28 @@ fn execute_epoch<'plan, 'image>(
             match stop {
                 NativeBlockStop::Resume { .. } => {}
                 NativeBlockStop::Returned { value } => {
+                    let returned =
+                        engine
+                            .observed_return()
+                            .ok_or(NativeSessionError::FixtureInvariant(
+                                "missing actual native return",
+                            ))?;
+                    if let Some(action) = session.fiber_entry_return(proof, &returned)? {
+                        let result = state.fibers.transfer(
+                            session,
+                            proof,
+                            &mut engine,
+                            action,
+                            &mut state.frames,
+                            &mut progress.phase,
+                            &mut state.admission_work,
+                            limits.max_admission_work,
+                        );
+                        progress.admission_work = state.admission_work;
+                        progress.dispatch = engine.usage();
+                        result?;
+                        continue;
+                    }
                     if let Some((start, nested, phase)) = state.frames.last().copied() {
                         let returned = engine.observed_return().ok_or(
                             NativeSessionError::FixtureInvariant("missing initializer return"),
@@ -1541,6 +1569,27 @@ fn execute_epoch<'plan, 'image>(
                     // A typed service error returns above and drops this engine.
                     // Never invent a return-domain mapping or resume with zero.
                     match action {
+                        NativeServiceAction::Fiber(pending) => {
+                            let result = state
+                                .fibers
+                                .transfer(
+                                    session,
+                                    proof,
+                                    &mut engine,
+                                    pending,
+                                    &mut state.frames,
+                                    &mut progress.phase,
+                                    &mut state.admission_work,
+                                    limits.max_admission_work,
+                                )
+                                .inspect_err(|_| {
+                                    progress.failed_kernel_service =
+                                        session.last_admitted_kernel_service();
+                                });
+                            progress.admission_work = state.admission_work;
+                            progress.dispatch = engine.usage();
+                            result?;
+                        }
                         NativeServiceAction::WaitThread(pending) => {
                             state.scheduling.wait(session, pending, token)?;
                         }

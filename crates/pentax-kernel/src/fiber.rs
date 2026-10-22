@@ -3,8 +3,8 @@
 // Modified 2026 for PentaX: owned fiber lifecycle and atomic guest ABI writes.
 // Adapted from pinned src/libs/libKernel.cpp Fiber namespace; see NOTICE.
 
-//! Fiber initialization is actual retained guest storage, not execution evidence.
-//! Run/switch/return must separately admit saved CPU state and executable source.
+//! Source ABI and generation-bound fiber state. Run/switch/return admission
+//! remains separate from authenticated native context exchange and completion.
 
 use crate::budget::Budget;
 use crate::{CallArgs, Failure, GuestAccess, GuestError, GuestWrite, Limits, Service};
@@ -13,6 +13,8 @@ const NULL: u64 = 0x8059_0001;
 const ALIGNMENT: u64 = 0x8059_0002;
 const RANGE: u64 = 0x8059_0003;
 const INVALID: u64 = 0x8059_0004;
+const PERMISSION: u64 = 0x8059_0005;
+const RUNNING: u32 = 1;
 const STATE: u64 = 0x8059_0006;
 const MAGIC_START: u32 = 0xdef1_649c;
 const MAGIC_END: u32 = 0xb375_92a0;
@@ -26,10 +28,22 @@ const OBJECT_BYTES: usize = 208;
 struct Record {
     address: u64,
     state: u32,
+    generation: u64,
+    entry: u64,
+    argument: u64,
+    context: u64,
+    size: u64,
+    resume_output: Option<u64>,
+    execution_stack: Option<(u64, u64)>,
 }
 pub(crate) struct FiberState {
     records: Vec<Record>,
     maximum: usize,
+    maximum_threads: usize,
+    next_generation: u64,
+    next_serial: u64,
+    threads: Vec<runtime::Thread>,
+    pending: Option<AdmittedFiberTransfer>,
 }
 
 fn end(address: u64, length: u64) -> Result<u64, Failure> {
@@ -79,12 +93,23 @@ impl FiberState {
         Ok(Self {
             records,
             maximum: limits.max_handles,
+            maximum_threads: limits.max_thread_contexts,
+            next_generation: 1,
+            next_serial: 1,
+            threads: {
+                let mut v = Vec::new();
+                v.try_reserve_exact(limits.max_thread_contexts)
+                    .map_err(|_| Failure::Allocation)?;
+                v
+            },
+            pending: None,
         })
     }
 
     pub(crate) fn invoke(
         &mut self,
         service: Service,
+        thread: u64,
         args: CallArgs,
         stack: Option<u64>,
         guest: &mut impl GuestAccess,
@@ -141,6 +166,9 @@ impl FiberState {
                 };
                 match service {
                     FiberFinalize => {
+                        if self.pending.is_some() {
+                            return Err(Failure::Unsupported("pending fiber finalization"));
+                        }
                         if self.records[index].state != IDLE || word(&object, 4) != IDLE {
                             return Ok(STATE);
                         }
@@ -179,7 +207,32 @@ impl FiberState {
                 }
                 Ok(0)
             }
-            _ => Err(Failure::Unsupported("fiber execution/context switching")),
+            FiberGetSelf | FiberGetThreadFramePointerAddress => {
+                if a[0] == 0 {
+                    return Ok(NULL);
+                }
+                let value = if service == FiberGetSelf {
+                    self.threads
+                        .iter()
+                        .find(|row| row.thread == thread)
+                        .and_then(|row| row.current)
+                        .map_or(0, |key| key.address())
+                } else {
+                    0
+                };
+                budget.write(
+                    guest,
+                    &[GuestWrite {
+                        address: a[0],
+                        bytes: &value.to_le_bytes(),
+                    }],
+                )?;
+                Ok(0)
+            }
+            FiberStartContextSizeCheck | FiberStopContextSizeCheck => Ok(0),
+            _ => Err(Failure::Unsupported(
+                "prepared fiber execution/context switching",
+            )),
         }
     }
 
@@ -192,6 +245,9 @@ impl FiberState {
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
     ) -> Result<u64, Failure> {
+        if self.pending.is_some() {
+            return Err(Failure::Unsupported("pending fiber initialization"));
+        }
         let [address, name_pointer, entry, argument, context, size] = a;
         if address == 0 || name_pointer == 0 || entry == 0 {
             return Ok(NULL);
@@ -224,6 +280,10 @@ impl FiberState {
             }
             budget.can_add_handle()?;
         }
+        let generation = self.next_generation;
+        let next_generation = generation
+            .checked_add(1)
+            .ok_or(Failure::Limit("fiber generation"))?;
         let copied_name = name(guest, budget, name_pointer, Some((address, object_end)))?;
         let mut object = [0; OBJECT_BYTES];
         object[..4].copy_from_slice(&MAGIC_START.to_le_bytes());
@@ -259,14 +319,35 @@ impl FiberState {
         // and shared handle admission precede that transaction; no allocation
         // or fallible mutation follows it. Reinitialization replaces this record.
         if let Some(index) = index {
-            self.records[index].state = IDLE;
+            self.records[index] = Record {
+                address,
+                state: IDLE,
+                generation,
+                entry,
+                argument,
+                context,
+                size,
+                resume_output: None,
+                execution_stack: (context != 0).then_some((context, context_end)),
+            };
         } else {
             self.records.push(Record {
                 address,
                 state: IDLE,
+                generation,
+                entry,
+                argument,
+                context,
+                size,
+                resume_output: None,
+                execution_stack: (context != 0).then_some((context, context_end)),
             });
             budget.added_handle();
         }
+        self.next_generation = next_generation;
         Ok(0)
     }
 }
+
+mod runtime;
+pub use runtime::{AdmittedFiberTransfer, FiberAction, FiberKey, FiberTransferKind};

@@ -1063,3 +1063,23 @@ when first mapped. Whole section capacity still consumes the backing allowance;
 aliases and remaps reuse existing commitment. Compact fixtures retain eager
 sections. A typed memory stop can also report the latest transaction's closed
 host operation and numeric Win32 code, excluding addresses and raw error text.
+
+Prepared Fiber Run, Switch and ReturnToThread use bounded continuation banks on
+the existing guest executor. Each selected pthread retains its own Run root and
+TLS; an idle fiber can resume on another pthread within the same memory owner
+and executor. Actual entry returns terminate that fiber, while nested HLE
+callback returns retain their existing completion path. Suspended callback
+chains may resume only on the same pthread and TLS; migration to another pthread
+or TLS with such a chain is explicitly refused before the CPU exchange. No
+Windows host fibers are used.
+
+PentaX parks the complete owned CPU state, including vector lanes, flags and
+floating control/status. This is an emulator continuation policy: the pinned
+source Fiber assembly saves an 80-byte GPR continuation and does not establish
+a caller-saved SIMD preservation guarantee. Each distinct initialized guest
+object address retains one lifetime handle/record under the existing finite
+caps; Finalize does not release that handle. Reinitialization at the same address
+uses a new generation and releases the invalid parked CPU slot before replacing
+it. Entry, stack, owner, origin, current-thread root, outputs and live physical
+stack separation remain checked. Original native fixtures cover these paths;
+source review alone establishes neither successful execution nor title startup.
