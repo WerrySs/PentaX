@@ -108,15 +108,16 @@ fn original_owner() -> (NativeAddressSpace, u64) {
             NativePermissions::READ_WRITE.with_gpu(true, true),
         )
         .unwrap();
-    let mut memory = owner.pause().unwrap();
-    memory.write(base + 0x8000, &stage_bytes([0.0; 4])).unwrap();
-    memory
-        .write(base + 0x9000, &stage_bytes([1.0, 0.0, 0.0, 1.0]))
-        .unwrap();
-    memory
-        .write(base + 0x10000, &SENTINEL.repeat(WIDTH * HEIGHT))
-        .unwrap();
-    drop(memory);
+    {
+        let mut memory = owner.pause().unwrap();
+        memory.write(base + 0x8000, &stage_bytes([0.0; 4])).unwrap();
+        memory
+            .write(base + 0x9000, &stage_bytes([1.0, 0.0, 0.0, 1.0]))
+            .unwrap();
+        memory
+            .write(base + 0x10000, &SENTINEL.repeat(WIDTH * HEIGHT))
+            .unwrap();
+    }
     (owner, base)
 }
 
