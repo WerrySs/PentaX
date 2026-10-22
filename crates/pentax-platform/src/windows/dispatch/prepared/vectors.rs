@@ -368,6 +368,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || vector_shifts::form(instruction.code()).is_some()
         || mxcsr_control::store(instruction.code()).is_some()
         || x87_control::supported(instruction.code())
+        || x87_data::supported(instruction.code())
         || mask_layout(instruction.code()).is_some()
         || test_width(instruction.code()).is_some()
         || packed_vectors::supported(instruction.code())
@@ -652,6 +653,13 @@ impl NativeBlockStepper<'_, '_, '_> {
         let mut transferred = 0;
         if x87_control::supported(instruction.code()) {
             transferred = x87_control::execute(
+                instruction,
+                &mut next,
+                memory,
+                self.machine.usage.vector_bytes,
+            )?;
+        } else if x87_data::supported(instruction.code()) {
+            transferred = x87_data::execute(
                 instruction,
                 &mut next,
                 memory,

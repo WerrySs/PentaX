@@ -490,6 +490,8 @@ mod vector_shifts;
 mod vectors;
 #[path = "prepared/x87_control.rs"]
 mod x87_control;
+#[path = "prepared/x87_data.rs"]
+mod x87_data;
 pub use threads::NativeThreadContext;
 
 // Publication history is machine-local, hence implicitly qualified by its

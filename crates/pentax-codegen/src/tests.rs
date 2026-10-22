@@ -874,3 +874,5 @@ fn partial_source_patch_intersections_use_the_same_retained_write_bytes() {
 }
 
 mod signed_comparisons;
+
+mod x87_data;
