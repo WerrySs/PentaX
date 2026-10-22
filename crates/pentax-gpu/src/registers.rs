@@ -391,11 +391,24 @@ pub fn contains_indirect(buffers: &[&[u8]]) -> Result<bool, Error> {
     for bytes in buffers {
         let mut at = 0usize;
         while at < bytes.len() {
-            let words = packet_words(&bytes[at..])?;
+            let words = packet_words(&bytes[at..]).map_err(|error| match error {
+                Error::Unsupported(reason) => Error::Packet {
+                    dword: at / 4,
+                    reason,
+                },
+                Error::Packet { dword, reason } => Error::Packet {
+                    dword: at / 4 + dword,
+                    reason,
+                },
+                other => other,
+            })?;
             let end = at
                 .checked_add(words.checked_mul(4).ok_or(Error::Limit("packet extent"))?)
                 .filter(|end| *end <= bytes.len())
-                .ok_or(Error::Unsupported("truncated command packet"))?;
+                .ok_or(Error::Packet {
+                    dword: at / 4,
+                    reason: "truncated command packet",
+                })?;
             found |= indirect_opcode(Header::new(word(bytes, at)));
             at = end;
         }

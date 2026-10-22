@@ -675,8 +675,11 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
                 } else {
                     [0, 1f32.to_bits(), 0]
                 };
+                let pixel_layout = product.pixel().manifest().push_data().unwrap();
+                assert_eq!(pixel_layout.start_dword, 16);
+                assert_eq!(pixel_layout.user_sgprs.as_slice(), &[0, 1, 2]);
                 assert_eq!(
-                    &product.pixel_push_data()[..12],
+                    &product.pixel_push_data()[64..76],
                     &bytes(&expected_pixel_words)
                 );
                 assert!(product.usage().shader_words > 0);

@@ -191,8 +191,22 @@ impl Driver {
                 .max_preparation_work
                 .saturating_sub(self.usage.preparation_work),
         );
-        let ordered =
-            pentax_gpu::contains_indirect_registers(&buffers).map_err(Failure::Preparation)?;
+        let mut ordered = false;
+        for (buffer, bytes) in buffers.iter().enumerate() {
+            ordered |= pentax_gpu::contains_indirect_registers(&[bytes]).map_err(|error| {
+                Failure::GraphicsPreparation(match error {
+                    compute::Error::Packet { dword, reason } => draw::Error::Packet {
+                        buffer,
+                        dword,
+                        reason,
+                    },
+                    compute::Error::Limit(reason) => draw::Error::Limit(reason),
+                    compute::Error::Allocation => draw::Error::Allocation,
+                    compute::Error::Unsupported(reason) => draw::Error::Unsupported(reason),
+                    _ => draw::Error::Unsupported("graphics packet classification"),
+                })
+            })?;
+        }
         let mut plan = if ordered {
             GraphicsCommands::Ordered(
                 draw::OrderedCommands::prepare(&buffers, &sources, initial, &commands)
