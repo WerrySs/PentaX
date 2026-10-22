@@ -681,32 +681,42 @@ mod tests {
         );
         let captured = capture(&memory, &[root]);
         assert_eq!(captured.usage().captured_buffers, 5); // repeated non-active reads are legal
-        let mut limits = CommandLimits::default();
-        limits.max_buffers = 2;
+        let limits = CommandLimits {
+            max_buffers: 2,
+            ..Default::default()
+        };
         assert!(matches!(
             CapturedCommands::capture(&[root], &memory, &limits),
             Err(Error::Limit(_))
         ));
-        limits = CommandLimits::default();
-        limits.max_command_bytes = root.size as usize + child.size as usize;
+        let limits = CommandLimits {
+            max_command_bytes: root.size as usize + child.size as usize,
+            ..Default::default()
+        };
         assert!(matches!(
             CapturedCommands::capture(&[root], &memory, &limits),
             Err(Error::Limit("graphics captured command bytes"))
         ));
-        limits = CommandLimits::default();
-        limits.max_packets = 1;
+        let limits = CommandLimits {
+            max_packets: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             CapturedCommands::capture(&[root], &memory, &limits),
             Err(Error::Limit("graphics captured packets"))
         ));
-        limits = CommandLimits::default();
-        limits.max_host_bytes = 1;
+        let limits = CommandLimits {
+            max_host_bytes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             CapturedCommands::capture(&[root], &memory, &limits),
             Err(Error::Limit(_))
         ));
-        limits = CommandLimits::default();
-        limits.max_work = 1;
+        let limits = CommandLimits {
+            max_work: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             CapturedCommands::capture(&[root], &memory, &limits),
             Err(Error::Limit(_))
