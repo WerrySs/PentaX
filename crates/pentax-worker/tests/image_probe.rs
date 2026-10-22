@@ -28,6 +28,9 @@ mod cache_hints;
 #[path = "image_probe/x87_data.rs"]
 mod x87_data;
 
+#[path = "image_probe/x87_arithmetic.rs"]
+mod x87_arithmetic;
+
 #[path = "image_probe/late_binding.rs"]
 mod late_binding;
 

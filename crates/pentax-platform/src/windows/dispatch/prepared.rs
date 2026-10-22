@@ -26,7 +26,9 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Owned guest x87 environment and physical R0..R7 bits. Status TOP selects
-/// logical ST0; no field is applied to the host FPU.
+/// logical ST0. Checked arithmetic copies validated operands and PC/RC into
+/// a closed host-state-restoring scratch transaction; no guest saved environment
+/// is installed on the host FPU.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeX87State {
     pub control_word: u16,
@@ -488,6 +490,8 @@ mod timestamp_counter;
 mod vector_shifts;
 #[path = "prepared/vectors.rs"]
 mod vectors;
+#[path = "prepared/x87_arithmetic.rs"]
+mod x87_arithmetic;
 #[path = "prepared/x87_control.rs"]
 mod x87_control;
 #[path = "prepared/x87_data.rs"]

@@ -2272,7 +2272,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-cli"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-config",
  "pentax-core",
@@ -2284,7 +2284,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-codegen"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "iced-x86",
  "pentax-linker",
@@ -2293,7 +2293,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-config"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "serde",
  "toml",
@@ -2301,7 +2301,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-core"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-codegen",
  "pentax-config",
@@ -2316,7 +2316,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-desktop"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "eframe",
  "gilrs",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-gpu"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-shader",
  "pentax-shader-compiler",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-kernel"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "cap-std",
  "epaint_default_fonts",
@@ -2352,18 +2352,18 @@ dependencies = [
 
 [[package]]
 name = "pentax-linker"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-loader",
 ]
 
 [[package]]
 name = "pentax-loader"
-version = "0.32.45"
+version = "0.32.46"
 
 [[package]]
 name = "pentax-platform"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "ash",
  "cap-std",
@@ -2378,22 +2378,22 @@ dependencies = [
 
 [[package]]
 name = "pentax-session"
-version = "0.32.45"
+version = "0.32.46"
 
 [[package]]
 name = "pentax-shader"
-version = "0.32.45"
+version = "0.32.46"
 
 [[package]]
 name = "pentax-shader-compiler"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-shader",
 ]
 
 [[package]]
 name = "pentax-worker"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "pentax-codegen",
  "pentax-config",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "pentax-xtask"
-version = "0.32.45"
+version = "0.32.46"
 dependencies = [
  "serde",
  "serde_json",

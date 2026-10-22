@@ -1575,3 +1575,6 @@ mod signed_comparisons;
 
 #[path = "tests/x87_data.rs"]
 mod x87_data_tests;
+
+#[path = "tests/x87_arithmetic.rs"]
+mod x87_arithmetic;

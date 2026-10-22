@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 //! Exact integer-only x87 loads and stack transfers over retained physical state.
-//! Narrowing stores/arithmetic and disputed extended SNaN/pseudo/unnormal
+//! Narrowing stores and disputed extended SNaN/pseudo/unnormal
 //! payloads remain explicit stops. No guest state is installed on the host FPU.
 use super::{NativeCpuState, NativeDispatchError, NativeX87State};
 use crate::native_memory::PausedNativeMemory;
@@ -45,22 +45,22 @@ fn form(code: Code) -> Option<Operation> {
 pub(super) fn supported(code: Code) -> bool {
     form(code).is_some()
 }
-fn top(state: &NativeX87State) -> usize {
+pub(super) fn top(state: &NativeX87State) -> usize {
     usize::from((state.status_word >> 11) & 7)
 }
 fn set_top(state: &mut NativeX87State, slot: usize) {
     state.status_word = (state.status_word & !0x3800) | ((slot as u16) << 11);
 }
-fn tag(state: &NativeX87State, slot: usize) -> u16 {
+pub(super) fn tag(state: &NativeX87State, slot: usize) -> u16 {
     (state.tag_word >> (slot * 2)) & 3
 }
-fn set_tag(state: &mut NativeX87State, slot: usize, value: u16) {
+pub(super) fn set_tag(state: &mut NativeX87State, slot: usize, value: u16) {
     state.tag_word = (state.tag_word & !(3 << (slot * 2))) | (value << (slot * 2));
 }
-fn pending(state: &NativeX87State) -> bool {
+pub(super) fn pending(state: &NativeX87State) -> bool {
     state.status_word & !state.control_word & 0x3f != 0
 }
-fn raise(
+pub(super) fn raise(
     state: &mut NativeX87State,
     flags: u16,
     stack: Option<bool>,
@@ -88,7 +88,7 @@ fn components(value: &[u8; 10]) -> (u64, u16) {
         u16::from_le_bytes(value[8..].try_into().unwrap()) & 0x7fff,
     )
 }
-fn canonical(value: &[u8; 10]) -> Result<(), NativeDispatchError> {
+pub(super) fn canonical(value: &[u8; 10]) -> Result<(), NativeDispatchError> {
     let (significand, exponent) = components(value);
     let integer = significand >> 63 != 0;
     let fraction = significand & 0x7fff_ffff_ffff_ffff;
@@ -102,7 +102,7 @@ fn canonical(value: &[u8; 10]) -> Result<(), NativeDispatchError> {
     }
     Ok(())
 }
-fn classify(value: &[u8; 10]) -> u16 {
+pub(super) fn classify(value: &[u8; 10]) -> u16 {
     let (significand, exponent) = components(value);
     if exponent == 0 && significand == 0 {
         1
@@ -112,7 +112,10 @@ fn classify(value: &[u8; 10]) -> u16 {
         0
     }
 }
-fn widen(bytes: &[u8], state: &mut NativeX87State) -> Result<[u8; 10], NativeDispatchError> {
+pub(super) fn widen(
+    bytes: &[u8],
+    state: &mut NativeX87State,
+) -> Result<[u8; 10], NativeDispatchError> {
     let (bits, fraction_bits, exponent_bits, bias) = if bytes.len() == 4 {
         (
             u64::from(u32::from_le_bytes(bytes.try_into().unwrap())),
@@ -152,7 +155,10 @@ fn widen(bytes: &[u8], state: &mut NativeX87State) -> Result<[u8; 10], NativeDis
         sign | (exponent as i32 - bias + 16383) as u16,
     ))
 }
-fn register(instruction: &Instruction, operand: u32) -> Result<usize, NativeDispatchError> {
+pub(super) fn register(
+    instruction: &Instruction,
+    operand: u32,
+) -> Result<usize, NativeDispatchError> {
     let register = instruction.op_register(operand);
     if instruction.op_kind(operand) != OpKind::Register
         || !(Register::ST0..=Register::ST7).contains(&register)
@@ -190,7 +196,7 @@ fn source(state: &mut NativeX87State, slot: usize) -> Result<([u8; 10], u16), Na
         Ok((value, tag(state, slot)))
     }
 }
-fn pop(state: &mut NativeX87State) {
+pub(super) fn pop(state: &mut NativeX87State) {
     let old = top(state);
     set_tag(state, old, 3);
     set_top(state, (old + 1) & 7);
