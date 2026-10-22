@@ -281,11 +281,22 @@ fn signed_compare_evex_masks_mmx_and_explicit_rep_prefixes_do_not_enter_the_chec
                 );
                 engine.machine.phase = Phase::Terminal;
                 let usage = engine.usage();
-                assert!(
-                    engine
-                        .resolve(&mut arena.pause().unwrap(), &planned)
-                        .is_err()
-                );
+                let outcome = engine.resolve(&mut arena.pause().unwrap(), &planned);
+                if matches!(code[0], 0x62 | 0x0f) {
+                    assert_eq!(
+                        outcome,
+                        Ok(NativeBlockStop::Unsupported {
+                            guest_pc: state.guest_pc
+                        }),
+                        "code={code:x?}"
+                    );
+                } else {
+                    assert_eq!(
+                        outcome,
+                        Err(NativeDispatchError::UnsupportedVectorInstruction),
+                        "code={code:x?}"
+                    );
+                }
                 assert_eq!(engine.machine.state, state);
                 assert_eq!(engine.usage().vector_operations, usage.vector_operations);
                 assert_eq!(engine.usage().vector_bytes, usage.vector_bytes);
