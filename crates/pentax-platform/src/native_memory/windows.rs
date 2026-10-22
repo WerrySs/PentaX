@@ -740,7 +740,7 @@ impl PausedNativeMemory<'_> {
     /// retained only while this owner's mapping/protection metadata is unchanged.
     /// No payload, operand, guard, RSP or TLS proof is retained. Empty spans and
     /// cache hits still require a live owner, as with the individual checks.
-    pub(crate) fn preflight_read_write_non_executable(
+    pub fn preflight_read_write_non_executable(
         &self,
         address: u64,
         size: u64,

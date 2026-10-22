@@ -54,7 +54,7 @@ fn run_yield_resume_and_normal_return_publish_actual_source_fields_and_reject_re
     assert_eq!(guest.u64(72), ARG + 104);
     assert_eq!(guest.get(ARG + 200, 1), [1]);
     for (i, value) in saved.iter().enumerate() {
-        assert_eq!(guest.u64(104 + i * 8), *value);
+        assert_eq!(guest.u64(104 + i as u64 * 8), *value);
     }
     assert!(
         owner
@@ -84,7 +84,7 @@ fn run_yield_resume_and_normal_return_publish_actual_source_fields_and_reject_re
     assert_eq!(guest.u64(0x510), 0);
     // Completion invalidates the context but does not fabricate saved registers.
     for (i, value) in saved.iter().enumerate() {
-        assert_eq!(guest.u64(104 + i * 8), *value);
+        assert_eq!(guest.u64(104 + i as u64 * 8), *value);
     }
 }
 #[test]
