@@ -102,7 +102,7 @@ fn pause_stays_inside_decode_instruction_output_and_work_limits() {
     .unwrap();
     assert_eq!(plan.native_admission().emitted_instructions(), 1);
     assert!(
-        matches!(plan.exit().kind(), ExitKind::Fallthrough { target } if *target == BIAS + ENTRY as u64 + 2)
+        matches!(plan.exit().kind(), ExitKind::Fallthrough { target } if target == BIAS + ENTRY as u64 + 2)
     );
     for limits in [
         BlockLimits {
