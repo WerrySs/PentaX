@@ -696,8 +696,16 @@ errors return int32 -1 and update the active thread errno; success preserves it.
 Prefix updates and errno writes form one checked transaction before count or
 lifecycle publication. Absolute timespec validation precedes lookup/acquisition,
 as in the source. Available counts acquire immediately; an empty try returns
-EAGAIN and an already expired wait returns ETIMEDOUT. A wait requiring another
-thread remains Unsupported until the scheduler is implemented. `pshared` flags
+EAGAIN and an already expired wait returns ETIMEDOUT. Indefinite POSIX and direct
+pthread waits can retain an opaque thread-bound continuation on zero count.
+Enrollment publishes `has_waiters` before parking; ordinary posts, tries and
+waits preserve that flag until the last retained waiter completes. Readiness
+does not reserve count: another source call may acquire it first. Actual resume
+rechecks count and atomically publishes its prefix before consuming one count
+and the ticket. Output faults retain both count and membership. Destroy/reinit
+with retained waiters is explicitly unsupported; timed waits that require another
+thread remain unsupported. Scalar calls without scheduler continuation still
+refuse blocking. No host wait or fairness guarantee is introduced. `pshared` flags
 are retained metadata, not host interprocess synchronization; direct init
 requires flag zero and its diagnostic name does not create a named semaphore.
 

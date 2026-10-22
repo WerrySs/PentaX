@@ -8,6 +8,9 @@ use crate::{CallArgs, Errno, Failure, GuestAccess, GuestWrite, Kernel, Limits, S
 
 const MAX: u32 = i32::MAX as u32;
 
+mod wait;
+pub use wait::{PthreadSemaphoreWait, PthreadSemaphoreWaitAction};
+
 #[derive(Clone, Copy)]
 struct Semaphore {
     address: u64,
@@ -16,6 +19,8 @@ struct Semaphore {
 
 pub(crate) struct SemaphoreState {
     entries: Vec<Semaphore>,
+    waiters: Vec<wait::Waiter>,
+    max_waiters: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -61,9 +66,10 @@ impl Action {
     }
 }
 
-fn prefix(address: u64, count: u32, flags: Option<u32>) -> Payload {
+fn prefix(address: u64, count: u32, flags: Option<u32>, waiting: bool) -> Payload {
     let mut bytes = [0; 16];
     bytes[..2].copy_from_slice(&0x09fa_u16.to_le_bytes());
+    bytes[4..8].copy_from_slice(&u32::from(waiting).to_le_bytes());
     bytes[8..12].copy_from_slice(&count.to_le_bytes());
     if let Some(flags) = flags {
         bytes[12..].copy_from_slice(&flags.to_le_bytes());
@@ -85,7 +91,15 @@ impl SemaphoreState {
         entries
             .try_reserve_exact(limits.max_handles)
             .map_err(|_| Failure::Allocation)?;
-        Ok(Self { entries })
+        let mut waiters = Vec::new();
+        waiters
+            .try_reserve_exact(limits.max_thread_contexts)
+            .map_err(|_| Failure::Allocation)?;
+        Ok(Self {
+            entries,
+            waiters,
+            max_waiters: limits.max_thread_contexts,
+        })
     }
 
     fn plan(
@@ -95,7 +109,7 @@ impl SemaphoreState {
         guest: &impl GuestAccess,
         budget: &mut Budget,
     ) -> Result<Action, Failure> {
-        budget.work(self.entries.len() as u64 + 16)?;
+        budget.work((self.entries.len() + 2 * self.waiters.len()) as u64 + 16)?;
         let [address, arg, value, ..] = args.0;
         // The absolute wrapper validates the timespec before looking up sem.
         let timeout = match op {
@@ -136,11 +150,16 @@ impl SemaphoreState {
             if count > MAX {
                 return Ok(Action::result(Some(Errno::Invalid)));
             }
+            if self.has_waiters(address) {
+                return Err(Failure::Unsupported(
+                    "reinitializing a semaphore with retained waiters",
+                ));
+            }
             if index.is_none() {
                 budget.can_add_handle()?;
             }
             let mut action = Action::result(None);
-            action.payloads[0] = Some(prefix(address, count, Some(arg as u32)));
+            action.payloads[0] = Some(prefix(address, count, Some(arg as u32), false));
             action.change = Change::Set {
                 index,
                 entry: Semaphore { address, count },
@@ -154,6 +173,11 @@ impl SemaphoreState {
         let mut action = Action::result(None);
         match op {
             Operation::Destroy => {
+                if self.has_waiters(address) {
+                    return Err(Failure::Unsupported(
+                        "destroying a semaphore with retained waiters",
+                    ));
+                }
                 // The source does not clear nameid: no guest read is needed
                 // to preserve it, and the two writes commit together.
                 action.payloads[0] = Some(Payload {
@@ -187,7 +211,12 @@ impl SemaphoreState {
             }
             Operation::Post => {
                 entry.count += 1;
-                action.payloads[0] = Some(prefix(address, entry.count, None));
+                action.payloads[0] = Some(prefix(
+                    address,
+                    entry.count,
+                    None,
+                    self.has_waiters(address),
+                ));
                 action.change = Change::Set {
                     index: Some(index),
                     entry,
@@ -210,7 +239,12 @@ impl SemaphoreState {
                 } else {
                     return Err(Failure::Unsupported("POSIX semaphore blocking wait"));
                 }
-                action.payloads[0] = Some(prefix(address, entry.count, None));
+                action.payloads[0] = Some(prefix(
+                    address,
+                    entry.count,
+                    None,
+                    self.has_waiters(address),
+                ));
             }
             Operation::Init => unreachable!(),
         }

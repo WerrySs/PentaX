@@ -1071,6 +1071,8 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                     | pentax_kernel::Service::CondWait
                     | pentax_kernel::Service::PosixCondWait
                     | pentax_kernel::Service::WaitSema
+                    | pentax_kernel::Service::PosixSemWait
+                    | pentax_kernel::Service::PthreadSemWait
                     | pentax_kernel::Service::WaitEqueue
                     | pentax_kernel::Service::WaitEventFlag
                     | pentax_kernel::Service::SetEventFlag

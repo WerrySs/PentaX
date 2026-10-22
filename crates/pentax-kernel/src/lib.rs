@@ -53,6 +53,7 @@ mod pthread_mutex;
 mod pthread_once;
 mod pthread_rwlock;
 mod pthread_semaphore;
+pub use pthread_semaphore::{PthreadSemaphoreWait, PthreadSemaphoreWaitAction};
 mod pthread_yield;
 mod raw_input;
 mod rudp;

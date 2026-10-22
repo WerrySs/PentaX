@@ -4,7 +4,7 @@
 //! Stage times sample one block in 4093, while service time covers every call.
 
 use super::{NativeSessionError, charge};
-use std::time::Instant;
+use std::{fmt::Write, time::Instant};
 
 mod block_samples;
 
@@ -23,12 +23,15 @@ pub(super) struct StartupProfile {
 
 /// Exact counts for the first 64 public kernel labels, plus an explicit
 /// overflow bucket. Other admitted providers have their own aggregate bucket.
-/// The top four are selected only when emitting a bounded progress record.
+/// Count and elapsed-time top fours are selected only when emitting a bounded record.
 #[derive(Debug)]
 pub(super) struct ServiceProfile {
-    counts: [Option<(&'static str, u64, u64)>; 64],
+    counts: [Option<(&'static str, u64, u64, u64)>; 64],
     other: u64,
     overflow: u64,
+    other_ns: u64,
+    overflow_ns: u64,
+    unattributed_ns: u64,
     last: Option<&'static str>,
 }
 
@@ -38,6 +41,9 @@ impl Default for ServiceProfile {
             counts: [None; 64],
             other: 0,
             overflow: 0,
+            other_ns: 0,
+            overflow_ns: 0,
+            unattributed_ns: 0,
             last: None,
         }
     }
@@ -48,46 +54,60 @@ impl ServiceProfile {
         &mut self,
         name: Option<&'static str>,
         nonzero_return: bool,
+        elapsed_ns: u64,
         work: &mut u64,
         limit: u64,
     ) -> Result<(), NativeSessionError> {
         self.last = name;
         let Some(name) = name else {
             self.other = self.other.saturating_add(1);
+            self.other_ns = self.other_ns.saturating_add(elapsed_ns);
             return Ok(());
         };
         for slot in &mut self.counts {
-            charge(
+            if let Err(error) = charge(
                 work,
-                8 + slot.map_or(0, |(label, _, _)| label.len().min(name.len()) as u64),
+                8 + slot.map_or(0, |(label, _, _, _)| label.len().min(name.len()) as u64),
                 limit,
                 "admission work",
-            )?;
+            ) {
+                // The action was measured, but this observation was not admitted.
+                self.unattributed_ns = self.unattributed_ns.saturating_add(elapsed_ns);
+                return Err(error);
+            }
             match slot {
-                Some((label, count, nonzero)) if *label == name => {
+                Some((label, count, nonzero, nanos)) if *label == name => {
                     *count = count.saturating_add(1);
                     *nonzero = nonzero.saturating_add(u64::from(nonzero_return));
+                    *nanos = nanos.saturating_add(elapsed_ns);
                     return Ok(());
                 }
                 None => {
-                    *slot = Some((name, 1, u64::from(nonzero_return)));
+                    *slot = Some((name, 1, u64::from(nonzero_return), elapsed_ns));
                     return Ok(());
                 }
                 _ => {}
             }
         }
         self.overflow = self.overflow.saturating_add(1);
+        self.overflow_ns = self.overflow_ns.saturating_add(elapsed_ns);
         Ok(())
+    }
+
+    /// No successful public label is available for a failed action or a libc
+    /// pre-effect fallback. Keep its measured time without changing old counts.
+    pub fn record_unattributed(&mut self, elapsed_ns: u64) {
+        self.unattributed_ns = self.unattributed_ns.saturating_add(elapsed_ns);
     }
 
     fn protocol_fields(&self) -> String {
         let mut sorted = self.counts;
-        sorted.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.map_or(0, |(_, n, _)| n)));
+        sorted.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.map_or(0, |(_, n, _, _)| n)));
         let top = sorted
             .iter()
             .flatten()
             .take(4)
-            .map(|(name, count, _)| format!("{name}:{count}"))
+            .map(|(name, count, _, _)| format!("{name}:{count}"))
             .collect::<Vec<_>>()
             .join(",");
         // Nonzero observations need their own ranking: the most frequent calls
@@ -95,22 +115,43 @@ impl ServiceProfile {
         // are raw return observations, not an error classification (IDs and
         // other successful values can be nonzero).
         sorted.sort_unstable_by_key(|entry| {
-            std::cmp::Reverse(entry.map_or((0, 0), |(_, calls, nonzero)| (nonzero, calls)))
+            std::cmp::Reverse(entry.map_or((0, 0), |(_, calls, nonzero, _)| (nonzero, calls)))
         });
         let nonzero = sorted
             .iter()
             .flatten()
-            .filter(|(_, _, count)| *count != 0)
+            .filter(|(_, _, count, _)| *count != 0)
             .take(4)
-            .map(|(name, _, count)| format!("{name}:{count}"))
+            .map(|(name, _, count, _)| format!("{name}:{count}"))
             .collect::<Vec<_>>()
             .join(",");
-        format!(
+        let mut fields = format!(
             "service_top={top}\tservice_nonzero_top={nonzero}\tservice_last={}\tservice_other={}\tservice_overflow={}",
             self.last.unwrap_or("other-provider"),
             self.other,
             self.overflow
+        );
+        // Reuse the same fixed stack table. Formatting directly into the existing
+        // output string needs no third Vec or per-label temporary allocation.
+        sorted.sort_unstable_by_key(|entry| {
+            std::cmp::Reverse(entry.map_or(0, |(_, _, _, nanos)| nanos))
+        });
+        fields.push_str("\tservice_time_top=");
+        let mut separator = "";
+        for (name, _, _, nanos) in sorted.iter().flatten().filter(|row| row.3 != 0).take(4) {
+            write!(fields, "{separator}{name}:{nanos}").expect("String formatting is infallible");
+            separator = ",";
+        }
+        if separator.is_empty() {
+            fields.push_str("none");
+        }
+        write!(
+            fields,
+            "\tservice_other_ns={}\tservice_overflow_ns={}\tservice_unattributed_ns={}",
+            self.other_ns, self.overflow_ns, self.unattributed_ns
         )
+        .expect("String formatting is infallible");
+        fields
     }
 }
 
@@ -162,10 +203,14 @@ impl StartupProfile {
         }
     }
 
-    pub fn service_finished(&mut self, start: Option<Instant>) {
-        if let Some(start) = start {
-            Self::accumulate(&mut self.service_ns, start.elapsed().as_nanos());
-        }
+    pub fn service_finished(&mut self, start: Option<Instant>) -> u64 {
+        start.map_or(0, |start| self.service_elapsed(start.elapsed().as_nanos()))
+    }
+
+    fn service_elapsed(&mut self, nanos: u128) -> u64 {
+        let nanos = u64::try_from(nanos).unwrap_or(u64::MAX);
+        self.service_ns = self.service_ns.saturating_add(nanos);
+        nanos
     }
 
     fn accumulate(total: &mut u64, nanos: u128) {
@@ -203,20 +248,20 @@ mod service_profile_tests {
         ] {
             for _ in 0..16 {
                 profile
-                    .record(Some(label), false, &mut work, u64::MAX)
+                    .record(Some(label), false, 0, &mut work, u64::MAX)
                     .unwrap();
             }
         }
         // Both a successful nonzero identity and another nonzero result remain
         // visible. The observer deliberately assigns neither an errno meaning.
         profile
-            .record(Some("PthreadGetthreadid"), true, &mut work, u64::MAX)
+            .record(Some("PthreadGetthreadid"), true, 0, &mut work, u64::MAX)
             .unwrap();
         profile
-            .record(Some("Open"), true, &mut work, u64::MAX)
+            .record(Some("Open"), true, 0, &mut work, u64::MAX)
             .unwrap();
         profile
-            .record(Some("Open"), true, &mut work, u64::MAX)
+            .record(Some("Open"), true, 0, &mut work, u64::MAX)
             .unwrap();
         let fields = profile.protocol_fields();
         let top = fields
@@ -229,10 +274,13 @@ mod service_profile_tests {
             .find(|part| part.starts_with("service_nonzero_top="))
             .unwrap();
         assert_eq!(nonzero, "service_nonzero_top=Open:2,PthreadGetthreadid:1");
-        assert!(fields.ends_with("service_last=Open\tservice_other=0\tservice_overflow=0"));
+        assert!(fields.contains("service_last=Open\tservice_other=0\tservice_overflow=0\t"));
         assert_eq!(
             ServiceProfile::default().protocol_fields(),
-            "service_top=\tservice_nonzero_top=\tservice_last=other-provider\tservice_other=0\tservice_overflow=0"
+            "service_top=\tservice_nonzero_top=\tservice_last=other-provider\tservice_other=0\tservice_overflow=0\tservice_time_top=none\tservice_other_ns=0\tservice_overflow_ns=0\tservice_unattributed_ns=0"
         );
     }
 }
+
+#[cfg(test)]
+mod service_timing_tests;

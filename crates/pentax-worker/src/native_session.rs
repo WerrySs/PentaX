@@ -1162,7 +1162,10 @@ fn execute_epoch<'plan, 'image>(
                     .ok_or(NativeSessionError::Budget("service observations"))?;
                 let service_start = limits.report_progress.then(Instant::now);
                 let result = session.try_libc_builtin(manifest, proof, &mut engine, block);
-                progress.profile.service_finished(service_start);
+                let elapsed_ns = progress.profile.service_finished(service_start);
+                if result.is_err() || matches!(&result, Ok(None)) {
+                    progress.profile.services.record_unattributed(elapsed_ns);
+                }
                 progress.dispatch = engine.usage();
                 if !matches!(&result, Ok(None)) {
                     state.service_stops = next_stops;
@@ -1175,6 +1178,7 @@ fn execute_epoch<'plan, 'image>(
                     progress.profile.services.record(
                         None,
                         false,
+                        elapsed_ns,
                         &mut state.admission_work,
                         limits.max_admission_work,
                     )?;
@@ -1533,9 +1537,10 @@ fn execute_epoch<'plan, 'image>(
                             stack_pointer: Some(token.stack_pointer()),
                         },
                     );
-                    progress.profile.service_finished(service_start);
+                    let elapsed_ns = progress.profile.service_finished(service_start);
                     progress.output_bytes = session.output_usage().accepted_bytes;
                     if action.is_err() {
+                        progress.profile.services.record_unattributed(elapsed_ns);
                         progress.failed_kernel_service = session.last_admitted_kernel_service();
                         if matches!(
                             &action,
@@ -1560,6 +1565,7 @@ fn execute_epoch<'plan, 'image>(
                         let observed = progress.profile.services.record(
                             session.last_admitted_kernel_service(),
                             matches!(&action, NativeServiceAction::Returned(value) if *value != 0),
+                            elapsed_ns,
                             &mut state.admission_work,
                             limits.max_admission_work,
                         );

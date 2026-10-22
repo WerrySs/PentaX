@@ -372,6 +372,19 @@ providers. `service_last` is the latest successful action's public kernel label,
 or `other-provider`. Labels are selected only after live provider admission; no
 guest-supplied name is emitted. These counts diagnose repeated startup activity,
 not completion or time spent in each function.
+`service_time_top` separately ranks up to four of those same retained labels by
+accumulated nanoseconds, omitting zero durations and emitting `none` if empty.
+`service_other_ns` and `service_overflow_ns` retain durations for the corresponding
+successful-action count buckets. `service_unattributed_ns` retains failed actions,
+libc pre-effect fallbacks and observations refused by the existing work limit;
+these durations never inherit the previous successful action's label. Existing
+`service_ns` remains the total of the same measured intervals. The timer covers
+service admission and handling, not subsequent native callbacks or parked waits.
+All duration counters saturate at the existing unsigned 64-bit limit. Per-label
+attribution reuses the existing 64-slot scan and its unchanged work charges, with
+no new per-call allocation or clock read. Final output reuses that fixed table;
+the existing protocol record cap and guest budgets remain unchanged. These
+observations do not measure a frame rate or establish a performance improvement.
 The final result also snapshots the bounded cooperative queue after an execution
 epoch returns, including before propagating a typed stop. `scheduling_threads`,
 `scheduling_pending_waits` and `scheduling_returned` count retained queue entries;

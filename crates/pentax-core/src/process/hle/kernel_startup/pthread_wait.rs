@@ -6,8 +6,8 @@ use super::*;
 use pentax_kernel::{
     AudioOut2Wait, AudioOut2WaitAction, ConditionWait, ConditionWaitAction, EventFlagWait,
     EventFlagWaitAction, EventQueueWait, EventQueueWaitAction, MutexWait, MutexWaitAction,
-    RwlockWait, RwlockWaitAction, SemaphoreWait, SemaphoreWaitAction, Service, TimeWait,
-    TimeWaitAction,
+    PthreadSemaphoreWait, PthreadSemaphoreWaitAction, RwlockWait, RwlockWaitAction, SemaphoreWait,
+    SemaphoreWaitAction, Service, TimeWait, TimeWaitAction,
 };
 use pentax_platform::native_memory::NativeOwnerId;
 
@@ -24,6 +24,7 @@ enum Ticket {
     EventQueue(EventQueueWait),
     Condition(ConditionWait),
     Semaphore(SemaphoreWait),
+    PthreadSemaphore(PthreadSemaphoreWait),
     Mutex(MutexWait),
     Rwlock(RwlockWait),
     EventFlag(EventFlagWait),
@@ -164,6 +165,16 @@ pub(super) fn begin(
             }
             EventQueueWaitAction::Waiting(ticket) => Ticket::EventQueue(ticket),
         }
+    } else if matches!(service, Service::PosixSemWait | Service::PthreadSemWait) {
+        match kernel
+            .begin_pthread_semaphore_wait(service, args, memory)
+            .map_err(KernelStartupError::Kernel)?
+        {
+            PthreadSemaphoreWaitAction::Returned(value) => {
+                return Ok(NativeServiceAction::Returned(value));
+            }
+            PthreadSemaphoreWaitAction::Waiting(ticket) => Ticket::PthreadSemaphore(ticket),
+        }
     } else if service == Service::WaitSema {
         match kernel
             .begin_semaphore_wait(args, memory)
@@ -244,6 +255,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
             Ticket::EventQueue(ticket) => self.kernel.event_queue_wait_ready(ticket),
             Ticket::Condition(ticket) => self.kernel.condition_wait_ready(ticket),
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
+            Ticket::PthreadSemaphore(ticket) => self.kernel.pthread_semaphore_wait_ready(ticket),
             Ticket::Mutex(ticket) => self.kernel.mutex_wait_ready(ticket),
             Ticket::Rwlock(ticket) => self.kernel.rwlock_wait_ready(ticket),
             Ticket::EventFlag(ticket) => self.kernel.event_flag_wait_ready(ticket),
@@ -307,7 +319,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .kernel
                 .event_queue_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Condition(_) | Ticket::Join(_) => Ok(None),
+            Ticket::Condition(_) | Ticket::Join(_) | Ticket::PthreadSemaphore(_) => Ok(None),
             Ticket::Semaphore(ticket) => self
                 .kernel
                 .semaphore_wait_delay(ticket)
@@ -412,6 +424,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .map_err(KernelStartupError::Kernel),
             Ticket::Join(_)
             | Ticket::Semaphore(_)
+            | Ticket::PthreadSemaphore(_)
             | Ticket::EventQueue(_)
             | Ticket::EventFlag(_)
             | Ticket::AudioOut2(_)
@@ -438,6 +451,9 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     Ticket::Semaphore(ticket) => {
                         self.kernel.complete_semaphore_wait(ticket, &mut guest)
                     }
+                    Ticket::PthreadSemaphore(ticket) => self
+                        .kernel
+                        .complete_pthread_semaphore_wait(ticket, &mut guest),
                     Ticket::EventQueue(ticket) => {
                         self.kernel.complete_event_queue_wait(ticket, &mut guest)
                     }

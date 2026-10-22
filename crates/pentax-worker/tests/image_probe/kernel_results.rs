@@ -357,6 +357,8 @@ mod native_register_loop;
 mod native_vector_broadcasts;
 #[path = "pause.rs"]
 mod pause;
+#[path = "pthread_semaphore_wait.rs"]
+mod pthread_semaphore_wait;
 
 struct Program {
     code: Vec<u8>,

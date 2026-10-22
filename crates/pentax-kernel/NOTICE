@@ -828,3 +828,13 @@ retained original MIT grant apply. PentaX modifications2026: exact zero-argument
 source-void binding and owner-checked cooperative scheduling through existing
 CPU/TLS contexts. No host sleep/backoff, alternate NID or host-policy change is
 inferred.
+
+Cooperative POSIX/direct pthread semaphore waits additionally adapt the already
+retained KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de,
+src/kernel/semaphore.cpp PosixSemPrivate::Wait/Post/SyncGuest and the sem_wait/
+PthreadSemWait wrappers. Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained
+original MIT grant continue to apply. PentaX modifications2026: opaque bounded
+thread wait membership, atomic guest prefix publication and checked scheduler
+continuations. Readiness reserves no count, matching the source predicate;
+destroy/reinit with retained waiters stays an explicit unsupported transition.
+No host wait, timed-wait completion or fairness claim follows.

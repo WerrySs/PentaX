@@ -318,6 +318,7 @@ mod mutex_wait;
 #[path = "tests/pad_runtime.rs"]
 mod pad_runtime;
 mod process_parameters;
+mod pthread_semaphore_wait;
 mod rwlock_wait;
 mod thread_context;
 mod user_privacy;
