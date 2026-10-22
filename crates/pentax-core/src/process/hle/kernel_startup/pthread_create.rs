@@ -5,9 +5,11 @@
 use super::*;
 use pentax_kernel::{AdmittedPthreadCreate, PthreadCreateAction, ThreadAttributes};
 use pentax_linker::SourceIdentity;
+mod join;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod tests;
 mod thread_exit;
+pub(super) use join::{JoinAction, JoinTicket};
 use pentax_platform::native_memory::{
     NativeMemoryEffect, NativeMemoryTransaction, NativeOwnerId, NativePermissions, NativeRange,
 };
@@ -40,6 +42,10 @@ pub struct ThreadEntryLayout {
 }
 struct Record {
     tls_index: usize,
+    thread_pointer: u64,
+    joined: bool,
+    join_claim: Option<(u64, u64)>,
+    waiting_for: Option<usize>,
     layout: ThreadEntryLayout,
     attributes: ThreadAttributes,
     published: bool,
@@ -52,6 +58,7 @@ pub(super) struct ThreadRuntime {
     pub(super) next: u64,
     records: Vec<Record>,
     maximum: usize,
+    next_join_serial: u64,
 }
 impl ThreadRuntime {
     pub(super) fn stack_ranges(&self) -> impl Iterator<Item = NativeRange> + '_ {
@@ -67,6 +74,7 @@ impl ThreadRuntime {
             next: 0,
             records,
             maximum,
+            next_join_serial: 1,
         })
     }
 }
@@ -394,6 +402,10 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         let index = self.thread_runtime.records.len();
         self.thread_runtime.records.push(Record {
             tls_index,
+            thread_pointer: tp,
+            joined: false,
+            join_claim: None,
+            waiting_for: None,
             layout,
             attributes,
             published: false,

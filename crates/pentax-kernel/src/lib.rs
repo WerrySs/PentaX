@@ -44,6 +44,7 @@ mod posix;
 mod pthread_attr;
 mod pthread_condition;
 mod pthread_create;
+mod pthread_join;
 mod pthread_keys;
 mod pthread_mutex;
 mod pthread_once;

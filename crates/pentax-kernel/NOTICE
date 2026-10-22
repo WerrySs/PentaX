@@ -749,3 +749,11 @@ checked guest stack/source selection, atomic ABI publication, per-thread roots,
 bounded migration policy and original fixtures. Full CPU/control-state transport
 and lazy bounded contextless stacks are PentaX policies, not claims that the
 reference assembly saves floating/vector state or implements these safety checks.
+
+Cooperative PthreadJoin adaptation: src/kernel/pthread.cpp, PthreadJoin, revision
+209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+PentaX joins only published owner-bound created threads through its existing
+scheduler and authenticated post-cleanup return records. Sole join claims,
+serial/current-thread checks, atomic optional result writes, cycle detection
+and original tests are PentaX changes. Native stacks and context slots remain
+bounded until owner teardown instead of the source's immediate stack freeing.

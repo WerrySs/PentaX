@@ -20,6 +20,7 @@ pub struct PendingThreadWait {
     ticket: Ticket,
 }
 enum Ticket {
+    Join(pthread_create::JoinTicket),
     EventQueue(EventQueueWait),
     Condition(ConditionWait),
     Semaphore(SemaphoreWait),
@@ -38,6 +39,54 @@ impl PendingThreadWait {
 impl fmt::Debug for PendingThreadWait {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PendingThreadWait").finish_non_exhaustive()
+    }
+}
+
+pub(super) fn begin_join(
+    kernel: &mut Kernel,
+    memory: &mut KernelMemory<'_, '_, '_>,
+    runtime: &mut pthread_create::ThreadRuntime,
+    args: CallArgs,
+    pc: u64,
+    id: u64,
+) -> Result<NativeServiceAction, KernelStartupError> {
+    if let Some(value) = kernel
+        .admit_pthread_join(args, memory)
+        .map_err(KernelStartupError::Kernel)?
+    {
+        return Ok(NativeServiceAction::Returned(value));
+    }
+    let waiter = memory
+        .thread_tls
+        .ok_or(KernelStartupError::InvalidProvider("pthread join TLS"))?
+        .thread_pointer;
+    let maximum = memory
+        .lookup_limits
+        .ok_or(KernelStartupError::InvalidProvider("pthread join work"))?
+        .max_work;
+    charge(
+        memory
+            .lookup_work
+            .as_deref_mut()
+            .ok_or(KernelStartupError::InvalidProvider("pthread join work"))?,
+        runtime.join_scan_work(),
+        maximum,
+    )?;
+    match runtime
+        .begin_join(kernel, args, waiter)
+        .map_err(KernelStartupError::Kernel)?
+    {
+        pthread_create::JoinAction::Returned(value) => Ok(NativeServiceAction::Returned(value)),
+        pthread_create::JoinAction::Wait(ticket) => {
+            Ok(NativeServiceAction::WaitThread(PendingThreadWait {
+                owner: memory.paused.owner_id(),
+                thread_pointer: waiter,
+                pc,
+                id,
+                args: args.0,
+                ticket: Ticket::Join(ticket),
+            }))
+        }
     }
 }
 
@@ -186,6 +235,12 @@ impl PreparedNativeKernelStartup<'_, '_> {
             return Err(KernelStartupError::InvalidProvider("thread wait owner"));
         }
         match &pending.ticket {
+            Ticket::Join(ticket) => {
+                self.kernel
+                    .poll_pthread_join()
+                    .map_err(KernelStartupError::Kernel)?;
+                self.thread_runtime.join_ready(ticket)
+            }
             Ticket::EventQueue(ticket) => self.kernel.event_queue_wait_ready(ticket),
             Ticket::Condition(ticket) => self.kernel.condition_wait_ready(ticket),
             Ticket::Semaphore(ticket) => self.kernel.semaphore_wait_ready(ticket),
@@ -230,7 +285,7 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .kernel
                 .event_queue_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Condition(_) => Ok(None),
+            Ticket::Condition(_) | Ticket::Join(_) => Ok(None),
             Ticket::Semaphore(ticket) => self
                 .kernel
                 .semaphore_wait_delay(ticket)
@@ -333,7 +388,8 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .complete_condition_wait(ticket)
                 .map(|ready| ready.then_some(0))
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Semaphore(_)
+            Ticket::Join(_)
+            | Ticket::Semaphore(_)
             | Ticket::EventQueue(_)
             | Ticket::EventFlag(_)
             | Ticket::AudioOut2(_)
@@ -351,6 +407,12 @@ impl PreparedNativeKernelStartup<'_, '_> {
                     initial_entry: None,
                 };
                 match &pending.ticket {
+                    Ticket::Join(ticket) => self.thread_runtime.complete_join(
+                        &mut self.kernel,
+                        ticket,
+                        pending.thread_pointer,
+                        &mut guest,
+                    ),
                     Ticket::Semaphore(ticket) => {
                         self.kernel.complete_semaphore_wait(ticket, &mut guest)
                     }

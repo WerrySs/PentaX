@@ -671,7 +671,9 @@ fn native_fiber_owned_cpu_transport_keeps_all_vector_lanes_control_and_root_flag
     main.bytes.push(0xf9); // STC immediately before the admitted Run call.
     main.call(1);
     main.stack(0x89, 0, 8);
-    main.bytes.extend([0x9c, 0x58]);
+    // MOV preserves flags. With the separately checked return RAX=0, admitted
+    // ADC RAX,0 captures exactly the restored carry without PUSHFQ support.
+    main.bytes.extend([0x48, 0x83, 0xd0, 0]);
     main.stack(0x89, 0, 16);
     main.stack(0x8b, 0, 8);
     main.expect(0);
@@ -817,5 +819,209 @@ fn native_fiber_faulted_entries_and_import_scope_errors_do_not_publish_a_return(
     }
     println!(
         "fiber_refusal_native_available=true fiber_refusal_native_programs=3 fiber_refusal_native_cases=3"
+    );
+}
+
+// Separate original kernel-only programs keep the Fiber scope fixtures intact.
+const JOIN_IMPORTS: [&str; 6] = [
+    "6UgtwV+0zb4",
+    "onNY9Byn-W8",
+    "QcteRwbsnV0",
+    "aI+OeCz8xrQ",
+    "nsYoNRywwNg",
+    "-Wreprtu0Qs",
+];
+
+fn join_image(main: &[u8], children: &[(i32, Vec<u8>)]) -> Input {
+    let source = scoped_system_image(&[], &JOIN_IMPORTS, "libkernel", "libkernel", 1);
+    let mut bytes = source.bytes.clone();
+    bytes.resize(0x14000, 0);
+    put(&mut bytes, 24, &(MAIN as u64).to_le_bytes());
+    put(&mut bytes, MAIN as usize, main);
+    for (address, code) in children {
+        assert!((*address == FIRST || *address == SECOND) && code.len() < 0x1000);
+        put(&mut bytes, *address as usize, code);
+    }
+    put(&mut bytes, 96, &0x4000_u64.to_le_bytes());
+    put(&mut bytes, 56, &3_u16.to_le_bytes());
+    put(&mut bytes, 176, &1_u32.to_le_bytes());
+    put(&mut bytes, 180, &6_u32.to_le_bytes());
+    for (offset, value) in [
+        (184, 0x4000_u64),
+        (192, 0x4000),
+        (200, 0),
+        (208, 0x10000),
+        (216, 0x10000),
+        (224, 0x4000),
+    ] {
+        put(&mut bytes, offset, &value.to_le_bytes());
+    }
+    create_input(bytes)
+}
+
+fn create_child(code: &mut Code, entry: i32, detached: bool) {
+    code.pointer(7, OUTPUT + 24);
+    if detached {
+        code.pointer(6, OUTPUT + 64);
+    } else {
+        code.reg(6, 0);
+    }
+    code.pointer(2, entry);
+    code.reg(1, 0x1234);
+    code.pointer(8, NAME);
+    code.call(0);
+    code.expect(0);
+}
+
+fn join_child(code: &mut Code, output: i32, result: u64) {
+    code.read(OUTPUT + 24);
+    code.bytes.extend([0x48, 0x89, 0xc7]);
+    code.pointer(6, output);
+    code.call(1);
+    code.expect(result);
+}
+
+fn assert_join_completed(source: &Input, calls: u64, returned_threads: u64) {
+    let (status, fields, text) = probe(source);
+    assert_eq!(status, 0, "{text}");
+    assert_eq!(fields["value"], "42", "{text}");
+    assert_eq!(fields["service_stops"], calls.to_string(), "{text}");
+    assert_eq!(fields["phase"], "main-entry", "{text}");
+    assert_eq!(fields["initializer_calls"], "0", "{text}");
+    assert_eq!(
+        fields["scheduling_returned"],
+        returned_threads.to_string(),
+        "{text}"
+    );
+    assert_eq!(fields["scheduling_pending_waits"], "0", "{text}");
+}
+
+#[test]
+fn native_join_waits_for_sleeping_child_ret_and_preserves_current_thread_tls() {
+    let mut main = Code::new(MAIN);
+    main.reg(0, 10);
+    main.fs(true);
+    main.reg(12, 0x1212);
+    create_child(&mut main, FIRST, false);
+    main.word(OUTPUT + 8, 1);
+    main.write(OUTPUT + 16, 1);
+    main.write(OUTPUT + 32, 0xa5);
+    join_child(&mut main, OUTPUT + 32, 0);
+    main.word(OUTPUT + 32, 77);
+    main.word(OUTPUT + 8, 2);
+    main.write(OUTPUT + 40, 1);
+    main.tls(10, 10);
+    main.expect_reg(12, 0x1212);
+    let (main, calls) = main.finish(42);
+    let mut child = Code::new(FIRST);
+    child.expect_reg(7, 0x1234);
+    child.reg(0, 30);
+    child.fs(true);
+    child.write(OUTPUT + 8, 1);
+    child.reg(7, 50_000);
+    child.call(2);
+    child.expect(0);
+    child.word(OUTPUT + 16, 1);
+    child.word(OUTPUT + 40, 0);
+    child.tls(30, 32);
+    child.write(OUTPUT + 8, 2);
+    let (child, child_calls) = child.finish(77);
+    assert_join_completed(
+        &join_image(&main, &[(FIRST, child)]),
+        calls + child_calls,
+        1,
+    );
+    println!(
+        "pthread_join_wait_native_available=true pthread_join_wait_native_programs=1 pthread_join_wait_native_returns=1 pthread_join_wait_native_value=77"
+    );
+}
+
+#[test]
+fn native_join_source_errors_keep_output_then_actual_reap_rejects_second_join() {
+    let mut main = Code::new(MAIN);
+    main.write(OUTPUT + 32, 0xa5);
+    for (target, expected) in [(0, 0x8002_0016), (u64::MAX, 0x8002_0003)] {
+        main.reg(7, target);
+        main.pointer(6, OUTPUT + 32);
+        main.call(1);
+        main.expect(expected);
+        main.word(OUTPUT + 32, 0xa5);
+    }
+    main.call(3);
+    main.bytes.extend([0x48, 0x89, 0xc7]);
+    main.pointer(6, OUTPUT + 32);
+    main.call(1);
+    main.expect(0x8002_000b);
+    main.word(OUTPUT + 32, 0xa5);
+    create_child(&mut main, FIRST, false);
+    join_child(&mut main, OUTPUT + 32, 0);
+    main.word(OUTPUT + 32, 77);
+    main.write(OUTPUT + 32, 0xa5);
+    join_child(&mut main, OUTPUT + 32, 0x8002_0003);
+    main.word(OUTPUT + 32, 0xa5);
+    main.pointer(7, OUTPUT + 64);
+    main.call(4);
+    main.expect(0);
+    main.pointer(7, OUTPUT + 64);
+    main.reg(6, 1);
+    main.call(5);
+    main.expect(0);
+    create_child(&mut main, SECOND, true);
+    join_child(&mut main, OUTPUT + 32, 0x8002_0016);
+    main.word(OUTPUT + 32, 0xa5);
+    main.reg(7, 100_000);
+    main.call(2);
+    main.expect(0);
+    main.word(OUTPUT + 8, 2);
+    let (main, calls) = main.finish(42);
+    let first = Code::new(FIRST);
+    let (first, first_calls) = first.finish(77);
+    let mut detached = Code::new(SECOND);
+    detached.write(OUTPUT + 8, 1);
+    detached.reg(7, 50_000);
+    detached.call(2);
+    detached.expect(0);
+    detached.write(OUTPUT + 8, 2);
+    let (detached, detached_calls) = detached.finish(88);
+    assert_join_completed(
+        &join_image(&main, &[(FIRST, first), (SECOND, detached)]),
+        calls + first_calls + detached_calls,
+        2,
+    );
+    println!(
+        "pthread_join_errors_native_available=true pthread_join_errors_native_programs=1 pthread_join_errors_native_cases=5 pthread_join_errors_native_reaps=1"
+    );
+}
+
+#[test]
+fn native_join_readonly_output_refuses_after_real_child_return_without_success() {
+    let mut main = Code::new(MAIN);
+    create_child(&mut main, FIRST, false);
+    main.word(OUTPUT + 8, 1);
+    main.read(OUTPUT + 24);
+    main.bytes.extend([0x48, 0x89, 0xc7]);
+    main.pointer(6, MAIN);
+    main.call(1); // Actual mapped RX output, never a host pointer.
+    let (main, calls) = main.finish(42);
+    let mut child = Code::new(FIRST);
+    child.write(OUTPUT + 8, 1);
+    child.reg(7, 50_000);
+    child.call(2);
+    child.expect(0);
+    child.write(OUTPUT + 8, 2);
+    let (child, child_calls) = child.finish(77);
+    let (status, fields, text) = probe(&join_image(&main, &[(FIRST, child)]));
+    assert_eq!(status, 2, "{text}");
+    assert_eq!(fields["code"], "runtime-service", "{text}");
+    assert_eq!(fields["runtime_failure"], "guest-write-denied", "{text}");
+    assert_eq!(fields["scheduling_returned"], "1", "{text}");
+    assert_eq!(
+        fields["service_stops"],
+        (calls + child_calls).to_string(),
+        "{text}"
+    );
+    assert!(!fields.contains_key("value"), "{text}");
+    println!(
+        "pthread_join_output_native_available=true pthread_join_output_native_programs=1 pthread_join_output_native_refusals=1 pthread_join_output_native_returns=1"
     );
 }

@@ -873,3 +873,23 @@ terminally; it is not a completed or unchanged service return. Suspended HLE
 callbacks retain their existing thread/TLS bindings: their cross-thread migration
 is explicitly unsupported. Ordinary idle fiber migration remains supported.
 These source and original-fixture contracts do not establish a game frame.
+
+### Cooperative pthread join
+
+The prepared owner services the existing raw-kernel `PthreadJoin` role through
+its normal cooperative wait queue. A sole serial-bound claim identifies the
+published created-thread handle and current waiter. Readiness requires the
+actual authenticated thread return after exit cleanup. An already completed
+thread is immediately ready; an active child lets other runnable threads make
+progress. The optional result receives the complete 64-bit exit value only when
+ready. A failed output write leaves the target unjoined and its claim intact;
+source errno results do not modify the output.
+
+Null, self/deadlocked, non-owned/reaped, detached and competing-claim cases keep
+the source kernel error domain. Creation attributes provide detached state; no
+new Detach or POSIX alias is inferred. Successful join consumes the claim once.
+Stacks, TLS, context slots and identity records retain the existing bounded
+owner-lifetime allocation policy until teardown. This deliberate policy does
+not claim the reference implementation's immediate `FreeGuestStack` reclamation
+or authorize reuse of a joined context. Original native fixtures independently
+exercise migrated fibers, a real sleeping-child join and failure after RET.
