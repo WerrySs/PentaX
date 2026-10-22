@@ -279,6 +279,13 @@ impl<'image> KernelStartupPlan<'image> {
     fn entry(&self, marker: KernelMarker) -> u64 {
         self.bias + marker.rva
     }
+
+    fn marker_at_syscall_pc(&self, syscall_pc: u64) -> Option<&KernelMarker> {
+        let rva = syscall_pc.checked_sub(self.bias)?.checked_sub(5)?;
+        self.factory
+            .marker_at_rva(rva)
+            .filter(|marker| self.entry(**marker) + 5 == syscall_pc)
+    }
 }
 
 /// Derive authority only from both factories and the exact complete image plan.
@@ -892,15 +899,11 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 + self.plan.factory.metadata_mapped_bytes() / PAGE_SIZE * 4,
             self.plan.limits.max_provider_work,
         )?;
-        let marker = self
-            .plan
-            .factory
-            .markers()
-            .iter()
-            .find(|marker| self.plan.entry(**marker) + 5 == stop.syscall_pc)
-            .ok_or(KernelStartupError::SiteMismatch {
+        let marker = self.plan.marker_at_syscall_pc(stop.syscall_pc).ok_or(
+            KernelStartupError::SiteMismatch {
                 syscall_pc: stop.syscall_pc,
-            })?;
+            },
+        )?;
         if stop.service_id != u64::from(marker.service_id) {
             return Err(KernelStartupError::ServiceIdMismatch {
                 expected: marker.service_id,

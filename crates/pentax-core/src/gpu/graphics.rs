@@ -113,6 +113,11 @@ impl<'borrow, 'owner> CurrentDraw<'borrow, 'owner> {
     pub(super) fn written_bytes(&self) -> usize {
         self.report.written_bytes
     }
+    /// Shared observation retains the unique pause loan and current draw
+    /// receipt. It grants neither writes nor an independently reusable pause.
+    pub(super) fn paused_memory(&self) -> &PausedNativeMemory<'owner> {
+        self.memory
+    }
     pub(super) fn into_pause(self) -> &'borrow mut PausedNativeMemory<'owner> {
         self.memory
     }

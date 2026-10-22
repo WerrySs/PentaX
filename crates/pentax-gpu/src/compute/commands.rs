@@ -83,9 +83,9 @@ pub struct CommandPlan {
     final_state: ComputeState,
     usage: CommandUsage,
     captured: Vec<CommandRange>,
-    actions: Vec<Action>,
+    pub(super) actions: Vec<Action>,
 }
-enum Action {
+pub(super) enum Action {
     Dispatch(usize),
     Write(MemoryWrite),
     Wait(MemoryWait),
@@ -192,6 +192,15 @@ impl CommandPlan {
     }
     pub fn final_state(&self) -> ComputeState {
         self.final_state
+    }
+    pub fn command(&self, index: usize) -> Option<Command<'_>> {
+        self.actions.get(index).map(|action| match action {
+            Action::Dispatch(index) => Command::Dispatch(&self.dispatches[*index]),
+            Action::Write(value) => Command::Write(value),
+            Action::Wait(value) => Command::Wait(value),
+            Action::Release(value) => Command::Release(value),
+            Action::Drain => Command::Drain,
+        })
     }
     pub fn commands(&self) -> impl Iterator<Item = Command<'_>> {
         self.actions.iter().map(|a| match a {
@@ -410,7 +419,9 @@ fn plan_commands_for_queue(
                 }
                 state.indirect_base = Some(address);
             }
-            0x76 if header.shader_type() && length >= 3 => {
+            // The public generic CB producer uses tag0 on actual ACB queues.
+            // The closed CS register bank remains the authority for each write.
+            0x76 if matches!(header.low_byte(), 0 | 2) && length >= 3 => {
                 let first = frame.word(at + 1);
                 if first > 0xffff {
                     return Err(fail("register selector"));

@@ -29,6 +29,8 @@ mod graphics;
 mod interrupts;
 #[path = "driver/presentation.rs"]
 mod presentation;
+#[path = "driver/register_execution.rs"]
+mod register_execution;
 #[path = "driver/video_events.rs"]
 mod video_events;
 pub(crate) type GraphicsClock =
@@ -110,6 +112,28 @@ pub enum Function {
     AgcQueueEndOfPipeActionPatchAddress,
     AgcQueueEndOfPipeActionPatchData,
     AgcDcbStallCommandBufferParser,
+    AgcCbSetShRegisterRangeDirect,
+    AgcCbSetShRegisterRangeDirectGetSize,
+    AgcCbSetShRegistersDirect,
+    AgcCbSetUcRegistersDirect,
+    AgcDcbSetShRegisterDirect,
+    AgcDcbSetCxRegisterDirect,
+    AgcDcbSetCxRegisterDirectGetSize,
+    AgcDcbSetUcRegisterDirect,
+    AgcDcbSetCxRegistersIndirect,
+    AgcDcbSetCxRegistersIndirectGetSize,
+    AgcDcbSetShRegistersIndirect,
+    AgcDcbSetShRegistersIndirectGetSize,
+    AgcDcbSetUcRegistersIndirect,
+    AgcSetCxRegIndirectPatchSetAddress,
+    AgcSetShRegIndirectPatchSetAddress,
+    AgcSetUcRegIndirectPatchSetAddress,
+    AgcSetCxRegIndirectPatchSetNumRegisters,
+    AgcSetShRegIndirectPatchSetNumRegisters,
+    AgcSetUcRegIndirectPatchSetNumRegisters,
+    AgcSetCxRegIndirectPatchAddRegisters,
+    AgcSetShRegIndirectPatchAddRegisters,
+    AgcSetUcRegIndirectPatchAddRegisters,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -630,16 +654,15 @@ impl Driver {
                     .max_preparation_work
                     .saturating_sub(self.usage.preparation_work),
             );
-            let plan = compute::plan_commands(
-                &self.queues[queue_index],
+            let mut plan = register_execution::ComputeCommands::prepare(
+                memory,
                 compute::CommandRange {
                     address: range.address,
                     size: range.size,
                 },
-                &super::Memory(memory),
+                self.queues[queue_index],
                 &command_limits,
-            )
-            .map_err(Failure::Preparation)?;
+            )?;
             self.usage.command_bytes = add(
                 self.usage.command_bytes,
                 (plan.usage().command_bytes as u64)
@@ -656,7 +679,19 @@ impl Driver {
                 .usage
                 .indirect_buffers
                 .saturating_add(plan.usage().indirect_buffers);
-            for command in plan.commands() {
+            while let Some(step) = plan.next_step()? {
+                let owned_dispatch;
+                let command = match step {
+                    register_execution::ComputeStep::Array => {
+                        plan.resolve_array(memory)?;
+                        continue;
+                    }
+                    register_execution::ComputeStep::Command(index) => plan.command(index)?,
+                    register_execution::ComputeStep::Dispatch(dispatch) => {
+                        owned_dispatch = dispatch;
+                        compute::Command::Dispatch(&owned_dispatch)
+                    }
+                };
                 let dispatch = match command {
                     compute::Command::Drain => {
                         self.drain_commands()?;
@@ -772,7 +807,7 @@ impl Driver {
                     .written_bytes
                     .saturating_add(report.written_bytes as u64);
             }
-            self.queues[queue_index] = plan.final_state();
+            self.queues[queue_index] = plan.final_state()?;
             self.poisoned = true;
         }
         self.poisoned = false;

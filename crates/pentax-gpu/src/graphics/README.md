@@ -258,3 +258,16 @@ counts and unported destinations remain explicit execution refusals.
 Graphics release INT_SEL1 and INT_SEL4 have no label or reference-clock write,
 even if raw packet bytes retain a nonzero address. Their interrupt contexts
 remain ordered. ACB INT_SEL1 retains its distinct write-before-interrupt path.
+
+Flat CX/SH/UC indirect-register packets retain their complete five-DWORD grammar
+and point to arrays of offset/value pairs. Ordered execution captures an array
+after preceding writes and completed draws, then applies only known register
+offsets to the current bank. A later draw is materialized from its original
+packet and the replayed state; shader, target and resource preparation still
+use actual current backing. A read-only register update preserves the existing
+completed-draw receipt for a following flip. It does not fabricate a frame.
+
+Array scratch, immutable command snapshots, range metadata and actions share
+the existing host/work ceilings. Unknown registers and future writes aliasing
+captured command/array sources are refused. No Vulkan execution or commercial
+first frame is implied by a CPU command plan or shader-preparation fixture.

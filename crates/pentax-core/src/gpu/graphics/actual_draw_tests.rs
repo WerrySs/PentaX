@@ -571,3 +571,124 @@ fn actual_declared_tiled_draws_load_retire_and_preserve_full_padded_source_geome
         assert_eq!(read(&memory, target + 65536, 16), [0xe7; 16]);
     }
 }
+
+#[test]
+fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_stage_inputs() {
+    use pentax_gpu::graphics::{MemoryAction, OrderedCommands, OrderedStep, prepare_draw};
+    let mut owner = NativeAddressSpace::reserve_any(Default::default(), 0x30000).unwrap();
+    let base = owner.reserved_ranges().next().unwrap().address;
+    owner
+        .map_at(
+            base,
+            0x20000,
+            NativePermissions::READ_WRITE.with_gpu(true, true),
+        )
+        .unwrap();
+    let mut memory = owner.pause().unwrap();
+    let vertex = base + 0x4000;
+    let pixel = base + 0x5000;
+    let target = base + 0x8000;
+    memory.write(vertex, &bytes(&vertex_shader())).unwrap();
+    memory.write(pixel, &bytes(&pixel_shader())).unwrap();
+    memory
+        .write(target, &SENTINEL.repeat(WIDTH * HEIGHT))
+        .unwrap();
+    // Convert each original direct register packet to a real WRITE_DATA and
+    // indirect array. Preserve every actual draw/NUM_INSTANCES packet. Arrays
+    // use distinct backing so earlier snapshots remain protected sources.
+    let original = commands(vertex, pixel, target);
+    let mut stream = Vec::new();
+    let mut array = base + 0x10000;
+    let mut at = 0;
+    while at < original.len() {
+        let header = pentax_gpu::Header::new(original[at]);
+        let count = usize::from(header.count()) + 2;
+        if matches!(header.opcode(), 0x69 | 0x76 | 0x79) {
+            let values = count - 2;
+            stream.extend([
+                0xc000_3700 | ((2 + values * 2) as u32) << 16,
+                0x100,
+                array as u32,
+                (array >> 32) as u32,
+            ]);
+            for index in 0..values {
+                stream.extend([original[at + 1] + index as u32, original[at + 2 + index]]);
+            }
+            let opcode = match header.opcode() {
+                0x69 => 0x9f,
+                0x76 => 0x63,
+                _ => 0x64,
+            };
+            stream.extend([
+                0xc003_0000 | opcode << 8,
+                array as u32,
+                (array >> 32) as u32,
+                0x8000_0000,
+                values as u32,
+            ]);
+            array += values as u64 * 8;
+        } else {
+            stream.extend_from_slice(&original[at..at + count]);
+        }
+        at += count;
+    }
+    assert!(array < base + 0x14000);
+    let encoded = bytes(&stream);
+    assert!(encoded.len() < 0x3000);
+    let mut commands = OrderedCommands::prepare(
+        &[&encoded],
+        &[CommandRange {
+            address: base + 0x1000,
+            size: encoded.len() as u64,
+        }],
+        GraphicsState::empty(),
+        &CommandLimits::default(),
+    )
+    .unwrap();
+    let mut prepared = 0;
+    while let Some(step) = commands.next_step().unwrap() {
+        match step {
+            OrderedStep::Array => commands
+                .resolve_array(&crate::gpu::Memory(&memory))
+                .unwrap(),
+            OrderedStep::Memory(index) => {
+                let MemoryAction::Write(write) = commands.memory_action(index) else {
+                    panic!("original WRITE_DATA")
+                };
+                memory.write(write.address(), write.bytes()).unwrap();
+            }
+            OrderedStep::Draw(draw) => {
+                let product =
+                    prepare_draw(&draw, &crate::gpu::Memory(&memory), &Limits::default()).unwrap();
+                assert_eq!(product.width(), WIDTH as u32);
+                assert_eq!(product.height(), HEIGHT as u32);
+                assert_eq!(product.target_address(), target);
+                assert_eq!(product.input(), SENTINEL.repeat(WIDTH * HEIGHT));
+                assert_eq!(
+                    &product.vertex_push_data()[..4],
+                    &(if prepared == 0 { 0f32 } else { 0.5f32 })
+                        .to_bits()
+                        .to_le_bytes()
+                );
+                assert_eq!(
+                    &product.pixel_push_data()[..12],
+                    &bytes(if prepared == 0 {
+                        &[1f32.to_bits(), 0, 0]
+                    } else {
+                        &[0, 1f32.to_bits(), 0]
+                    })
+                );
+                assert!(product.usage().shader_words > 0);
+                prepared += 1;
+            }
+            OrderedStep::Flip(_) => panic!("no original flip"),
+        }
+    }
+    assert_eq!(prepared, 2);
+    commands.final_state().unwrap();
+    // CPU preparation did not invent a draw completion or render any pixels.
+    assert_eq!(
+        read(&memory, target, TARGET_BYTES),
+        SENTINEL.repeat(WIDTH * HEIGHT)
+    );
+}

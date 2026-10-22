@@ -6,7 +6,10 @@
 use super::*;
 use pentax_platform::native_memory::NativeOwnerId;
 
-pub(crate) const EXPORTS: [(&str, Function); 30] = [
+#[path = "command_builder/register_builder.rs"]
+mod register_builder;
+
+pub(crate) const EXPORTS: [(&str, Function); 52] = [
     ("LtTouSCZjHM", Function::AgcCbNop),
     ("t7PlZ9nt5Lc", Function::AgcCbNopGetSize),
     ("k3GhuSNmBLU", Function::AgcCbDispatch),
@@ -37,6 +40,49 @@ pub(crate) const EXPORTS: [(&str, Function); 30] = [
     ("0fWWK5uG9rQ", Function::AgcQueueEndOfPipeActionPatchAddress),
     ("MlEw1feXcjg", Function::AgcQueueEndOfPipeActionPatchData),
     ("u2T2DiA5hRI", Function::AgcDcbStallCommandBufferParser),
+    ("n2fD4A+pb+g", Function::AgcCbSetShRegisterRangeDirect),
+    (
+        "bxGoVxpdSPQ",
+        Function::AgcCbSetShRegisterRangeDirectGetSize,
+    ),
+    ("UZbQjYAwwXM", Function::AgcCbSetShRegistersDirect),
+    ("03RZmELWWzw", Function::AgcCbSetUcRegistersDirect),
+    ("pFLArOT53+w", Function::AgcDcbSetShRegisterDirect),
+    ("LHFXRrlTPD8", Function::AgcDcbSetCxRegisterDirect),
+    ("1DeUNpRIDDA", Function::AgcDcbSetCxRegisterDirectGetSize),
+    ("w4-d0n60hdo", Function::AgcDcbSetUcRegisterDirect),
+    ("ZvwO9euwYzc", Function::AgcDcbSetCxRegistersIndirect),
+    ("GBCh3zCihoU", Function::AgcDcbSetCxRegistersIndirectGetSize),
+    ("-HOOCn0JY48", Function::AgcDcbSetShRegistersIndirect),
+    ("nNlUtdDDvZ0", Function::AgcDcbSetShRegistersIndirectGetSize),
+    ("hvUfkUIQcOE", Function::AgcDcbSetUcRegistersIndirect),
+    ("vcmNN+AAXnY", Function::AgcSetCxRegIndirectPatchSetAddress),
+    ("Qrj4c+61z4A", Function::AgcSetShRegIndirectPatchSetAddress),
+    ("6lNcCp+fxi4", Function::AgcSetUcRegIndirectPatchSetAddress),
+    (
+        "whb1RL7K4Ss",
+        Function::AgcSetCxRegIndirectPatchSetNumRegisters,
+    ),
+    (
+        "nCUgItdN2ms",
+        Function::AgcSetShRegIndirectPatchSetNumRegisters,
+    ),
+    (
+        "fRG-JOH5+sI",
+        Function::AgcSetUcRegIndirectPatchSetNumRegisters,
+    ),
+    (
+        "d-6uF9sZDIU",
+        Function::AgcSetCxRegIndirectPatchAddRegisters,
+    ),
+    (
+        "z2duB-hHQSM",
+        Function::AgcSetShRegIndirectPatchAddRegisters,
+    ),
+    (
+        "vRoArM9zaIk",
+        Function::AgcSetUcRegIndirectPatchAddRegisters,
+    ),
 ];
 
 pub(crate) fn supports(function: Function) -> bool {
@@ -94,6 +140,7 @@ pub(crate) struct PendingCommandBuilder {
     callback_args: [u64; 3],
     payload: Vec<u8>,
     preflight_work: u64,
+    registers: Option<register_builder::RegisterBuildState>,
 }
 impl std::fmt::Debug for PendingCommandBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,6 +149,14 @@ impl std::fmt::Debug for PendingCommandBuilder {
     }
 }
 impl PendingCommandBuilder {
+    pub(crate) fn retained_payload_bytes(&self) -> Option<usize> {
+        self.payload
+            .capacity()
+            .checked_add(self.registers.as_ref().map_or(
+                0,
+                register_builder::RegisterBuildState::retained_payload_bytes,
+            ))
+    }
     pub(crate) fn owner(&self) -> NativeOwnerId {
         self.owner
     }
@@ -123,6 +178,11 @@ fn size(function: Function, args: &[u64; 6]) -> Option<u64> {
     Some(match function {
         AgcCbNopGetSize => u64::from((args[0] as u32).wrapping_mul(4)),
         AgcCbDispatchGetSize | AgcDcbDrawIndexOffsetGetSize => 20,
+        AgcCbSetShRegisterRangeDirectGetSize => {
+            u64::from((args[0] as u32).wrapping_mul(4).wrapping_add(8))
+        }
+        AgcDcbSetCxRegisterDirectGetSize => 12,
+        AgcDcbSetCxRegistersIndirectGetSize | AgcDcbSetShRegistersIndirectGetSize => 20,
         AgcDcbSetNumInstancesGetSize => 8,
         AgcDcbDrawIndexGetSize => 24,
         AgcDcbDrawIndexAutoGetSize => 12,
@@ -154,6 +214,10 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
         | AgcCbReleaseMem
         | AgcDcbWaitRegMem
         | AgcAcbWaitRegMem => Ok(0),
+        AgcCbSetShRegisterRangeDirect
+        | AgcDcbSetShRegisterDirect
+        | AgcDcbSetCxRegisterDirect
+        | AgcDcbSetUcRegisterDirect => Ok(0),
         _ => Err(Failure::UnsupportedQueue),
     }
 }
@@ -337,6 +401,41 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
             w[end..end + 3].copy_from_slice(&[pm4(3, 0x79, 1), 0x342, END_WAIT]);
             value
         }
+        AgcCbSetShRegisterRangeDirect => {
+            let mut value = Packet::fixed(&[pm4(a[3].wrapping_add(2), 0x76, 0), a[1] & 0xffff]);
+            value.allocate = a[3].checked_add(2).ok_or(Failure::Limit)?;
+            if args[2] != 0 {
+                value.payload = Some((
+                    args[2],
+                    usize::try_from(u64::from(a[3]) * 4).map_err(|_| Failure::Limit)?,
+                ));
+            }
+            value
+        }
+        AgcDcbSetShRegisterDirect | AgcDcbSetCxRegisterDirect | AgcDcbSetUcRegisterDirect => {
+            let op = match function {
+                AgcDcbSetShRegisterDirect => 0x76,
+                AgcDcbSetCxRegisterDirect => 0x69,
+                _ => 0x79,
+            };
+            Packet::fixed(&[pm4(3, op, 0), a[1] & 0xffff, (args[1] >> 32) as u32])
+        }
+        AgcDcbSetCxRegistersIndirect
+        | AgcDcbSetShRegistersIndirect
+        | AgcDcbSetUcRegistersIndirect => {
+            let op = match function {
+                AgcDcbSetCxRegistersIndirect => 0x9f,
+                AgcDcbSetShRegistersIndirect => 0x63,
+                _ => 0x64,
+            };
+            Packet::fixed(&[
+                pm4(5, op, 0),
+                a[1] & !3,
+                (args[1] >> 32) as u32,
+                0x8000_0000,
+                a[2] & 0x3fff,
+            ])
+        }
         _ => return Err(Failure::UnsupportedQueue),
     };
     Ok(Some(packet))
@@ -403,6 +502,13 @@ fn available(memory: &PausedNativeMemory<'_>, buffer: u64) -> Result<(u64, u64),
 fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failure>> {
     use Function::*;
     if function == AgcCbNop && args[1] as u32 == 0 {
+        return Some(Ok(0));
+    }
+    if matches!(
+        function,
+        AgcCbSetShRegistersDirect | AgcCbSetUcRegistersDirect
+    ) && args[2] as u32 == 0
+    {
         return Some(Ok(0));
     }
     if matches!(function, AgcDcbWriteData | AgcAcbWriteData) && args[4] == 0 {
@@ -555,6 +661,17 @@ impl Driver {
         }
         if matches!(
             function,
+            Function::AgcCbSetShRegistersDirect | Function::AgcCbSetUcRegistersDirect
+        ) {
+            return self.begin_register_group(memory, function, args);
+        }
+        if register_builder::patch_kind(function).is_some() {
+            return self
+                .patch_register_command(memory, function, args)
+                .map(CommandBuilderAction::Returned);
+        }
+        if matches!(
+            function,
             Function::AgcWriteDataPatchSetAddressOrOffset
                 | Function::AgcWaitRegMemPatchAddress
                 | Function::AgcWaitRegMemPatchReference
@@ -604,10 +721,23 @@ impl Driver {
         // (lp*rp+3*(lp+rp)+1) is below this envelope. The allocation term also
         // covers payload staging/copying. Passing the cap to each primitive
         // does not refund or debit this admitted allowance a second time.
-        let work = allocation
+        let mut work = allocation
             .checked_mul(8)
             .and_then(|n| n.checked_add(4096))
             .ok_or(Failure::Limit)?;
+        if function == Function::AgcCbSetShRegisterRangeDirect && payload_length != 0 {
+            let page = crate::memory::PAGE_SIZE;
+            let pages = (payload_length as u64)
+                .checked_add(page - 2)
+                .map(|bytes| bytes / page + 1)
+                .ok_or(Failure::Limit)?;
+            work = pages
+                .checked_mul(pages)
+                .and_then(|n| pages.checked_mul(6).and_then(|m| n.checked_add(m)))
+                .and_then(|n| n.checked_add(1))
+                .and_then(|n| work.checked_add(n))
+                .ok_or(Failure::Limit)?;
+        }
         if work > self.limits.commands.max_work
             || payload_length > self.limits.commands.max_host_bytes
         {
@@ -632,7 +762,8 @@ impl Driver {
             .try_reserve_exact(payload_length)
             .map_err(|_| Failure::Allocation)?;
         if payload.capacity() > self.limits.commands.max_host_bytes
-            || payload.capacity() > MAX_PAYLOAD_BYTES
+            || function != Function::AgcCbSetShRegisterRangeDirect
+                && payload.capacity() > MAX_PAYLOAD_BYTES
         {
             return Err(Failure::Limit);
         }
@@ -648,6 +779,7 @@ impl Driver {
             callback_args: [0; 3],
             payload,
             preflight_work: work,
+            registers: None,
         };
         if u64::from(packet.allocate) <= count {
             let value = self.publish_command(memory, pending, up)?;
@@ -671,23 +803,27 @@ impl Driver {
         memory: &mut PausedNativeMemory<'_>,
         pending: PendingCommandBuilder,
         returned: u64,
-    ) -> Result<u64, Failure> {
+    ) -> Result<CommandBuilderAction, Failure> {
         if self.poisoned {
             return Err(Failure::Poisoned);
         }
         if pending.owner != memory.owner_id() {
             return Err(Failure::Memory);
         }
+        if pending.registers.is_some() {
+            return self.resume_register_group(memory, pending, Some(returned));
+        }
         // A source bool uses AL. The actual callback receipt, not this numeric
         // value alone, is authenticated by the core continuation before entry.
         if returned as u8 == 0 {
-            return allocation_failure(pending.function);
+            return allocation_failure(pending.function).map(CommandBuilderAction::Returned);
         }
         let (up, count) = available(memory, pending.buffer)?;
         if u64::from(pending.packet.allocate) > count {
-            return allocation_failure(pending.function);
+            return allocation_failure(pending.function).map(CommandBuilderAction::Returned);
         }
         self.publish_command(memory, pending, up)
+            .map(CommandBuilderAction::Returned)
     }
 
     fn command_write(
@@ -731,6 +867,14 @@ impl Driver {
             &next.to_le_bytes(),
             pending.preflight_work,
         )?;
+        if up == 0 {
+            // AllocateDW advances a null cursor before returning nullptr.
+            // Its caller follows the individual failure branch, without
+            // touching either a packet header or an optional source payload.
+            let value = allocation_failure(pending.function)?;
+            self.poisoned = false;
+            return Ok(value);
+        }
         for ordinal in 0..pending.packet.written {
             // The source writes a wait's end tag immediately after its prefix,
             // before filling the central WAIT_REG_MEM packet. Preserve even

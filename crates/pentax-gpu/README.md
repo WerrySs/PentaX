@@ -318,3 +318,20 @@ launch out of order. The Vulkan compute profile permits this rather than
 promising an ordered launch. Other modifier controls and wave64 remain typed
 unsupported. AMD documents this bit in the primary
 [CIK register reference, COMPUTE_DISPATCH_INITIATOR](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/programmer-references/CIK_3D_registers_v2.pdf).
+
+Ordered register arrays
+-----------------------
+
+The flat command profile decodes the five-DWORD CX, SH and UC indirect-register
+packets into bounded descriptors. The executor reads each current array of
+offset/value pairs at its position after preceding memory and GPU effects.
+Draw and dispatch products use the resulting register state. Zero-count arrays
+perform no address access; unknown offsets or queue banks remain explicit
+refusals. Generic SH packets with a zero shader-type bit can update the known
+compute register bank, matching the public common opcode handler.
+
+Immutable command storage, packet metadata, reusable array scratch and action
+capacity are admitted before effects. Captured array ranges participate in
+later physical write exclusions. A late failure preserves prior effects and
+makes the driver terminal. New array/compute-IB combinations remain unsupported;
+streams without arrays retain the existing static planners and IB behavior.

@@ -43,12 +43,14 @@ pub mod graphics;
 mod inspect;
 mod limits;
 mod packet;
+mod registers;
 mod report;
 
 pub use error::{InspectError, StopCategory, StopReason, Storage};
 pub use inspect::inspect;
 pub use limits::{LimitKind, Limits, RECORD_STORAGE_BYTES};
 pub use packet::{Header, IndirectBuffer, RegisterSpace};
+pub use registers::{IndirectRegisters, contains_indirect as contains_indirect_registers};
 pub use report::{
     Accounting, Inspection, NopPayload, Outcome, Packet, PacketBody, Packets, RegisterWrite,
 };

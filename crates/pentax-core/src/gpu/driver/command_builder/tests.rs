@@ -3,6 +3,9 @@
 use super::*;
 use pentax_platform::native_memory::{NativeAddressSpace, NativePermissions};
 
+#[path = "tests/register_tests.rs"]
+mod register_tests;
+
 fn setup(memory: &mut PausedNativeMemory<'_>, buffer: u64, up: u64, available: u64, callback: u64) {
     let mut bytes = [0; 56];
     bytes[16..24].copy_from_slice(&up.to_le_bytes());
@@ -162,7 +165,7 @@ fn source_packet_words_sizes_narrow_arguments_and_all_selected_roles_are_closed(
     ] {
         assert_eq!(size(function, &[arg, 0, 0, 0, 0, 0]), Some(expected));
     }
-    assert_eq!(EXPORTS.len(), 30);
+    assert_eq!(EXPORTS.len(), 52);
     assert!(packet(AgcDcbSetIndexBuffer, full(&[1, 3])).is_err());
     assert!(packet(AgcCbReleaseMem, full(&[1, 0, 0, 2])).is_err());
     assert!(
@@ -227,8 +230,12 @@ fn allocation_prefix_precedes_descriptor_and_header_payload_reads_and_fresh_grow
     setup(&mut memory, base, up + 0x100, 9, base + 0x80);
     memory.write(data, &[0x5c; 8]).unwrap();
     assert_eq!(
-        driver.complete_command_builder(&mut memory, pending, 0x10001),
-        Ok(up + 0x100)
+        returned(
+            driver
+                .complete_command_builder(&mut memory, pending, 0x10001)
+                .unwrap()
+        ),
+        up + 0x100
     );
     assert_eq!(read(&memory, up + 0x110, 8), [0x5c; 8]);
     assert_eq!(driver.usage().calls, 1);

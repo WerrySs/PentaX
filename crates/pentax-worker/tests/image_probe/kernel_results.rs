@@ -43,6 +43,8 @@ fn assert_modeled_vector_counters(fields: &HashMap<String, String>, expected: [(
 
 #[path = "agc_command_builders.rs"]
 mod agc_command_builders;
+#[path = "agc_register_builders.rs"]
+mod agc_register_builders;
 #[path = "font_parser.rs"]
 mod font_parser;
 #[path = "ime_callbacks.rs"]

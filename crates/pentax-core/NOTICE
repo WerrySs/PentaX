@@ -460,6 +460,20 @@ the independently retained exact prefix pair already used by this provider.
 No wildcard namespace, proprietary command stream or copied game data is used.
 Packet construction never grants unsupported GPU execution or presentation.
 
+The register command-buffer family additionally adapts the same public
+7b7f9a70 agc.cpp blob: SH ranges and grouped SH/UC direct runs at lines 1861-2034,
+by-value single-register and indirect builders at lines 2271-2411, and the native
+indirect address/count helpers at lines 818-1015. The corresponding 22
+registrations are in the same libAgcDriver.cpp blob. GPL-2.0-only,
+Copyright (c) 2021 InoriRus, and
+the retained original Kyty MIT grant above continue to apply. PentaX changes
+2026 add bounded source-ordered checked guest access, full-call allocation/work
+admission and actual owner/source/thread/executor-bound multi-grow continuation
+with fresh serials and no receipt replay. SH snapshot-before-allocation and
+UC incremental reads/failed-run continuation remain distinct. Only the existing
+two exact namespace pairs receive appended exports; the prior 178 marker rows
+remain unchanged. Original bounded fixtures are PentaX code, not title data.
+
 
 The appended keyboard-type provider marker integrates pentax-kernel's
 ConvertKeycodeGetImeKeyboardType adaptation from PUBLIC KytyPS5/KytyPS5

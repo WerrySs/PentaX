@@ -181,8 +181,30 @@ impl Driver {
         } else {
             self.graphics
         };
-        let plan = draw::plan_commands(&buffers, initial, &commands)
-            .map_err(Failure::GraphicsPreparation)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            total,
+            self.limits.max_preparation_work,
+        )?;
+        commands.max_work = commands.max_work.min(
+            self.limits
+                .max_preparation_work
+                .saturating_sub(self.usage.preparation_work),
+        );
+        let ordered =
+            pentax_gpu::contains_indirect_registers(&buffers).map_err(Failure::Preparation)?;
+        let mut plan = if ordered {
+            GraphicsCommands::Ordered(
+                draw::OrderedCommands::prepare(&buffers, &sources, initial, &commands)
+                    .map_err(Failure::GraphicsPreparation)?,
+            )
+        } else {
+            GraphicsCommands::Static {
+                plan: draw::plan_commands(&buffers, initial, &commands)
+                    .map_err(Failure::GraphicsPreparation)?,
+                action: 0,
+            }
+        };
         self.usage.preparation_work = add(
             self.usage.preparation_work,
             plan.usage().work,
@@ -218,11 +240,8 @@ impl Driver {
         let mut planned = [0usize; 3];
         let mut frame_bytes = self.video.retained_frame_bytes();
         let mut capture_work = 0u64;
-        for action in plan.actions() {
-            let draw::Action::Flip(flip) = action else {
-                continue;
-            };
-            let surface = self.video.gpu_capture_surface(*flip)?;
+        for flip in plan.flips() {
+            let surface = self.video.gpu_capture_surface(flip)?;
             let slot = usize::try_from(flip.handle() - 1)
                 .ok()
                 .filter(|i| *i < 3)
@@ -265,17 +284,27 @@ impl Driver {
         )?;
         let owner = memory.owner_id();
         let mut cursor = Cursor::Paused(memory);
-        for action in plan.actions() {
+        while let Some(action) = plan.next_step().map_err(Failure::GraphicsPreparation)? {
+            let owned_draw;
             let command = match action {
-                draw::Action::Draw(index) => &plan.draws()[*index],
-                draw::Action::Memory(index) => {
+                GraphicsStep::Array => {
+                    plan.resolve_array(&super::super::Memory(cursor.paused_memory()))
+                        .map_err(Failure::GraphicsPreparation)?;
+                    continue;
+                }
+                GraphicsStep::StaticDraw(index) => plan.static_draw(index),
+                GraphicsStep::OrderedDraw(draw) => {
+                    owned_draw = draw;
+                    &owned_draw
+                }
+                GraphicsStep::Memory(index) => {
                     // Consuming the current draw receipt invalidates it before
                     // every memory/barrier action, including empty writes. A
                     // later flip must follow a new actual owned draw.
                     let memory = cursor.into_pause();
-                    match plan.memory_action(*index) {
+                    match plan.memory_action(index) {
                         draw::MemoryAction::Write(write) => {
-                            self.memory_write(memory, write, &sources)?;
+                            self.memory_write(memory, write, plan.command_ranges(&sources))?;
                         }
                         draw::MemoryAction::Wait(wait) => {
                             self.usage.preparation_work = add(
@@ -293,14 +322,20 @@ impl Driver {
                             }
                         }
                         draw::MemoryAction::Release(release) => {
-                            self.retire_release(memory, release, &sources, &mut kernel, 0)?;
+                            self.retire_release(
+                                memory,
+                                release,
+                                plan.command_ranges(&sources),
+                                &mut kernel,
+                                0,
+                            )?;
                         }
                         draw::MemoryAction::Drain => self.drain_commands()?,
                     }
                     cursor = Cursor::Paused(memory);
                     continue;
                 }
-                draw::Action::Flip(flip) => {
+                GraphicsStep::Flip(flip) => {
                     let Cursor::Draw(current) = cursor else {
                         return Err(Failure::UnsupportedVideo);
                     };
@@ -312,7 +347,7 @@ impl Driver {
                     let clock = clock.ok_or(Failure::UnsupportedVideo)?;
                     let (memory, result) =
                         self.video
-                            .submit_gpu_flip(current, *flip, &limits, |memory| {
+                            .submit_gpu_flip(current, flip, &limits, |memory| {
                                 clock(kernel, memory)
                             });
                     result?;
@@ -352,7 +387,7 @@ impl Driver {
                 command,
                 &limits,
                 &gpu_limits,
-                &sources,
+                plan.command_ranges(&sources),
                 |prepared, preflight, may_execute| {
                     let vertices = add(
                         self.usage.vertices,
@@ -392,7 +427,7 @@ impl Driver {
                 .saturating_add(current.written_bytes() as u64);
             cursor = Cursor::Draw(current);
         }
-        self.graphics = plan.final_state();
+        self.graphics = plan.final_state().map_err(Failure::GraphicsPreparation)?;
         self.graphics_owner = Some(owner);
         self.frame.reset_before_graphics = false;
         self.poisoned = false;
@@ -405,6 +440,12 @@ enum Cursor<'borrow, 'owner> {
     Draw(super::super::graphics::CurrentDraw<'borrow, 'owner>),
 }
 impl<'borrow, 'owner> Cursor<'borrow, 'owner> {
+    fn paused_memory(&self) -> &PausedNativeMemory<'owner> {
+        match self {
+            Self::Paused(memory) => memory,
+            Self::Draw(current) => current.paused_memory(),
+        }
+    }
     fn into_pause(self) -> &'borrow mut PausedNativeMemory<'owner> {
         match self {
             Self::Paused(memory) => memory,
@@ -422,3 +463,96 @@ fn host_add(held: usize, count: usize, maximum: usize) -> Result<usize, Failure>
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "graphics_tests.rs"]
 mod tests;
+
+// The static variant preserves the existing no-array planner and its complete
+// immutable draw snapshots. Only array streams use source-ordered replay.
+// Inline sealed state avoids a fallible allocation after an earlier effect.
+#[allow(clippy::large_enum_variant)]
+enum GraphicsCommands {
+    Static {
+        plan: draw::CommandPlan,
+        action: usize,
+    },
+    Ordered(draw::OrderedCommands),
+}
+// Inline sealed state avoids a fallible allocation after an earlier effect.
+#[allow(clippy::large_enum_variant)]
+enum GraphicsStep {
+    Array,
+    StaticDraw(usize),
+    OrderedDraw(draw::Draw),
+    Memory(usize),
+    Flip(draw::Flip),
+}
+impl GraphicsCommands {
+    fn usage(&self) -> draw::CommandUsage {
+        match self {
+            Self::Static { plan, .. } => plan.usage(),
+            Self::Ordered(plan) => plan.usage(),
+        }
+    }
+    fn flips(&self) -> impl Iterator<Item = draw::Flip> + '_ {
+        let actions = match self {
+            Self::Static { plan, .. } => plan.actions(),
+            Self::Ordered(plan) => plan.static_actions(),
+        };
+        actions.iter().filter_map(|action| match action {
+            draw::Action::Flip(flip) => Some(*flip),
+            _ => None,
+        })
+    }
+    fn command_ranges<'a>(
+        &'a self,
+        sources: &'a [compute::CommandRange],
+    ) -> &'a [compute::CommandRange] {
+        match self {
+            Self::Static { .. } => sources,
+            Self::Ordered(plan) => plan.command_ranges(),
+        }
+    }
+    fn resolve_array(&mut self, memory: &impl compute::Memory) -> Result<(), draw::Error> {
+        match self {
+            Self::Ordered(plan) => plan.resolve_array(memory),
+            _ => Err(draw::Error::Unsupported("static register array")),
+        }
+    }
+    fn memory_action(&self, index: usize) -> &draw::MemoryAction {
+        match self {
+            Self::Static { plan, .. } => plan.memory_action(index),
+            Self::Ordered(plan) => plan.memory_action(index),
+        }
+    }
+    fn static_draw(&self, index: usize) -> &draw::Draw {
+        match self {
+            Self::Static { plan, .. } => &plan.draws()[index],
+            _ => unreachable!(),
+        }
+    }
+    fn final_state(&self) -> Result<draw::GraphicsState, draw::Error> {
+        match self {
+            Self::Static { plan, .. } => Ok(plan.final_state()),
+            Self::Ordered(plan) => plan.final_state(),
+        }
+    }
+    fn next_step(&mut self) -> Result<Option<GraphicsStep>, draw::Error> {
+        Ok(match self {
+            Self::Static { plan, action } => {
+                let Some(next) = plan.actions().get(*action) else {
+                    return Ok(None);
+                };
+                *action += 1;
+                Some(match *next {
+                    draw::Action::Draw(index) => GraphicsStep::StaticDraw(index),
+                    draw::Action::Memory(index) => GraphicsStep::Memory(index),
+                    draw::Action::Flip(flip) => GraphicsStep::Flip(flip),
+                })
+            }
+            Self::Ordered(plan) => plan.next_step()?.map(|next| match next {
+                draw::OrderedStep::Array => GraphicsStep::Array,
+                draw::OrderedStep::Draw(draw) => GraphicsStep::OrderedDraw(draw),
+                draw::OrderedStep::Memory(index) => GraphicsStep::Memory(index),
+                draw::OrderedStep::Flip(flip) => GraphicsStep::Flip(flip),
+            }),
+        })
+    }
+}

@@ -4,26 +4,52 @@ The common AGC command-buffer builders retain the pinned public allocator and
 packet contracts: NOP, direct dispatch, index type/base/count, instance count,
 direct indexed/automatic/offset draws, DCB/ACB writes and waits, release-memory,
 parser drain, their selected size helpers and five packet patch helpers.
-Thirty function identities append only the exact `Graphics5/Graphics5` and
-`libSceAgc/libSceAgc` module1.1/library1 pairs. No hybrid pair or NID-only lookup
-is added. Existing118 markers remain in place; new metadata fits the same
+The register family adds SH ranges, grouped SH/UC runs, single SH/CX/UC
+registers, indirect CX/SH/UC pair arrays, their four size helpers and nine
+address/count patch helpers. Fifty-two builder identities use only the exact
+`Graphics5/Graphics5` and `libSceAgc/libSceAgc` module 1.1/library 1 pairs.
+No hybrid pair or NID-only lookup is added. The original 178 markers remain in
+place; new metadata fits the same
 16 KiB immutable provider mapping and its existing allocation limit.
 
-Insufficient capacity can suspend a builder for one genuine guest allocator
+Insufficient capacity can suspend each allocation for one genuine guest allocator
 callback, using `(buffer, requested_dwords + reserved_dwords, user_data)` with
-the source's32-bit addition. The owner/source/thread/executor-bound ticket is
+the source's 32-bit addition. The owner/source/thread/executor-bound ticket is
 completed only by that exact nested call's actual return. The callback may
 change the descriptor and payload; completion rereads current cursor/capacity
 and reads payload only after publishing the cursor and fixed header words in
 source order. Reentrant calls receive independent admitted tickets within the
-existing32-frame bound. Callback false or insufficient returned capacity follows
-the individual source NULL/fatal branch, without retrying the callback.
+existing 32-frame bound. Callback false or insufficient returned capacity follows
+the individual source NULL/fatal branch, without retrying that allocation's callback.
+Grouped calls may continue to another allocation and genuine callback. Each
+completed receipt is consumed before any fallible continuation; a subsequent
+grow gets a fresh serial in the same retained slot and must establish a new
+actual nested call. The whole call retains its original work/output admissions.
+
+Grouped SH snapshots every offset/value pair before its first allocation;
+allocation failure returns the first previously emitted command. Grouped UC
+stages only the current run's values, rereads the next boundary pair after
+allocation/callback, and continues past failed allocations. Neither operation
+is replaced by universal presnapshotting or fit-only publication. Range values
+are read after cursor/header publication; a null range source leaves the value
+words untouched. Single registers are eight-byte by-value arguments. Indirect
+builders encode the source pointer/count without reading its pair array; its
+eventual execution still requires independent current GPU-read authority.
 
 Finite work, output bytes and any payload capacity are admitted before callback
-entry. Each pending payload's actual capacity is bounded by both the existing
-per-call command host allowance and the source maximum65524 bytes;32 pending
-tickets therefore retain at most2096768 payload bytes plus fixed metadata. The
-per-call host allowance is not presented as an aggregate cap. A later guest
+entry. Each WriteData body's pending payload capacity is bounded by the existing
+per-call command host allowance and the source maximum of 65,524 bytes. Thirty-two
+pending tickets containing only those bodies therefore retain at most 2,096,768
+payload bytes plus fixed metadata.
+Ranges and grouped register arrays instead retain their actual admitted
+capacity under the unchanged per-call host allowance; grouped calls also
+include their fixed pending metadata in that host bound. At most 32 tickets
+are live, including reentrant calls; sequential grows reuse one slot. Across
+all retained continuations, actual payload and register-staging capacities
+share the unchanged 2,096,768-byte aggregate payload cap. A new continuation
+is refused before retention if its capacity would exceed that cap; a consumed
+slot's prior body is already released before replacement. Fixed ticket metadata
+remains separately bounded by the 32 slots. A later guest
 read/write fault preserves already committed cursor/header
 prefixes, consumes the callback ticket and poisons further driver submissions;
 neither guest execution nor a partial builder is replayed. Payload `memcpy`

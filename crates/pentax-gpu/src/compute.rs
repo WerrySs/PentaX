@@ -14,11 +14,13 @@ use pentax_shader_compiler::{
 use std::fmt;
 
 mod commands;
+mod ordered;
 pub use commands::{
     Command, CommandLimits, CommandPlan, CommandRange, CommandUsage, Dispatch, MemoryAction,
     MemoryWait, MemoryWrite, Release, plan_commands,
 };
 pub(crate) use commands::{memory_packet, tagged_wait_dwords};
+pub use ordered::{OrderedCommands, OrderedStep};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryError {
@@ -246,7 +248,7 @@ fn packets(bytes: &[u8], budget: &mut Budget<'_>) -> Result<(ComputeState, [u32;
             .ok_or(fail("truncated packet"))?;
         if length == 1 || header.opcode() == 0x10 { /* Hardware NOP payload remains opaque. */
         } else if header.opcode() == 0x76
-            && header.shader_type()
+            && matches!(header.low_byte(), 0 | 2)
             && length >= 3
             && dispatch.is_none()
         {

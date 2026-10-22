@@ -15,6 +15,8 @@ use pentax_shader_compiler::CompiledShader;
 use std::fmt;
 
 mod commands;
+mod ordered;
+pub use ordered::{OrderedCommands, OrderedStep};
 mod linkage;
 mod prepare;
 mod state;

@@ -252,6 +252,17 @@ impl GeneratedKernelProvider {
         &self.markers
     }
 
+    /// Locate only a factory-owned marker start. This is catalogue selection;
+    /// the caller still attests the current source, live bytes and permissions.
+    pub(crate) fn marker_at_rva(&self, rva: u64) -> Option<&KernelMarker> {
+        let offset = usize::try_from(rva).ok()?.checked_sub(STUB_START)?;
+        if !offset.is_multiple_of(STUB_STRIDE) {
+            return None;
+        }
+        let marker = self.markers.get(offset / STUB_STRIDE)?;
+        (marker.rva == rva).then_some(marker)
+    }
+
     pub(super) fn code_bytes(&self) -> &[u8] {
         &self.image[..self.code_bytes]
     }

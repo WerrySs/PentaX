@@ -137,3 +137,15 @@ ORDER_MODE bit6=1 as permitting out-of-order wave launch, and the pinned public
 pm4.h retains CS_W32_EN bit15. This supports the exact0x8041 wave32 profile,
 not a general dispatch-mode or wave64 implementation. All proof command words,
 shader programs, index arrays and data remain original PentaX fixtures.
+
+Ordered indirect-register packets additionally adapt the public
+KytyPS5/KytyPS5 revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp, RegIndirectPacket and register builders/patches;
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp, CpOpIndirectCxRegs,
+    CpOpIndirectShRegs and CpOpIndirectUcRegs;
+  src/graphics/guest_gpu/pm4.h, register packet opcode constants.
+The existing GPL-2.0-only terms and retained original Kyty MIT grant above apply.
+PentaX modifications 2026: checked descriptors, immutable bounded command
+products, current-owner ordered array snapshots, replayed register banks and
+actual draw/dispatch preparation. Source masks retain unknown bits for explicit
+refusal rather than inventing register values or execution success.

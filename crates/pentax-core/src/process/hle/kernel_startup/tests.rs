@@ -404,6 +404,34 @@ fn stop(plan: &KernelStartupPlan<'_>, service: Service, args: [u64; 6]) -> Kerne
 }
 
 #[test]
+fn indexed_kernel_stop_sites_match_the_linear_catalogue_for_every_byte_and_bound() {
+    with_plan(KernelStartupLimits::default(), |plan, _, _, _| {
+        let first = plan.entry(plan.factory.markers()[0]) + 5;
+        let last = plan.entry(*plan.factory.markers().last().unwrap()) + 5;
+        // Independent previous lookup is the oracle for every valid start,
+        // seven interior bytes, both edges and the preceding stub padding.
+        let range = first - 16..=last + 16;
+        let extremes = [0, 4, 5, plan.bias - 1, plan.bias, u64::MAX - 5, u64::MAX];
+        for pc in range.chain(extremes) {
+            let old = plan
+                .factory
+                .markers()
+                .iter()
+                .find(|marker| plan.entry(**marker) + 5 == pc);
+            let indexed = plan.marker_at_syscall_pc(pc);
+            assert_eq!(
+                indexed.map(|marker| (marker.rva, marker.service_id, marker.symbol)),
+                old.map(|marker| (marker.rva, marker.service_id, marker.symbol)),
+                "catalogue selection differs at {pc:#x}"
+            );
+            if let (Some(indexed), Some(old)) = (indexed, old) {
+                assert!(std::ptr::eq(indexed, old));
+            }
+        }
+    });
+}
+
+#[test]
 fn exact_kernel_provider_catalogue_and_real_got_resolutions() {
     with_plan(KernelStartupLimits::default(), |plan, _, _, _| {
         assert_eq!(

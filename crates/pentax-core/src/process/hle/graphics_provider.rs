@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 178] = {
+const ENTRIES: [(&str, Function, usize, usize); 222] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 178] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 178];
+    let mut entries = [BASE_ENTRIES[0]; 222];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -361,7 +361,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 178);
+        assert_eq!(provider.function_count(), 222);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -408,6 +408,10 @@ mod flip_tests {
         }
         let previous = provider.markers().nth(117).unwrap();
         assert_eq!((previous.rva(), previous.id()), (0x850, 0x5058_4776));
+        // The prior thirty builder identities keep all sixty marker rows.
+        let old_last = provider.markers().nth(177).unwrap();
+        assert_eq!((old_last.rva(), old_last.id()), (0xc10, 0x5058_47b2));
+        assert_eq!(old_last.function, Function::AgcDcbStallCommandBufferParser);
         for (index, (nid, function)) in crate::gpu::driver::COMMAND_BUILDER_EXPORTS
             .into_iter()
             .enumerate()
