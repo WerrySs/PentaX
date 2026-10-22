@@ -306,7 +306,7 @@ fn apr_identity_queries_use_cached_size_current_stat_layout_and_source_error_ord
         Ok(u64::from(u32::MAX))
     );
     assert_eq!(other_guest.u64(0x300), 85);
-    let other_errno = errno(&mut other, &mut other_guest);
+    let other_errno = self::errno(&mut other, &mut other_guest);
     assert_eq!(u32_at(&other_guest, other_errno), 2);
     guest.regions[0].protection = 1;
     assert_eq!(
