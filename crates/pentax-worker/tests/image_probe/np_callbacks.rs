@@ -94,7 +94,9 @@ impl Code {
             self.reg(register, gpr_pattern(register) ^ self.base as u64);
         }
     }
-    fn check_context(&mut self) {
+    fn check_context(&mut self, environment_base: i32) {
+        // A real same-thread callback may change MXCSR; caller GPR/YMM state
+        // is restored independently of the continuing thread FP environment.
         for register in GPRS {
             if matches!(register, 1 | 11) {
                 continue;
@@ -115,10 +117,8 @@ impl Code {
         self.bad();
         self.word(88, CANARY);
         self.bytes.extend([0x0f, 0xae, 0x5c, 0x24, 88]);
-        self.check(
-            88,
-            (CANARY & !0xffff_ffff) | u64::from(MXCSR | (((self.base as u32 >> 12) & 3) << 13)),
-        );
+        let expected_mxcsr = MXCSR | (((environment_base as u32 >> 12) & 3) << 13);
+        self.check(88, (CANARY & !0xffff_ffff) | u64::from(expected_mxcsr));
     }
     fn finish(mut self, value: u64) -> Vec<u8> {
         self.reg(0, value);
@@ -398,12 +398,12 @@ impl Code {
         self.word(24, 0x3fff);
         self.bytes.extend([0xdb, 0x6c, 0x24, 16]);
     }
-    fn check_x87(&mut self, significand: u64) {
+    fn check_x87(&mut self, significand: u64, exponent: u16) {
         self.word(48, CANARY);
         self.word(56, CANARY);
         self.bytes.extend([0xdb, 0x7c, 0x24, 48]);
         self.check(48, significand);
-        self.check(56, (CANARY & !0xffff) | 0x3fff);
+        self.check(56, (CANARY & !0xffff) | u64::from(exponent));
         self.word(64, CANARY);
         self.bytes.extend([0xdd, 0x7c, 0x24, 64]);
         self.check(64, CANARY & !0xffff);
@@ -427,8 +427,8 @@ fn snapshot(scope: Scope) -> Input {
     main.call(0);
     main.flags_unchanged();
     main.expect(0, 0);
-    main.check_context();
-    main.check_x87(0x8000_0000_0000_0007);
+    main.check_context(SECOND);
+    main.check_x87(0, 0); // Last callback deliberately leaves its exact FLDZ value.
     record(&mut main, DATA, 1);
     record(&mut main, DATA + 0x100, 1);
     main.check_pending();
@@ -518,8 +518,8 @@ fn threaded_snapshots() -> Input {
     main.hold_x87(0x8000_0000_0000_0009);
     main.call(0);
     main.expect(0, 0);
-    main.check_context();
-    main.check_x87(0x8000_0000_0000_0009);
+    main.check_context(FIRST);
+    main.check_x87(0x8000_0000_0000_000b, 0x3fff);
     main.at(DATA + 64, 3);
     main.stack(0x8b, 7, 208);
     main.stack(0x8d, 6, 216);
@@ -538,10 +538,12 @@ fn threaded_snapshots() -> Input {
     first.flags();
     first.call(5); // Force a real owned guest-thread handoff; source return is void.
     first.flags_unchanged();
-    first.check_context();
-    first.check_x87(0x8000_0000_0000_000b);
+    first.check_context(FIRST);
+    first.check_x87(0x8000_0000_0000_000b, 0x3fff);
     first.at(DATA + 64, 2); // Other thread is suspended inside its own callback.
     first.check_pending(); // Must not replace either outstanding callback frame.
+    // Re-establish the value already consumed by the isolation check.
+    first.hold_x87(0x8000_0000_0000_000b);
     first.put(DATA + 64, 3);
     let mut second = Code::new(SECOND);
     second.arguments(DATA + 0x100);
@@ -551,9 +553,10 @@ fn threaded_snapshots() -> Input {
     second.flags();
     second.call(5);
     second.flags_unchanged();
-    second.check_context();
-    second.check_x87(0x8000_0000_0000_000d);
+    second.check_context(SECOND);
+    second.check_x87(0x8000_0000_0000_000d, 0x3fff);
     second.at(DATA + 64, 3);
+    second.hold_x87(0x8000_0000_0000_000d);
     second.put(DATA + 64, 4);
     let mut child = Code::new(CHILD);
     // At most eight explicit handoffs. No host sleeps or timing expectation.
@@ -579,8 +582,8 @@ fn threaded_snapshots() -> Input {
     child.seed_context();
     child.hold_x87(0x8000_0000_0000_000f);
     child.check_pending();
-    child.check_context();
-    child.check_x87(0x8000_0000_0000_000f);
+    child.check_context(SECOND);
+    child.check_x87(0x8000_0000_0000_000d, 0x3fff);
     child.at(DATA + 64, 4);
     image(
         &main.finish(42),
@@ -654,9 +657,23 @@ fn native_np_callbacks_refuse_unbacked_writable_nonreturning_prefixed_and_wrong_
         let source = image(&main.finish(42), &[&[0xc3]], None, scope);
         let (status, fields, text) = run(&source);
         assert_eq!(status, 2, "scope={scope:?}: {text}");
-        assert_eq!(fields["code"], "unavailable-function", "{text}");
-        assert_eq!(fields["unavailable_functions"], "1", "{text}");
-        assert_eq!(fields["service_stops"], "1", "{text}");
+        if matches!(
+            scope,
+            Scope::WrongLibraryVersion | Scope::WrongModuleVersion
+        ) {
+            // The linker rejects a known identity with incompatible versions
+            // before entry. This is stronger than a deferred unavailable use.
+            assert_eq!(fields["code"], "import-version-mismatch", "{text}");
+            assert_eq!(fields["phase"], "admission", "{text}");
+            assert_eq!(fields["native_instructions"], "0", "{text}");
+            assert_eq!(fields["service_stops"], "0", "{text}");
+            assert_eq!(fields["unavailable_functions"], "unknown", "{text}");
+        } else {
+            assert_eq!(fields["code"], "unavailable-function", "{text}");
+            assert_eq!(fields["phase"], "main-entry", "{text}");
+            assert_eq!(fields["unavailable_functions"], "1", "{text}");
+            assert_eq!(fields["service_stops"], "1", "{text}");
+        }
         assert!(!fields.contains_key("value"), "{text}");
         count += 1;
     }
