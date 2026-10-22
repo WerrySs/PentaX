@@ -426,8 +426,10 @@ fn save_directory_wildcard_matching_is_bounded_and_uses_source_percent_underscor
     ] {
         assert_eq!(matches(candidate, pattern, &mut budget).unwrap(), expected);
     }
-    let mut limits = Limits::default();
-    limits.max_work = 1;
+    let limits = Limits {
+        max_work: 1,
+        ..Default::default()
+    };
     let mut budget = Budget::new(limits).unwrap();
     assert!(matches!(
         matches(b"abc", b"%%%", &mut budget),

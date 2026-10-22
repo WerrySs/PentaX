@@ -232,7 +232,7 @@ impl CapturedCommands {
                     source_packet(source, roots.len(), source_range.address, at / 4, reason)
                 };
                 let tail = &frame.bytes[at..];
-                let words = packet_words(tail).map_err(|reason| fail(reason))?;
+                let words = packet_words(tail).map_err(&fail)?;
                 let length = words
                     .checked_mul(4)
                     .ok_or(Error::Limit("graphics packet extent"))?;

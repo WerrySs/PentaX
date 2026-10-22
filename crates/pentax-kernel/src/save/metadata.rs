@@ -131,18 +131,16 @@ fn newest_time(
                 .open_dir(entry.file_name())
                 .map_err(|_| Error::Code(INTERNAL))?;
             newest = newest.max(newest_time(&child, depth + 1, visited, budget)?);
-        } else if metadata.is_file() {
-            if let Ok(seconds) = metadata
+        } else if metadata.is_file()
+            && let Ok(seconds) = metadata
                 .modified()
                 .map(|time| time.into_std())
                 .and_then(|time| {
                     time.duration_since(UNIX_EPOCH)
                         .map_err(std::io::Error::other)
                 })
-            {
-                newest =
-                    newest.max(i64::try_from(seconds.as_secs()).map_err(|_| Error::Code(BROKEN))?);
-            }
+        {
+            newest = newest.max(i64::try_from(seconds.as_secs()).map_err(|_| Error::Code(BROKEN))?);
         }
     }
     Ok(newest)
@@ -200,12 +198,14 @@ fn icon_error(error: Failure) -> Error {
         other => Error::Policy(other),
     }
 }
+type SearchInput = ([u8; 64], [u8; 56], [u8; 10], [u8; 32]);
+
 fn search_input(
     guest: &impl GuestAccess,
     args: CallArgs,
     budget: &mut Budget,
     storage: &SaveStorage,
-) -> Result<([u8; 64], [u8; 56], [u8; 10], [u8; 32]), Error> {
+) -> Result<SearchInput, Error> {
     let condition = read::<64>(guest, args.0[0], budget)?;
     let result = read::<56>(guest, args.0[1], budget)?;
     if u32_at(&condition, 24) > 5
@@ -546,7 +546,7 @@ impl DirectoryState {
                     Err(_) => return Err(Error::Code(INTERNAL)),
                 }
                 if names.len() == names.capacity() {
-                    let capacity = (names.capacity() * 2).max(4).min(MAX_ENTRIES);
+                    let capacity = (names.capacity() * 2).clamp(4, MAX_ENTRIES);
                     let old = names.capacity();
                     budget.scratch((old + capacity) * size_of::<[u8; 32]>() + SEARCH_FIXED)?;
                     budget.work((capacity * size_of::<[u8; 32]>()) as u64)?;
