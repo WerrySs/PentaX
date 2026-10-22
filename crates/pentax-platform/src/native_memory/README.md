@@ -205,3 +205,20 @@ retain complete-span permission, overlap, physical-alias, work and byte checks.
 Two aliases share contents while retaining their own access rights. CPU and GPU
 are serialized by the exclusive pause through upload, fence and writeback; this
 is synchronous visibility, not concurrent cache emulation or asynchronous queues.
+
+Kernel provider permission preflights retain two exact positive spans inside the
+native owner: logical code READ/EXECUTE without CPU WRITE, and metadata CPU READ
+without CPU/GPU WRITE or EXECUTE. The profile matches the existing checked page
+conditions. Hits still check owner liveness; failures, a different exact span
+and every attempted mapping/protection change retire the corresponding proof.
+The existing stack invalidation point clears both provider slots before direct
+mapping, protection, unmapping, physical-view release, temporary loader rights
+or abandonment. Mutation transactions clear it before their own preflight too.
+There is no allocation, global cache, new guest authority or source-byte cache.
+
+Checked payload writes do not alter permission metadata. Kernel source/owner,
+continuation, service ID, live marker bytes and existing attempt/work charges
+remain checked on every service admission. Physical source pages remain NX.
+Original fixtures cover exact-hit reuse, protection changes, same-address remap,
+foreign owners, failed transactions, loader replacement and poisoned-owner
+refusal. No measured runtime speedup follows from this source implementation.

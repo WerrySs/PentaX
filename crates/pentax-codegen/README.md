@@ -25,6 +25,16 @@ host pointers, install exception handlers or authorize execution. The crate's
 own Rust code forbids `unsafe`. Its decoder/encoder is the pinned, pure-Rust
 `iced-x86` 1.21.0 dependency, rather than a second byte parser.
 
+The exact two-byte `F3 90` PAUSE hint emits its hardware instruction through
+the ordinary encoder. It preserves architectural state and consumes the normal
+instruction, work and block budgets. It creates no service call, host sleep or
+guest scheduler action. Other prefixed forms and wait instructions keep their
+existing refusal paths. The decoder's PAUSE feature is baseline-compatible:
+older processors interpret this encoding as NOP. See the
+[Intel instruction reference](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf),
+PAUSE, Volume 2B page 4-229. Original decoder, context and native thread-entry
+fixtures cover this behavior; source fixtures alone are not execution proof.
+
 VPMADDWD remains mediated in both VEX widths, retaining its exact register or
 complete memory source and original RIP target. Declared AVX/AVX2 features do
 not broaden native policy. Legacy XMM PMADDWD keeps its existing SSE2 native

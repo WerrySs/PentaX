@@ -52,6 +52,10 @@ pub struct NativeAddressSpace {
     // this owner, contains no payload/pointer and never bypasses live(). Every
     // attempted mapping/protection change clears it before any OS effect.
     stack_preflight: Cell<Option<NativeRange>>,
+    // Two exact positive provider permission spans: logical code and metadata.
+    // These owner-local proofs contain no payload or execution authority and
+    // share the existing before-mutation invalidation point with stack proofs.
+    provider_preflight: Cell<[Option<NativeRange>; 2]>,
     names: Vec<NameEntry>,
     name_work: u64,
     next_mapping_lifetime: u64,
@@ -78,6 +82,8 @@ pub struct NativeAddressSpace {
     rollback_operations: usize,
     #[cfg(test)]
     stack_preflight_scans: Cell<u64>,
+    #[cfg(test)]
+    provider_preflight_scans: Cell<[u64; 2]>,
 }
 
 impl NativeAddressSpace {
@@ -97,6 +103,7 @@ impl NativeAddressSpace {
             reservations: Vec::new(),
             pages: Vec::new(),
             stack_preflight: Cell::new(None),
+            provider_preflight: Cell::new([None; 2]),
             names: Vec::new(),
             name_work: 0,
             next_mapping_lifetime: 1,
@@ -123,6 +130,8 @@ impl NativeAddressSpace {
             rollback_operations: 0,
             #[cfg(test)]
             stack_preflight_scans: Cell::new(0),
+            #[cfg(test)]
+            provider_preflight_scans: Cell::new([0; 2]),
         })
     }
     /// Stable identity of this exact owner, including after moves. This getter
@@ -281,6 +290,7 @@ impl NativeAddressSpace {
         // mutators must enter here before validation or any possible OS effect.
         // Ordinary checked CPU/GPU payload writes do not change these metadata.
         self.stack_preflight.set(None);
+        self.provider_preflight.set([None; 2]);
     }
     fn operation(&mut self) -> Result<(), NativeMemoryError> {
         #[cfg(test)]
@@ -999,6 +1009,7 @@ mod stack_preflight_tests;
 #[cfg(test)]
 mod constrained_tests;
 
+mod provider_preflight;
 mod replacement;
 mod transaction;
 

@@ -37,6 +37,8 @@ impl CpuFeatures {
             CpuidFeature::CMOV,
             CpuidFeature::CX8,
             CpuidFeature::MULTIBYTENOP,
+            // PAUSE is backward-compatible as NOP, including on x86-64 hosts.
+            CpuidFeature::PAUSE,
             CpuidFeature::SSE,
             CpuidFeature::SSE2,
         ]
@@ -363,7 +365,10 @@ pub(crate) fn ordinary(
     if opcode.encoding() != EncodingKind::Legacy && !vex_gpr && !vex_vector {
         return Err(UnsupportedReason::InstructionClass);
     }
-    if !vex_vector && !integer(instruction.mnemonic()) && !sse(instruction.mnemonic()) {
+    // Admit only the observed F3 90 hint. The decoder consumes mandatory F3;
+    // a longer prefixed PAUSE remains outside this exact native profile.
+    let pause = instruction.code() == Code::Pause && instruction.len() == 2;
+    if !vex_vector && !pause && !integer(instruction.mnemonic()) && !sse(instruction.mnemonic()) {
         return Err(UnsupportedReason::InstructionClass);
     }
     if vex_vector && !policy.features.contains(CpuidFeature::AVX) {

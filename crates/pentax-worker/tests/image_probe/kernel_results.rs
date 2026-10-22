@@ -355,6 +355,8 @@ mod native_context_staging;
 mod native_register_loop;
 #[path = "native_vector_broadcasts.rs"]
 mod native_vector_broadcasts;
+#[path = "pause.rs"]
+mod pause;
 
 struct Program {
     code: Vec<u8>,

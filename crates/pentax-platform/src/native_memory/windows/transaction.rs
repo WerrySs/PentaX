@@ -179,6 +179,12 @@ impl PausedNativeMemory<'_> {
         limits: &NativeTransactionLimits,
         required: NativePermissions,
     ) -> Result<(), NativeMemoryError> {
+        // Mutation transactions clear permission metadata before any validation
+        // or possible OS effect, including a later preflight refusal. None-effect
+        // payload writes do not change permissions or make source bytes trusted.
+        if !matches!(transaction.effect, NativeMemoryEffect::None) {
+            self.owner.invalidate_stack_preflight();
+        }
         self.owner.live()?;
         let NativeMemoryTransaction { effect, writes } = transaction;
         if writes.len() > limits.max_outputs {

@@ -183,6 +183,12 @@ impl PausedNativeMemory<'_> {
     pub const fn owner_id(&self) -> NativeOwnerId {
         self._owner.owner_id()
     }
+    pub fn preflight_provider_code(&self, _: u64, _: u64) -> Result<(), NativeMemoryError> {
+        Err(NativeMemoryError::UnsupportedHost)
+    }
+    pub fn preflight_provider_metadata(&self, _: u64, _: u64) -> Result<(), NativeMemoryError> {
+        Err(NativeMemoryError::UnsupportedHost)
+    }
     pub fn preflight_fetch_source(&self, _: u64, _: u64) -> Result<(), NativeMemoryError> {
         Err(NativeMemoryError::UnsupportedHost)
     }

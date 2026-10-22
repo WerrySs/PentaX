@@ -111,6 +111,8 @@ mod native_ymm_tests;
 mod packed_convert_tests;
 #[path = "tests/packed_vectors.rs"]
 mod packed_vectors;
+#[path = "tests/pause.rs"]
+mod pause;
 #[path = "tests/permute_vectors.rs"]
 mod permute_vectors;
 #[path = "tests/precision_convert.rs"]

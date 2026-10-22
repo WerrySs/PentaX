@@ -672,22 +672,15 @@ fn attest_metadata_permissions(
     memory: &PausedNativeMemory<'_>,
     plan: &KernelStartupPlan<'_>,
 ) -> Result<(), KernelStartupError> {
-    for offset in (0..plan.factory.metadata_mapped_bytes()).step_by(PAGE_SIZE as usize) {
-        let page = plan.bias + METADATA_RVA + offset;
-        require(
-            memory.preflight_read(page, PAGE_SIZE).is_ok()
-                && memory.preflight_non_executable(page, PAGE_SIZE).is_ok()
-                && matches!(
-                    memory.preflight_write(page, PAGE_SIZE),
-                    Err(pentax_platform::native_memory::NativeMemoryError::PermissionDenied(_))
-                )
-                && matches!(
-                    memory.preflight_gpu_write(page, PAGE_SIZE),
-                    Err(pentax_platform::native_memory::NativeMemoryError::PermissionDenied(_))
-                ),
-            "kernel metadata must remain immutable and NX",
-        )?;
-    }
+    require(
+        memory
+            .preflight_provider_metadata(
+                plan.bias + METADATA_RVA,
+                plan.factory.metadata_mapped_bytes(),
+            )
+            .is_ok(),
+        "kernel metadata must remain immutable and NX",
+    )?;
     Ok(())
 }
 
@@ -941,20 +934,15 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
         let (mut paused, tls_instances) =
             self.hle.pause_with_tls().map_err(KernelStartupError::Hle)?;
         attest_marker(&paused, self.plan, *marker)?;
-        // Recheck page ownership/immutability before dispatch, including failed
-        // calls. The NativeGuestMemory owner guarantees all physical views NX.
-        for page in (self.plan.bias..self.plan.bias + CODE_MAPPED_BYTES).step_by(PAGE_SIZE as usize)
-        {
-            require(
-                paused.read(page, &mut [0]).is_ok()
-                    && paused.preflight_fetch_source(page, 1).is_ok()
-                    && matches!(
-                        paused.preflight_write(page, 1),
-                        Err(pentax_platform::native_memory::NativeMemoryError::PermissionDenied(_))
-                    ),
-                "kernel provider lost immutable permission",
-            )?;
-        }
+        // The same live owner retains only exact positive permission metadata.
+        // Every relevant mutation invalidates before effects; marker bytes above
+        // remain live on every call and physical views remain NX.
+        require(
+            paused
+                .preflight_provider_code(self.plan.bias, CODE_MAPPED_BYTES)
+                .is_ok(),
+            "kernel provider lost immutable permission",
+        )?;
         attest_metadata_permissions(&paused, self.plan)?;
         self.last_admitted_kernel_service = Some(marker.registration.source_name);
         let mut memory = KernelMemory {

@@ -1434,3 +1434,6 @@ fn application_heap_registration_reads_the_actual_guest_table_and_preserves_snap
         },
     );
 }
+
+#[path = "tests/provider_permissions.rs"]
+mod provider_permissions;

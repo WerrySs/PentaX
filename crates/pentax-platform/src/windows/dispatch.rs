@@ -656,9 +656,10 @@ fn host_supports(feature: CpuidFeature) -> bool {
     use CpuidFeature::*;
     match feature {
         // x86-64 long-mode baseline, always present on this target.
-        INTEL8086 | INTEL186 | INTEL286 | INTEL386 | INTEL486 | X64 | CMOV | CX8 | MULTIBYTENOP => {
-            true
-        }
+        // PAUSE's F3 90 encoding is backward-compatible as NOP. It has no
+        // CPUID enable bit or additional architectural state to admit.
+        INTEL8086 | INTEL186 | INTEL286 | INTEL386 | INTEL486 | X64 | CMOV | CX8 | MULTIBYTENOP
+        | PAUSE => true,
         SSE => std::is_x86_feature_detected!("sse"),
         SSE2 => std::is_x86_feature_detected!("sse2"),
         SSE3 => std::is_x86_feature_detected!("sse3"),

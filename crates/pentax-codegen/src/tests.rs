@@ -28,6 +28,7 @@ mod native_vector_moves;
 mod native_vector_register_bits;
 mod native_ymm;
 mod packed_convert;
+mod pause;
 mod qword_comparisons;
 mod register_loop_trace;
 mod rounding;
