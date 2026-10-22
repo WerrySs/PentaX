@@ -670,13 +670,14 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
                         .to_bits()
                         .to_le_bytes()
                 );
+                let expected_pixel_words = if prepared == 0 {
+                    [1f32.to_bits(), 0, 0]
+                } else {
+                    [0, 1f32.to_bits(), 0]
+                };
                 assert_eq!(
                     &product.pixel_push_data()[..12],
-                    &bytes(if prepared == 0 {
-                        &[1f32.to_bits(), 0, 0]
-                    } else {
-                        &[0, 1f32.to_bits(), 0]
-                    })
+                    &bytes(&expected_pixel_words)
                 );
                 assert!(product.usage().shader_words > 0);
                 prepared += 1;

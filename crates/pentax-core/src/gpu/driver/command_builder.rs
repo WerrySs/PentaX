@@ -168,6 +168,10 @@ impl PendingCommandBuilder {
     }
 }
 
+// Keep the bounded continuation inline: boxing would add a fallible allocation
+// at a callback boundary after earlier packet writes may already be visible.
+// Retained continuation count and aggregate payload capacity remain capped.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum CommandBuilderAction {
     Returned(u64),
     Grow(PendingCommandBuilder),
