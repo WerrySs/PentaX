@@ -78,24 +78,13 @@ impl Default for PortState {
         }
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct Port {
     state: PortState,
     open: bool,
     buffers: buffers::Buffers,
     vblank: VblankStatus,
     grid: Option<state::DisplayGrid>,
-}
-impl Default for Port {
-    fn default() -> Self {
-        Self {
-            state: PortState::default(),
-            open: false,
-            buffers: Default::default(),
-            vblank: VblankStatus::default(),
-            grid: None,
-        }
-    }
 }
 #[derive(Default)]
 pub(crate) struct State {

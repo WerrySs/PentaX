@@ -242,7 +242,10 @@ fn elapsed_grid_advances_without_pixels_and_consumer_ticks_cannot_double_count()
         Ok(0)
     );
     assert_eq!(status(&memory, base), expected);
-    assert_eq!(driver.video.flip_status(1).unwrap().count, 0);
+    assert_eq!(
+        driver.video_flip_status(&memory, 1).unwrap().unwrap().count,
+        0
+    );
     assert_eq!(driver.usage().dispatches, 0);
     assert_eq!(
         call(

@@ -185,12 +185,10 @@ fn thread_attribute_outputs_and_lifetime_publish_atomically_and_reject_stale_or_
         );
         assert_eq!(guest.get(ARG + 32, 16), [0x55; 16]);
     }
-    for service in [MutexInit] {
-        assert!(matches!(
-            library(&mut owner, &mut guest, service, &[ARG]),
-            Err(Failure::Unsupported(_))
-        ));
-    }
+    assert!(matches!(
+        library(&mut owner, &mut guest, MutexInit, &[ARG]),
+        Err(Failure::Unsupported(_))
+    ));
     assert_eq!(
         library(&mut owner, &mut guest, MutexAttrInit, &[ARG + 16]),
         Ok(0)
