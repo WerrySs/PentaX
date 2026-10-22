@@ -70,6 +70,27 @@ access fields. It never supplies guest pointers or shader code addresses.
 The 1024-invocation profile cap is a limit of this interface, not a universal
 claim about PS5 or host hardware.
 
+For caller specialization from actual resources, `analyze(&program, profile,
+&limits)` consumes an empty-buffer profile and returns an opaque
+`ShaderAnalysis`. Its read-only buffer requirements come from the same optimized
+IR after SSA, folding, dead-code elimination and policy checks. Dead loads do
+not declare resources; copied unmodified user values retain their actual user
+SGPR identity, while computed/replaced descriptors are refused. `finish` accepts
+only explicit `BufferDescription` values and continues resource validation,
+layout and emission on that same IR and monotonic budget. It cannot replace the
+stage, entry mapping, user range, interfaces or subgroup policy. No guest-memory
+reader or callback enters either operation. Missing/unused/access errors and the
+existing 64-buffer compiler bound remain active. The graphics consumer admits
+one read-only raw buffer per stage; this does not change the compiler's generic
+resource count.
+
+The current vertex entry mapping replaces s2/s3 with its source system values
+after user initialization. A descriptor in vertex quad0 therefore lacks the
+required unmodified user provenance and is refused. The graphics slice uses
+valid direct vertex quads4/8/12 and pixel quads0/4/8/12 within the declared user
+count. This boundary is preserved rather than changing entry values to make a
+descriptor appear valid.
+
 Bindings retain the source `NativeBinding`: descriptor set 0, stage group times
 57 plus the descriptor kind. Buffers are one storage-buffer descriptor array
 in first-use order, at kind 0; shader data uses kind 54 if it does not fit in

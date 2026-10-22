@@ -4,13 +4,14 @@
 
 use super::linkage::{PixelRegisters, validate_shader_interfaces};
 use super::{
-    Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedDraw,
-    PreparedIndices, RegisterSpace, TargetDecodeLimits, TargetGeometry, TargetLayout, Usage,
+    Budget, DecodedTarget, Draw, Error, GraphicsState, Limits, Memory, PreparedBuffer,
+    PreparedDraw, PreparedIndices, RegisterSpace, TargetDecodeLimits, TargetGeometry, TargetLayout,
+    Usage,
 };
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
-    CommonDescription, CompiledShader, Limits as CompilerLimits, Profile, ShaderProgram,
-    StageDescription, VertexDescription, WaveSize, compile,
+    BufferAccess, BufferDescription, CommonDescription, CompiledShader, Limits as CompilerLimits,
+    Profile, ShaderProgram, StageDescription, VertexDescription, WaveSize, analyze,
 };
 
 fn context(state: &GraphicsState, register: u32) -> Result<u32, Error> {
@@ -288,9 +289,7 @@ fn read_program(
 fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
     let manifest = compiled.manifest();
     let features = manifest.required_features();
-    if !manifest.buffers().is_empty()
-        || manifest.buffer_binding().is_some()
-        || manifest.shader_data_binding().is_some()
+    if manifest.shader_data_binding().is_some()
         || manifest.undefined_register_reads() != 0
         || manifest.required_subgroup_size().is_some()
         || features.subgroup_basic()
@@ -299,7 +298,131 @@ fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
     {
         return Err(Error::Unsupported("graphics resource/subgroup manifest"));
     }
+    let buffers = manifest.buffers();
+    let binding = if manifest.stage() == ShaderStage::Pixel {
+        57
+    } else {
+        0
+    };
+    if buffers.len() > 1
+        || manifest.buffer_binding() != (!buffers.is_empty()).then_some(binding)
+        || buffers.iter().any(|buffer| {
+            !buffer.read || buffer.written || buffer.coherent || buffer.profile_index != 0
+        })
+    {
+        return Err(Error::Unsupported("graphics read-only buffer manifest"));
+    }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct BufferSource {
+    range: crate::compute::CommandRange,
+}
+
+fn compile_stage(
+    program: &ShaderProgram,
+    profile: Profile,
+    state: &GraphicsState,
+    vertex: bool,
+    compiler: &CompilerLimits,
+    budget: &mut Budget<'_>,
+) -> Result<(CompiledShader, Option<BufferSource>), Error> {
+    let users = profile.common().user_sgpr_count;
+    budget.peak(compiler.max_bytes)?;
+    let analysis = analyze(program, profile, compiler).map_err(|_| Error::Compile)?;
+    let mut description = None;
+    let source = if let [requirement] = analysis.buffers() {
+        if !requirement.read
+            || requirement.written
+            || requirement.coherent
+            || !requirement.user_sgpr.is_multiple_of(4)
+            || requirement
+                .user_sgpr
+                .checked_add(4)
+                .is_none_or(|end| end > users)
+        {
+            return Err(Error::Unsupported("graphics direct read-only buffer"));
+        }
+        budget.work(4)?;
+        let first = if vertex { 0x8c } else { 0x0c } + u32::from(requirement.user_sgpr);
+        let descriptor = [
+            sh(state, first)?,
+            sh(state, first + 1)?,
+            sh(state, first + 2)?,
+            sh(state, first + 3)?,
+        ];
+        // Same explicit raw shape as the checked compute path: no stride,
+        // swizzle, formatted selectors, add-TID, or ignored descriptor flags.
+        if descriptor[1] & 0xffff_0000 != 0 || descriptor[3] != 0 {
+            return Err(Error::Unsupported(
+                "graphics raw unswizzled buffer descriptor",
+            ));
+        }
+        let address = u64::from(descriptor[0]) | (u64::from(descriptor[1]) << 32);
+        let size = u64::from(descriptor[2]);
+        if address == 0
+            || size == 0
+            || !address.is_multiple_of(4)
+            || !size.is_multiple_of(4)
+            || address.checked_add(size).is_none_or(|end| end > 1 << 47)
+        {
+            return Err(Error::Unsupported("graphics buffer extent"));
+        }
+        description = Some(BufferDescription {
+            user_sgpr: requirement.user_sgpr,
+            stride: 0,
+            swizzle: false,
+            index_stride: 0,
+            access: BufferAccess::ReadOnly,
+        });
+        Some(BufferSource {
+            range: crate::compute::CommandRange { address, size },
+        })
+    } else if analysis.buffers().is_empty() {
+        None
+    } else {
+        return Err(Error::Unsupported("graphics buffer count"));
+    };
+    // The same opaque IR and finite compiler budget continue into emission.
+    // The caller supplies no new entry, interface or register policy here.
+    let compiled = analysis
+        .finish(description.as_slice())
+        .map_err(|_| Error::Compile)?;
+    budget.host(compiled.retained_host_bytes())?;
+    validate_manifest(&compiled)?;
+    if compiled.manifest().buffers().len() != usize::from(source.is_some()) {
+        return Err(Error::Unsupported("graphics buffer specialization"));
+    }
+    Ok((compiled, source))
+}
+
+fn snapshot_resource(
+    source: Option<BufferSource>,
+    memory: &impl Memory,
+    target: crate::compute::CommandRange,
+    budget: &mut Budget<'_>,
+) -> Result<Option<PreparedBuffer>, Error> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let range = source.range;
+    if range.address < target.address + target.size && target.address < range.address + range.size {
+        return Err(Error::Unsupported("render target overlaps buffer source"));
+    }
+    let length = usize::try_from(range.size).map_err(|_| Error::Limit("buffer bytes"))?;
+    budget.host(length)?;
+    budget.work(range.size)?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| Error::Allocation)?;
+    budget.host(bytes.capacity() - length)?;
+    bytes.resize(length, 0);
+    memory
+        .snapshot_buffer(range.address, &mut bytes, true, false)
+        .map_err(Error::Memory)?;
+    Ok(Some(PreparedBuffer { range, bytes }))
 }
 
 fn push_data(
@@ -312,9 +435,18 @@ fn push_data(
         let first = if vertex { 0 } else { 16 };
         if layout.start_dword != first
             || layout.user_sgprs.len() > 16
-            || layout.memory_offset_count != 0
+            || layout.memory_offset_count != compiled.manifest().buffers().len() as u32
+            || layout.memory_offset_count > 1
+            || layout.memory_offset_dword != layout.user_sgprs.len() as u32
+            || layout.user_sgprs.len() + layout.memory_offset_count.div_ceil(4) as usize > 16
         {
             return Err(Error::Unsupported("graphics push layout"));
+        }
+        // Each binding begins at the exact copied guest base. Packed prefix
+        // bytes are explicitly zero and occupy the remaining stage window.
+        if layout.memory_offset_count != 0 {
+            let at = (first as usize + layout.memory_offset_dword as usize) * 4;
+            push[at..at + 4].copy_from_slice(&0_u32.to_le_bytes());
         }
         for (index, register) in layout.user_sgprs.iter().enumerate() {
             if *register >= 16 {
@@ -464,13 +596,22 @@ pub fn prepare_draw_with_target(
         config.pixel.profile(config.pixel_users, &mut budget)?;
     let pixel_profile =
         Profile::new(StageDescription::Pixel(pixel_description)).map_err(|_| Error::Compile)?;
-    budget.peak(compiler.max_bytes)?;
-    let vertex =
-        compile(&vertex_program, &vertex_profile, &compiler).map_err(|_| Error::Compile)?;
-    budget.host(vertex.retained_host_bytes())?;
-    budget.peak(compiler.max_bytes)?;
-    let pixel = compile(&pixel_program, &pixel_profile, &compiler).map_err(|_| Error::Compile)?;
-    budget.host(pixel.retained_host_bytes())?;
+    let (vertex, vertex_source) = compile_stage(
+        &vertex_program,
+        vertex_profile,
+        &draw.state,
+        true,
+        &compiler,
+        &mut budget,
+    )?;
+    let (pixel, pixel_source) = compile_stage(
+        &pixel_program,
+        pixel_profile,
+        &draw.state,
+        false,
+        &compiler,
+        &mut budget,
+    )?;
     budget.work(256)?;
     validate_manifest(&vertex)?;
     validate_manifest(&pixel)?;
@@ -494,9 +635,13 @@ pub fn prepare_draw_with_target(
     drop(vertex_program);
     drop(pixel_program);
     budget.release(program_bytes)?;
-    drop(pixel_profile);
-    drop(vertex_profile);
     budget.release(pixel_profile_bytes)?;
+    let target_range = crate::compute::CommandRange {
+        address: config.address,
+        size: config.bytes as u64,
+    };
+    let vertex_buffer = snapshot_resource(vertex_source, memory, target_range, &mut budget)?;
+    let pixel_buffer = snapshot_resource(pixel_source, memory, target_range, &mut budget)?;
     let indices = if let Some(source) = draw.indices {
         let size = usize::try_from(draw.vertex_count)
             .ok()
@@ -616,6 +761,8 @@ pub fn prepare_draw_with_target(
         instance_count: draw.instance_count,
         shader_ranges,
         indices,
+        vertex_buffer,
+        pixel_buffer,
         usage: budget.usage,
     })
 }

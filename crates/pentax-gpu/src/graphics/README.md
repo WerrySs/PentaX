@@ -94,8 +94,44 @@ The first profile is deliberately finite:
   MRT0 and may consume the linked parameters and supported system inputs.
   VertexIndex/InstanceIndex interfaces are allowed only when their manifest
   needs no unsupported DrawParameters.
-  Descriptors, textures, vertex buffers, shader-data buffers, subgroups and
+  Textures, formatted vertex buffers, shader-data buffers, subgroups and
   undefined registers remain typed refusals.
+
+The direct buffer slice admits an optional read-only raw dword V# in each VS
+and PS. Live requirements are discovered from sealed optimized compiler IR;
+register values are never searched heuristically for descriptor-shaped data.
+Each source must be an actual four-aligned user quad within its declared user
+count. The existing vertex entry overwrites s2/s3 with system values, so raw
+vertex quad0 is refused; unmodified vertex quads4/8/12 and pixel quads0/4/8/12
+remain eligible. Both scalar `S_BUFFER_LOAD_DWORD*` and raw
+`BUFFER_LOAD_DWORD{x1..4}` reads retain the compiler's per-dword bounds checks.
+
+This slice uses the existing compute raw shape: descriptor word1 contains only
+base-address high16 bits, word2 is an exact nonzero DWORD-multiple byte count,
+and word3 is zero. The base is nonzero and DWORD-aligned and the complete extent
+must fit below the existing 47-bit address ceiling. Stride, swizzle, format,
+add-TID and unknown fields are explicitly refused. Stores, coherent resources,
+multiple resources in one stage, dynamic/SRT descriptors and shader-data-buffer
+fallbacks remain unsupported. An access larger than the descriptor does not
+authorize a larger snapshot; compiled OOB component reads return zero.
+
+`PreparedDraw` retains independent immutable VS/PS snapshots at the exact guest
+bases, with GPU-read permission admitted by `Memory::snapshot_buffer`. Actual
+capacity and copy work share the existing host/work bounds. The target range
+must not overlap a resource; the native adapter additionally checks physical
+aliases before effects while preserving the unique pause. Resource/read aliases
+are allowed and each retained snapshot is charged. These bytes do not become
+pixel data or grant guest write authority. The backend uploads the exact bytes
+and binds manifest storage buffers at set0/binding0 for VS and set0/binding57
+for PS, retaining their owners through the actual fence.
+
+Each stage's push footprint includes its actual user values plus the packed
+buffer-prefix offset word. It must fit its original16-dword window: VS starts
+at0 and PS at16. Exact-base uploads use explicit zero prefixes; no descriptor
+alignment padding or synthesized user value is introduced. Existing compiler,
+host, work, pixel-transport and device descriptor limits remain in force.
+Original CPU and native consumers exercise this bounded contract; source
+implementation and fixture declarations alone do not establish game rendering.
 
 Parameter linkage requires explicit known `SPI_VS_OUT_CONFIG`,
 `SPI_PS_IN_CONTROL`, equal `SPI_PS_INPUT_ENA/ADDR`, `SPI_BARYC_CNTL=0` and all

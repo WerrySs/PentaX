@@ -59,6 +59,33 @@ resources. If final idle cleanup itself returns another error, the worker
 terminates rather than unwinding through potentially live GPU resources.
 No driver SDK, global configuration, browser or system feature is installed.
 
+## Read-only graphics buffers
+
+`run_graphics` accepts an optional owned raw storage-buffer snapshot for each
+prepared stage. Vertex binding0 and pixel binding57 remain independent, even
+when both describe the same guest range. Each exact nonempty dword-aligned
+snapshot has its own uploaded buffer, descriptor and retained resource borrow.
+The manifest must declare one read-only, noncoherent buffer; scalar and vector
+loads share this resource contract. Graphics stores and descriptor arrays with
+additional resources remain unsupported.
+
+The 128-byte push update contains actual live SGPR words and the complete
+packed-offset word at each stage's declared position. The VS and PS windows
+remain dwords0..15 and16..31; a shader-data-buffer fallback is refused. Uploads
+start at the copied guest base, so packed prefix bytes must all be zero. The
+compiler's checked load guards provide out-of-range zero semantics; the host
+never enlarges a snapshot to satisfy an encoded shader offset.
+
+The physical device must admit the descriptor count, per-stage storage and
+resource counts, fragment combined-output count, and exact buffer ranges.
+Sparse binding57 consumes one descriptor. Host-write to vertex/fragment
+shader-read barriers precede use, and the existing batch fence/drain protects
+all buffers and descriptors through completion. No graphics-store feature is
+enabled. Target upload, indices, both stage uploads and completed target
+readback share the existing host budget; device allocations retain their
+independent aggregate ceiling. Guest permissions and physical aliases are
+admitted by core while its original native owner remains paused.
+
 ## Validation and remaining integration
 
 Pure tests compile all three original stages and check bindings/push data,
@@ -78,6 +105,6 @@ Neither diagnostic establishes commercial-game compatibility.
 
 Persistent guest queues, general allocation aliasing/coherence, surface/swapchain
 presentation, textures/samplers, caches/invalidation, depth/blend specialization,
-multi-queue/timeline scheduling, additional shader capabilities and real game
-resource binding remain outside this profile. No game frame, startup or game
+multi-queue/timeline scheduling, additional shader capabilities and graphics resource classes remain outside
+this profile. No game frame, startup or game
 compatibility is claimed by an original diagnostic result.

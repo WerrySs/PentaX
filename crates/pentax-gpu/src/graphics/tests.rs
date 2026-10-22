@@ -4,6 +4,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
+mod buffers;
 mod builders;
 mod flips;
 mod indexed;

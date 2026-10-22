@@ -282,6 +282,61 @@ fn user_data_base(ir: &Ir, budget: &Budget, handle: Value, pc: u32) -> Result<u8
 }
 
 /// Source `TrackResources` for buffer handles, validated against the profile.
+pub(crate) fn discover_buffers(
+    ir: &Ir,
+    budget: &mut Budget,
+) -> Result<Vec<crate::BufferRequirement>, CompileError> {
+    let mut buffers: Vec<crate::BufferRequirement> = Vec::new();
+    for block in 0..ir.blocks.len() as u32 {
+        for id in ir.block_insts(block) {
+            budget.charge(1)?;
+            let inst = ir.inst(id);
+            if !inst.op.is_buffer_load() && !inst.op.is_buffer_store() {
+                continue;
+            }
+            let memory = ir
+                .memory
+                .get(inst.aux as usize)
+                .ok_or(CompileError::Internal("memory metadata index"))?;
+            let base = user_data_base(ir, budget, ir.arg(id, 0), inst.pc)?;
+            let write = inst.op.is_buffer_store();
+            let extent = memory.offset.saturating_add(memory.data_dwords.max(1) * 4);
+            budget.charge_usize(buffers.len())?;
+            if let Some(entry) = buffers.iter_mut().find(|entry| entry.user_sgpr == base) {
+                entry.read |= !write;
+                entry.written |= write;
+                entry.scalar |= memory.scalar;
+                entry.coherent |= memory.coherent;
+                entry.max_byte_extent = entry.max_byte_extent.max(extent);
+                entry.first_use_pc = entry.first_use_pc.min(inst.pc);
+            } else {
+                if buffers.len() >= MAX_BUFFERS {
+                    return Err(CompileError::resource(
+                        Some(inst.pc),
+                        ResourceErrorKind::BufferLimit,
+                    ));
+                }
+                budget.push(
+                    &mut buffers,
+                    crate::BufferRequirement {
+                        user_sgpr: base,
+                        read: !write,
+                        written: write,
+                        scalar: memory.scalar,
+                        coherent: memory.coherent,
+                        max_byte_extent: extent,
+                        first_use_pc: inst.pc,
+                    },
+                    MAX_BUFFERS,
+                    LimitKind::SourceTable,
+                )?;
+            }
+        }
+    }
+    Ok(buffers)
+}
+
+/// Source `TrackResources` for buffer handles, validated against the profile.
 pub(crate) fn track_resources(
     ir: &mut Ir,
     budget: &mut Budget,

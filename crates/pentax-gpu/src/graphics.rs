@@ -184,6 +184,29 @@ pub struct PreparedIndices {
     count: u32,
     bytes: Vec<u8>,
 }
+
+/// An immutable, exact-base GPU-readable raw-buffer snapshot. Its numeric
+/// range is metadata; the native adapter must separately exclude physical
+/// aliases of every writable target while retaining the original pause.
+pub struct PreparedBuffer {
+    range: CommandRange,
+    bytes: Vec<u8>,
+}
+impl fmt::Debug for PreparedBuffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreparedBuffer")
+            .field("capacity", &self.bytes.capacity())
+            .finish_non_exhaustive()
+    }
+}
+impl PreparedBuffer {
+    pub fn range(&self) -> CommandRange {
+        self.range
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
 impl PreparedIndices {
     pub fn range(&self) -> CommandRange {
         self.range
@@ -225,6 +248,8 @@ pub struct PreparedDraw {
     instance_count: u32,
     shader_ranges: [CommandRange; 2],
     indices: Option<PreparedIndices>,
+    vertex_buffer: Option<PreparedBuffer>,
+    pixel_buffer: Option<PreparedBuffer>,
     usage: Usage,
 }
 impl fmt::Debug for PreparedDraw {
@@ -276,6 +301,12 @@ impl PreparedDraw {
     /// upper bound; the backend must use the separate actual index payload.
     pub fn indices(&self) -> Option<&PreparedIndices> {
         self.indices.as_ref()
+    }
+    pub fn vertex_buffer(&self) -> Option<&PreparedBuffer> {
+        self.vertex_buffer.as_ref()
+    }
+    pub fn pixel_buffer(&self) -> Option<&PreparedBuffer> {
+        self.pixel_buffer.as_ref()
     }
     pub fn first_vertex(&self) -> u32 {
         0

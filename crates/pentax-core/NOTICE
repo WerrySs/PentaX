@@ -481,3 +481,14 @@ ConvertKeycodeGetImeKeyboardType adaptation from PUBLIC KytyPS5/KytyPS5
 7b3564593f884db0cd3f62c9b843e26662caab12. Copyright (c) 2021 InoriRus; see
 pentax-kernel/NOTICE, GPL-2.0-only and the retained Kyty MIT grant.
 The full-prefix module1.0/library1 tuple is a PentaX compatibility binding.
+
+The readonly VS/PS buffer adapter adds original PentaX checked integration around
+the retained guest graphics preparation and platform Vulkan paths. It retains
+the same unique paused-owner loan across resource snapshots, whole-span GPU-read
+admission, physical target/resource alias exclusion, fence and transactional
+writeback. Independent stage uploads consume existing host/transport budgets;
+read/read aliases remain legal without merging resource identities or uploads.
+The bounded original fixtures use PentaX shader/command bytes and actual native
+capability mappings. No commercial payload, host-language shader replacement,
+borrowed guest pointer or fabricated completion is introduced. Shader/compiler
+and platform provenance remain recorded in their respective retained notices.

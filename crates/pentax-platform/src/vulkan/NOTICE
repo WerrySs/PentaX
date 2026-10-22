@@ -90,3 +90,13 @@ https://docs.vulkan.org/spec/latest/chapters/memory.html
 https://docs.vulkan.org/spec/latest/chapters/synchronization.html
 https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceFloatControlsProperties.html
 https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceSubgroupProperties.html
+
+The read-only graphics-buffer extension retains the same source-derived buffer
+ownership, descriptor and command synchronization seams. PentaX supplies exact
+owned per-stage uploads at vertex binding0 and pixel binding57, actual physical
+limits, full stage push-layout checks and read barriers. Pipelines retain each
+buffer borrow until fence/drain completion. No new shader source, stores,
+optional Vulkan feature, descriptor indexing or allocation-cap increase is
+introduced. The primary resource-count contracts are:
+https://docs.vulkan.org/spec/latest/chapters/limits.html
+https://docs.vulkan.org/spec/latest/chapters/descriptorsets.html

@@ -78,7 +78,7 @@ pub(super) fn check_contract(
 }
 
 /// The graphics preparer supplies actual user SGPR values in its stage payload.
-/// Descriptor resources are still deliberately unsupported by this draw slice.
+/// One optional read-only raw buffer is bound independently for each stage.
 pub(super) fn check_graphics_contract(
     shader: &CompiledShader,
     stage: ShaderStage,
@@ -88,16 +88,47 @@ pub(super) fn check_graphics_contract(
     }
     check_contract_inner(shader, stage, true)?;
     let manifest = shader.manifest();
-    if !manifest.buffers().is_empty()
-        || manifest.buffer_binding().is_some()
-        || manifest.required_features().subgroup_basic()
+    if manifest.required_features().subgroup_basic()
         || manifest.required_features().subgroup_ballot()
         || manifest.required_subgroup_size().is_some()
-        || manifest
-            .push_data()
-            .is_some_and(|push| push.memory_offset_count != 0)
     {
         return Err(VulkanError::InvalidCompilerContract("graphics resources"));
+    }
+    let expected_binding = if stage == ShaderStage::Vertex { 0 } else { 57 };
+    let buffers = manifest.buffers();
+    if buffers.len() > 1
+        || manifest.buffer_binding() != (!buffers.is_empty()).then_some(expected_binding)
+        || buffers.iter().any(|buffer| {
+            !buffer.read
+                || buffer.written
+                || buffer.coherent
+                || buffer.profile_index != 0
+                || buffer.user_sgpr > 12
+                || !buffer.user_sgpr.is_multiple_of(4)
+        })
+    {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics buffer profile",
+        ));
+    }
+    if let Some(push) = manifest.push_data() {
+        let start = if stage == ShaderStage::Vertex { 0 } else { 16 };
+        let user_words = push.user_sgprs.len() as u32;
+        if push.start_dword != start
+            || push.memory_offset_count != buffers.len() as u32
+            || push.memory_offset_dword != user_words
+            || user_words
+                .checked_add(push.memory_offset_count.div_ceil(4))
+                .is_none_or(|words| words > 16)
+        {
+            return Err(VulkanError::InvalidCompilerContract(
+                "graphics push stage extent",
+            ));
+        }
+    } else if !buffers.is_empty() {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics buffer push data",
+        ));
     }
     Ok(())
 }

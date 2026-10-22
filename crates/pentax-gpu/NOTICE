@@ -162,3 +162,14 @@ call/chain traversal, strict ordinary control profile, active-cycle refusal,
 original packet provenance and whole-source physical-alias metadata. The
 existing compute admission remains separately scoped. All new packet and data
 fixtures are original; no commercial command stream or asset is included.
+
+PentaX read-only graphics buffers, 2026: the staged compiler's live direct V#
+requirements select actual declared user SGPR quads. The existing checked raw
+compute descriptor shape is reused for immutable per-stage GPU-readable buffer
+snapshots, exact manifest specialization and stage push offsets. Both resource
+snapshots remain bounded alongside the real target and compiled products; native
+execution must exclude target physical aliases before effects. The vertex entry
+system values are unchanged, and unsupported descriptor/source forms remain
+explicit refusals. Source mechanisms and licenses are those already listed for
+shaderBindings.h, ResourceTracking.cpp, BindingLayout.cpp and the Vulkan port;
+no additional source project or game-derived fixture is introduced.

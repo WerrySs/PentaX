@@ -203,6 +203,8 @@ pub enum ProfileError {
     StartInstanceRegister,
     VertexRegisterOverlap,
     ResourceCount,
+    /// Staged discovery requires an unspecialized buffer profile.
+    PredeclaredBuffers,
     DuplicateResource,
     ResourceRegister,
     BufferStride,

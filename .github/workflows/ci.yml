@@ -137,7 +137,7 @@ jobs:
           --test-threads=1
       - name: Test indexed graphics host admission
         run: >-
-          cargo test --locked -p pentax-platform --lib -- vulkan::graphics::tests:: vulkan::device::tests:: --test-threads=1
+          cargo test --locked -p pentax-platform --lib -- vulkan::graphics::tests:: vulkan::graphics::buffer_tests:: vulkan::device::tests:: --test-threads=1
       - name: Test scalar FMA admission and software rounding
         run: >-
           cargo test --locked -p pentax-platform --lib -- native_scalar_fma_tests:: fused_float::tests:: --test-threads=1

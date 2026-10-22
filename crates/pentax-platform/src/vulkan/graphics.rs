@@ -16,6 +16,7 @@ use super::{
 use ash::vk;
 use pentax_gpu::graphics::{IndexType, PreparedDraw, ShaderInterfaces, validate_shader_interfaces};
 use pentax_shader::ShaderStage;
+use pentax_shader_compiler::CompiledShader;
 
 fn extent(width: u32, height: u32) -> Result<usize, VulkanError> {
     width
@@ -104,16 +105,67 @@ fn index_input(
     Ok(IndexInput { kind, maximum })
 }
 
-fn upload_bytes(target: usize, indices: usize, budget: &mut Budget) -> Result<(), VulkanError> {
-    let upload = (target as u64)
-        .checked_add(indices as u64)
-        .ok_or(VulkanError::Limit("graphics host bytes"))?;
+fn upload_bytes(
+    target: usize,
+    indices: usize,
+    resources: [usize; 2],
+    budget: &mut Budget,
+) -> Result<(), VulkanError> {
+    let upload = [indices, resources[0], resources[1]].into_iter().try_fold(
+        target as u64,
+        |sum, bytes| {
+            sum.checked_add(bytes as u64)
+                .ok_or(VulkanError::Limit("graphics host bytes"))
+        },
+    )?;
     budget.host(upload)?;
     if upload
         .checked_add(target as u64)
         .is_none_or(|peak| peak > budget.limits.max_host_bytes)
     {
         return Err(VulkanError::Limit("graphics host bytes"));
+    }
+    Ok(())
+}
+
+/// The exact snapshot is the descriptor range. No uninitialized alignment
+/// prefix, partial dword, or larger inferred allocation can become shader data.
+fn resource_input(shader: &CompiledShader, bytes: Option<&[u8]>) -> Result<usize, VulkanError> {
+    if shader.manifest().buffers().len() != usize::from(bytes.is_some()) {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics resource count",
+        ));
+    }
+    match bytes {
+        Some(bytes) if bytes.is_empty() || !bytes.len().is_multiple_of(4) => Err(
+            VulkanError::InvalidCompilerContract("graphics resource extent"),
+        ),
+        Some(bytes) => Ok(bytes.len()),
+        None => Ok(0),
+    }
+}
+
+fn storage_limits(lengths: [usize; 2], host: &vk::PhysicalDeviceLimits) -> Result<(), VulkanError> {
+    let count = lengths.into_iter().filter(|bytes| *bytes != 0).count() as u32;
+    // Binding57 is a sparse binding number, not 58 descriptors. Both stages
+    // expose at most one storage descriptor and the render pass has one color
+    // attachment, which counts against the fragment per-stage resource limit.
+    // https://docs.vulkan.org/spec/latest/chapters/limits.html
+    if count != 0
+        && (host.max_bound_descriptor_sets < 1
+            || host.max_descriptor_set_storage_buffers < count
+            || host.max_per_stage_descriptor_storage_buffers < 1
+            || (lengths[0] != 0 && host.max_per_stage_resources < 1)
+            || (lengths[1] != 0
+                && (host.max_per_stage_resources < 2
+                    || host.max_fragment_combined_output_resources < 2))
+            || lengths
+                .into_iter()
+                .any(|bytes| bytes as u64 > u64::from(host.max_storage_buffer_range)))
+    {
+        return Err(VulkanError::Unsupported(
+            "graphics storage descriptor limits",
+        ));
     }
     Ok(())
 }
@@ -164,6 +216,45 @@ fn merge_range(
     Ok(())
 }
 
+fn merge_stage_push(
+    shader: &CompiledShader,
+    input: &[u8; 128],
+    output: &mut [u8; 128],
+    initialized: &mut [bool; 32],
+) -> Result<(), VulkanError> {
+    if let Some(push) = shader.manifest().push_data() {
+        merge_range(
+            output,
+            initialized,
+            push.start_dword as usize,
+            push.user_sgprs.len(),
+            input,
+        )?;
+        let offset_words = push.memory_offset_count.div_ceil(4) as usize;
+        if offset_words != 0 {
+            let start = push
+                .start_dword
+                .checked_add(push.memory_offset_dword)
+                .ok_or(VulkanError::InvalidCompilerContract(
+                    "graphics buffer push extent",
+                ))? as usize;
+            let end = start
+                .checked_add(offset_words)
+                .filter(|end| *end <= 32)
+                .ok_or(VulkanError::InvalidCompilerContract(
+                    "graphics buffer push extent",
+                ))?;
+            if input[start * 4..end * 4].iter().any(|byte| *byte != 0) {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "graphics buffer upload offset",
+                ));
+            }
+            merge_range(output, initialized, start, offset_words, input)?;
+        }
+    }
+    Ok(())
+}
+
 fn push_data(prepared: &PreparedDraw) -> Result<[u8; 128], VulkanError> {
     let mut output = [0; 128];
     let mut initialized = [false; 32];
@@ -171,19 +262,11 @@ fn push_data(prepared: &PreparedDraw) -> Result<[u8; 128], VulkanError> {
         (prepared.vertex(), prepared.vertex_push_data()),
         (prepared.pixel(), prepared.pixel_push_data()),
     ] {
-        if let Some(push) = shader.manifest().push_data() {
-            merge_range(
-                &mut output,
-                &mut initialized,
-                push.start_dword as usize,
-                push.user_sgprs.len(),
-                input,
-            )?;
-        }
+        merge_stage_push(shader, input, &mut output, &mut initialized)?;
     }
     // One update includes both layout stages as required by Vulkan
-    // VUID-vkCmdPushConstants-offset-01796. Stage placement comes from the actual
-    // compiler manifests; unused initialized zeros are never invented SGPRs.
+    // VUID-vkCmdPushConstants-offset-01796. Full compiler manifests include the
+    // actual SGPR payload and packed zero-prefix bytes, within each16-word stage.
     Ok(output)
 }
 
@@ -211,6 +294,14 @@ pub(super) fn run(
     }
     check_graphics_contract(prepared.vertex(), ShaderStage::Vertex)?;
     check_graphics_contract(prepared.pixel(), ShaderStage::Pixel)?;
+    let resource_bytes = [
+        prepared.vertex_buffer().map(|buffer| buffer.bytes()),
+        prepared.pixel_buffer().map(|buffer| buffer.bytes()),
+    ];
+    let resource_lengths = [
+        resource_input(prepared.vertex(), resource_bytes[0])?,
+        resource_input(prepared.pixel(), resource_bytes[1])?,
+    ];
     budget.work(256)?;
     let interfaces = validate_shader_interfaces(prepared.vertex(), prepared.pixel())
         .map_err(|_| VulkanError::InvalidCompilerContract("graphics interfaces"))?;
@@ -242,6 +333,7 @@ pub(super) fn run(
     upload_bytes(
         length,
         indices.map_or(0, |(indices, _)| indices.bytes().len()),
+        resource_lengths,
         &mut budget,
     )?;
     let device = Device::open(
@@ -250,6 +342,7 @@ pub(super) fn run(
         &mut budget,
     )?;
     let host = device.properties.limits;
+    storage_limits(resource_lengths, &host)?;
     interface_limits(
         interfaces,
         host.max_vertex_output_components,
@@ -296,18 +389,35 @@ pub(super) fn run(
     } else {
         None
     };
+    let mut storage = [None, None];
+    for (index, bytes) in resource_bytes.into_iter().enumerate() {
+        if let Some(bytes) = bytes {
+            let mut buffer = Buffer::new(
+                &device,
+                bytes.len(),
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                &mut budget,
+            )?;
+            buffer.write(bytes, &mut budget)?;
+            storage[index] = Some(buffer);
+        }
+    }
     let pipeline = Pipeline::graphics_loaded(
         &device,
         prepared.vertex(),
         prepared.pixel(),
         &image,
+        [storage[0].as_ref(), storage[1].as_ref()],
         &mut budget,
     )?;
     // The batch is declared last and drains uncertain submissions before any
     // pipeline, framebuffer, image or buffer owner can be destroyed.
     let batch = Batch::begin(&device, &mut budget)?;
-    budget.command(if index_buffer.is_some() { 10 } else { 9 })?;
-    let mut upload_barriers = [vk::BufferMemoryBarrier::default(); 2];
+    budget.command(
+        (if index_buffer.is_some() { 10 } else { 9 })
+            + u32::from(pipeline.set != vk::DescriptorSet::null()),
+    )?;
+    let mut upload_barriers = [vk::BufferMemoryBarrier::default(); 4];
     upload_barriers[0] = vk::BufferMemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::HOST_WRITE)
         .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
@@ -317,7 +427,7 @@ pub(super) fn run(
         .offset(0)
         .size(length as u64);
     let mut upload_stages = vk::PipelineStageFlags::TRANSFER;
-    let upload_count = if let Some(buffer) = &index_buffer {
+    let mut upload_count = if let Some(buffer) = &index_buffer {
         upload_barriers[1] = vk::BufferMemoryBarrier::default()
             .src_access_mask(vk::AccessFlags::HOST_WRITE)
             .dst_access_mask(vk::AccessFlags::INDEX_READ)
@@ -331,6 +441,24 @@ pub(super) fn run(
     } else {
         1
     };
+    for (stage, buffer) in storage.iter().enumerate() {
+        if let Some(buffer) = buffer {
+            upload_barriers[upload_count] = vk::BufferMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::HOST_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .buffer(buffer.raw)
+                .offset(0)
+                .size(buffer.length() as u64);
+            upload_stages |= if stage == 0 {
+                vk::PipelineStageFlags::VERTEX_SHADER
+            } else {
+                vk::PipelineStageFlags::FRAGMENT_SHADER
+            };
+            upload_count += 1;
+        }
+    }
     let initial = [vk::ImageMemoryBarrier::default()
         .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
         .old_layout(vk::ImageLayout::UNDEFINED)
@@ -412,6 +540,16 @@ pub(super) fn run(
         device
             .raw
             .cmd_bind_pipeline(batch.raw, vk::PipelineBindPoint::GRAPHICS, pipeline.raw);
+        if pipeline.set != vk::DescriptorSet::null() {
+            device.raw.cmd_bind_descriptor_sets(
+                batch.raw,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline.layout,
+                0,
+                &[pipeline.set],
+                &[],
+            );
+        }
         device.raw.cmd_push_constants(
             batch.raw,
             pipeline.layout,
@@ -562,7 +700,7 @@ mod tests {
             max_host_bytes: 20,
             ..GpuLimits::default()
         });
-        upload_bytes(8, 4, &mut fits).unwrap();
+        upload_bytes(8, 4, [0; 2], &mut fits).unwrap();
         assert_eq!(fits.usage.host_bytes, 12);
         let readback = fits.buffer(8).unwrap();
         assert_eq!(readback.len(), 8);
@@ -572,10 +710,18 @@ mod tests {
             ..GpuLimits::default()
         });
         assert_eq!(
-            upload_bytes(8, 4, &mut refused),
+            upload_bytes(8, 4, [0; 2], &mut refused),
             Err(VulkanError::Limit("graphics host bytes"))
         );
-        assert!(upload_bytes(usize::MAX, 1, &mut Budget::new(GpuLimits::default())).is_err());
+        assert!(
+            upload_bytes(
+                usize::MAX,
+                1,
+                [0; 2],
+                &mut Budget::new(GpuLimits::default())
+            )
+            .is_err()
+        );
         // Preserve the old non-indexed refusal order: reject the upload first,
         // then its simultaneous completed target, without a device allocation.
         let mut upload_refused = Budget::new(GpuLimits {
@@ -583,7 +729,7 @@ mod tests {
             ..GpuLimits::default()
         });
         assert_eq!(
-            upload_bytes(8, 0, &mut upload_refused),
+            upload_bytes(8, 0, [0; 2], &mut upload_refused),
             Err(VulkanError::Limit("host bytes"))
         );
         assert_eq!(upload_refused.usage.host_bytes, 0);
@@ -592,7 +738,7 @@ mod tests {
             ..GpuLimits::default()
         });
         assert_eq!(
-            upload_bytes(8, 0, &mut readback_refused),
+            upload_bytes(8, 0, [0; 2], &mut readback_refused),
             Err(VulkanError::Limit("graphics host bytes"))
         );
         assert_eq!(readback_refused.usage.host_bytes, 8);
@@ -623,3 +769,7 @@ mod tests {
         assert_eq!(&output[..4], &11_u32.to_le_bytes());
     }
 }
+
+#[cfg(test)]
+#[path = "graphics/buffer_tests.rs"]
+mod buffer_tests;

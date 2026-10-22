@@ -65,6 +65,16 @@ PentaX modifications, 2026-10-18:
 This modified port is distributed under GPL-2.0-only. Retained MIT notices
 continue to apply to their respective original portions. See README.md for scope.
 
+PentaX staged buffer specialization, 2026: analysis.rs exposes only immutable
+live direct-buffer requirements after the existing CFG/SSA/folding/dead-code
+and policy passes. The opaque analysis retains the original profile and the
+same monotonic compiler budget through exact buffer specialization, resource
+tracking and emission. Descriptor source recognition reuses the existing
+ResourceTracking.cpp adaptation at the pinned revision above. There are no
+guest-memory callbacks, alternative entry defaults or new source dependencies.
+The new graphics/scalar/raw/alias and refusal fixtures are original PentaX code;
+the existing licenses and retained notices continue to apply.
+
 PentaX interpolation admission correction2026 retains an internal P1 partial
 with ATTR/channel and genuine i-coordinate provenance, and matches P2's actual
 previous destination and j-coordinate before implicit host interpolation.

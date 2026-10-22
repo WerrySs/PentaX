@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 
+mod analysis;
 mod budget;
 pub mod cfg;
 mod error;
@@ -32,6 +33,7 @@ mod translate;
 #[cfg(test)]
 mod tests;
 
+pub use analysis::{BufferRequirement, ShaderAnalysis, analyze};
 pub use budget::{LimitKind, Limits};
 pub use cfg::Cfg;
 pub use error::*;
@@ -86,16 +88,34 @@ pub fn compile(
     profile: &Profile,
     limits: &Limits,
 ) -> Result<CompiledShader, CompileError> {
+    let mut budget = budget::Budget::new(limits);
+    let (ir, undefined) = lower(program, profile, &mut budget)?;
+    finish(ir, profile, budget, undefined)
+}
+
+fn lower(
+    program: &ShaderProgram,
+    profile: &Profile,
+    budget: &mut budget::Budget,
+) -> Result<(ir::Ir, u32), CompileError> {
     if program.stage() != profile.stage() {
         return Err(CompileError::Profile(ProfileError::StageMismatch));
     }
-    let mut budget = budget::Budget::new(limits);
-    let cfg = Cfg::build_in(program, &mut budget)?;
-    let mut ir = translate::translate_program(&cfg, profile, &mut budget)?;
-    passes::ssa::rewrite_to_ssa(&mut ir, &mut budget)?;
-    passes::fold::constant_propagation(&mut ir, &mut budget)?;
-    passes::eliminate_dead_code(&mut ir, &mut budget)?;
-    let undefined = passes::check_policies(&ir, &mut budget, profile)?;
+    let cfg = Cfg::build_in(program, budget)?;
+    let mut ir = translate::translate_program(&cfg, profile, budget)?;
+    passes::ssa::rewrite_to_ssa(&mut ir, budget)?;
+    passes::fold::constant_propagation(&mut ir, budget)?;
+    passes::eliminate_dead_code(&mut ir, budget)?;
+    let undefined = passes::check_policies(&ir, budget, profile)?;
+    Ok((ir, undefined))
+}
+
+fn finish(
+    mut ir: ir::Ir,
+    profile: &Profile,
+    mut budget: budget::Budget,
+    undefined: u32,
+) -> Result<CompiledShader, CompileError> {
     let mut layout = passes::Layout {
         undefined_reads: undefined,
         ..passes::Layout::default()

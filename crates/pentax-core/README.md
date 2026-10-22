@@ -638,6 +638,19 @@ writeback then produces a private receipt with actual layout/geometry/range.
 This RGBA8_UNORM byte receipt does not perform VideoOut sRGB transfer conversion,
 acknowledge a flip, emit GPU-EOP or establish a rendered game frame.
 
+The draw adapter additionally admits the GPU preparation layer's optional
+read-only direct buffer for each vertex and pixel stage. These are immutable
+copies from the actual current paused owner, discovered from live shader
+requirements rather than inferred from arbitrary register contents. Complete
+resource extents and GPU-read permissions precede backend admission. The target
+must have distinct physical backing from both resources, including aliases at
+different guest addresses; read/read aliases between stages, shaders, indices
+and command sources remain legal. Each stage upload is charged independently
+under the existing host and pixel transport ceilings, even when its backing is
+shared. Preparation runs at the draw's current ordered command point, so earlier
+retired writes are visible. No writable buffer, ambient host pointer, replacement
+shader result or commercial frame is authorized by this resource metadata.
+
 The ordered graphics driver separately admits the exact six-dword R_FLIP packet
 `0xc004105c`. A fresh fenced tiled draw retains its exclusive native pause until
 the next flip consumes it. Matching the live registered surface, owner, port

@@ -8,7 +8,7 @@
 //! Actual declared-layout guest draws. A draw completion is issued only after
 //! its Vulkan fence AND transactional writeback on the original paused owner.
 //! The one-level RenderTarget64KB path reuses VideoOut's exact pixel mapping.
-//! Presentation completion, depth, blending and descriptors remain separate.
+//! Presentation completion, depth, blending and writable descriptors remain separate.
 
 use pentax_gpu::{
     compute::CommandRange,
@@ -148,7 +148,7 @@ pub(super) fn execute_draw_current<'borrow, 'owner>(
 }
 
 /// No Vulkan call happens until the entire destination and its disjointness
-/// from retained command/shader/index sources are admitted. The exclusive pause lasts across
+/// from retained command/shader/index and stage-buffer sources are admitted. The exclusive pause lasts across
 /// preparation, execution, fence and all-or-nothing guest publication.
 pub fn execute_draw(
     paused: &mut PausedNativeMemory<'_>,
@@ -236,6 +236,13 @@ pub(super) fn execute_draw_admitted(
         .max_host_bytes
         .min(remaining_host as u64)
         .min(remaining_pixels as u64);
+    let resource_upload_bytes = [prepared.vertex_buffer(), prepared.pixel_buffer()]
+        .into_iter()
+        .flatten()
+        .try_fold(0u64, |bytes, resource| {
+            bytes.checked_add(resource.bytes().len() as u64)
+        })
+        .ok_or(Error::Limit)?;
     if (geometry.tight_bytes() as u64)
         .checked_mul(2)
         .and_then(|n| {
@@ -245,6 +252,7 @@ pub(super) fn execute_draw_admitted(
                     .map_or(0, |indices| indices.bytes().len() as u64),
             )
         })
+        .and_then(|n| n.checked_add(resource_upload_bytes))
         .is_none_or(|n| n > execution_limits.max_host_bytes)
     {
         return Err(Error::Limit);
@@ -267,6 +275,21 @@ pub(super) fn execute_draw_admitted(
             remaining.checked_sub(work).ok_or(Error::Limit)?,
         )?;
         work = work.checked_add(index_work).ok_or(Error::Limit)?;
+    }
+    // Immutable copies alone do not authorize GPU access or target writeback.
+    // Resolve both stages against this same paused owner and actual backing.
+    // Their mutual read/read aliases remain legal and each upload is charged.
+    for resource in [prepared.vertex_buffer(), prepared.pixel_buffer()]
+        .into_iter()
+        .flatten()
+    {
+        let resource_work = preflight_read_source(
+            paused,
+            resource.range(),
+            target,
+            remaining.checked_sub(work).ok_or(Error::Limit)?,
+        )?;
+        work = work.checked_add(resource_work).ok_or(Error::Limit)?;
     }
     // Reserve the completion serial before effects. No post-write allocation,
     // increment overflow or other fallible step can lose a committed receipt.
@@ -408,21 +431,30 @@ fn preflight_indices(
     target: NativeRange,
     maximum: u64,
 ) -> Result<u64, Error> {
-    let last = indices
+    preflight_read_source(paused, indices, target, maximum)
+}
+
+fn preflight_read_source(
+    paused: &PausedNativeMemory<'_>,
+    source: CommandRange,
+    target: NativeRange,
+    maximum: u64,
+) -> Result<u64, Error> {
+    let last = source
         .address
-        .checked_add(indices.size.checked_sub(1).ok_or(Error::Limit)?)
+        .checked_add(source.size.checked_sub(1).ok_or(Error::Limit)?)
         .ok_or(Error::Limit)?;
-    let pages = last / NATIVE_GUEST_PAGE - indices.address / NATIVE_GUEST_PAGE + 1;
+    let pages = last / NATIVE_GUEST_PAGE - source.address / NATIVE_GUEST_PAGE + 1;
     let mut work = pages
         .checked_add(1)
         .filter(|n| *n <= maximum)
         .ok_or(Error::Limit)?;
     paused
-        .preflight_gpu_read(indices.address, indices.size)
+        .preflight_gpu_read(source.address, source.size)
         .map_err(Error::Memory)?;
     let range = NativeRange {
-        address: indices.address,
-        size: indices.size,
+        address: source.address,
+        size: source.size,
     };
     let cost = paused
         .preflight_disjoint_backing(

@@ -25,6 +25,9 @@ mod eop_tests;
 #[path = "actual_draw_tests/indexed.rs"]
 mod indexed;
 
+#[path = "buffer_resource_tests.rs"]
+mod buffer_resource_tests;
+
 #[path = "actual_draw_tests/parameters.rs"]
 mod parameters;
 

@@ -12,7 +12,10 @@ use pentax_shader_compiler::CompiledShader;
 
 enum Resource<'d, 'r> {
     Buffer(&'r Buffer<'d>),
-    Image(&'r Image<'d>),
+    Graphics {
+        image: &'r Image<'d>,
+        buffers: [Option<&'r Buffer<'d>>; 2],
+    },
 }
 pub(super) struct Pipeline<'d, 'r> {
     device: &'d Device,
@@ -190,6 +193,73 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         Ok(out)
     }
 
+    fn graphics_descriptors(
+        &mut self,
+        buffers: [Option<&'r Buffer<'d>>; 2],
+        count: usize,
+        budget: &mut Budget,
+    ) -> Result<(), VulkanError> {
+        budget.object()?;
+        let sizes = [vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::STORAGE_BUFFER)
+            .descriptor_count(count as u32)];
+        let info = vk::DescriptorPoolCreateInfo::default()
+            .max_sets(1)
+            .pool_sizes(&sizes);
+        // SAFETY: One owned set contains exactly the one/two admitted stage
+        // descriptors; no extension or dynamically sized pool is requested.
+        self.pool = result(
+            unsafe { self.device.raw.create_descriptor_pool(&info, None) },
+            "vkCreateDescriptorPool(graphics)",
+        )?;
+        budget.object()?;
+        let layouts = [self.set_layout];
+        let info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(self.pool)
+            .set_layouts(&layouts);
+        // SAFETY: The owned pool has capacity for this exact retained layout;
+        // one actual handle output avoids an infallible allocation in ash.
+        let code = unsafe {
+            (self.device.raw.fp_v1_0().allocate_descriptor_sets)(
+                self.device.raw.handle(),
+                &info,
+                &mut self.set,
+            )
+        };
+        result(code.result(), "vkAllocateDescriptorSets(graphics)")?;
+        let mut infos = [vk::DescriptorBufferInfo::default(); 2];
+        let mut binding_numbers = [0; 2];
+        let mut used = 0;
+        for (stage, buffer) in buffers.into_iter().enumerate() {
+            if let Some(buffer) = buffer {
+                infos[used] = vk::DescriptorBufferInfo::default()
+                    .buffer(buffer.raw)
+                    .offset(0)
+                    .range(buffer.length() as u64);
+                binding_numbers[used] = if stage == 0 { 0 } else { 57 };
+                used += 1;
+            }
+        }
+        let mut writes = [vk::WriteDescriptorSet::default(); 2];
+        for index in 0..count {
+            writes[index] = vk::WriteDescriptorSet::default()
+                .dst_set(self.set)
+                .dst_binding(binding_numbers[index])
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&infos[index..index + 1]);
+        }
+        budget.work(count as u64)?;
+        // SAFETY: All descriptor ranges cover fully uploaded owned buffers.
+        // The graphics resource retains both borrows until after batch drain;
+        // updates happen before any descriptor use or submission.
+        unsafe {
+            self.device
+                .raw
+                .update_descriptor_sets(&writes[..count], &[])
+        };
+        Ok(())
+    }
+
     pub fn graphics(
         device: &'d Device,
         vertex: &CompiledShader,
@@ -197,7 +267,7 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         image: &'r Image<'d>,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        Self::graphics_target(device, vertex, pixel, image, false, budget)
+        Self::graphics_target(device, vertex, pixel, image, false, [None, None], budget)
     }
 
     /// Reuse the actual uploaded target instead of clearing diagnostic pixels.
@@ -206,9 +276,10 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         vertex: &CompiledShader,
         pixel: &CompiledShader,
         image: &'r Image<'d>,
+        buffers: [Option<&'r Buffer<'d>>; 2],
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        Self::graphics_target(device, vertex, pixel, image, true, budget)
+        Self::graphics_target(device, vertex, pixel, image, true, buffers, budget)
     }
 
     fn graphics_target(
@@ -217,14 +288,48 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         pixel: &CompiledShader,
         image: &'r Image<'d>,
         load: bool,
+        buffers: [Option<&'r Buffer<'d>>; 2],
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        let mut out = Self::empty(device, Resource::Image(image));
+        let mut out = Self::empty(device, Resource::Graphics { image, buffers });
+        let mut bindings = [vk::DescriptorSetLayoutBinding::default(); 2];
+        let mut count = 0;
+        for (index, shader) in [vertex, pixel].into_iter().enumerate() {
+            let binding = shader.manifest().buffer_binding();
+            if binding.is_some() != buffers[index].is_some()
+                || shader.manifest().buffers().len() != usize::from(buffers[index].is_some())
+            {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "graphics descriptor resource",
+                ));
+            }
+            if let Some(binding) = binding {
+                let expected = if index == 0 { 0 } else { 57 };
+                if binding != expected {
+                    return Err(VulkanError::InvalidCompilerContract(
+                        "graphics descriptor binding",
+                    ));
+                }
+                bindings[count] = vk::DescriptorSetLayoutBinding::default()
+                    .binding(binding)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(if index == 0 {
+                        vk::ShaderStageFlags::VERTEX
+                    } else {
+                        vk::ShaderStageFlags::FRAGMENT
+                    });
+                count += 1;
+            }
+        }
         out.layouts(
-            &[],
+            &bindings[..count],
             vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             budget,
         )?;
+        if count != 0 {
+            out.graphics_descriptors(buffers, count, budget)?;
+        }
         let attachments = [vk::AttachmentDescription::default()
             .format(vk::Format::R8G8B8A8_UNORM)
             .samples(vk::SampleCountFlags::TYPE_1)
@@ -387,8 +492,11 @@ impl Drop for Pipeline<'_, '_> {
             Resource::Buffer(buffer) => {
                 let _ = buffer.raw;
             }
-            Resource::Image(image) => {
+            Resource::Graphics { image, buffers } => {
                 let _ = image.raw;
+                for buffer in buffers.into_iter().flatten() {
+                    let _ = buffer.raw;
+                }
             }
         }
         // SAFETY: The batch completes/drains first, then unique children are

@@ -324,6 +324,19 @@ impl Profile {
         &self.desc
     }
 
+    pub(crate) fn with_buffers(
+        mut self,
+        buffers: Vec<BufferDescription>,
+    ) -> Result<Self, ProfileError> {
+        let common = match &mut self.desc {
+            StageDescription::Vertex(v) => &mut v.common,
+            StageDescription::Pixel(p) => &mut p.common,
+            StageDescription::Compute(c) => &mut c.common,
+        };
+        common.buffers = buffers;
+        Self::new(self.desc)
+    }
+
     pub fn common(&self) -> &CommonDescription {
         match &self.desc {
             StageDescription::Vertex(v) => &v.common,
