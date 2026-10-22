@@ -161,6 +161,7 @@ fn actual_register_traces_match_scalar_aliases_flags_mxcsr_and_complete_sse_avx_
                     }
                     // SAFETY: Exact original return on the unchanged owned stack.
                     assert!(matches!(
+                        // SAFETY: The original return uses the unchanged owned stack and current source.
                         unsafe { engine.step_checked(&mut arena.pause().unwrap(), &ret) }.unwrap(),
                         NativeBlockStop::Returned { .. }
                     ));
@@ -285,6 +286,7 @@ fn register_trace_span_quotas_and_counter_overflows_refuse_before_any_effect() {
             if case <= 1 {
                 // SAFETY: The original checked single block still fits its limit.
                 assert!(matches!(
+                    // SAFETY: The checked single block still fits the deliberately narrowed limit.
                     unsafe { engine.step_checked(&mut arena.pause().unwrap(), &block) }.unwrap(),
                     NativeBlockStop::Resume { .. }
                 ));
@@ -376,6 +378,7 @@ fn register_trace_resident_cache_repairs_body_both_exits_and_cells_and_retains_s
             );
             // SAFETY: The original checked return completes exactly this call.
             assert!(matches!(
+                // SAFETY: The original checked return completes this exact owned call.
                 unsafe { engine.step_checked(&mut arena.pause().unwrap(), &ret) }.unwrap(),
                 NativeBlockStop::Returned { .. }
             ));
@@ -413,6 +416,7 @@ fn register_trace_resident_cache_repairs_body_both_exits_and_cells_and_retains_s
             // SAFETY: Source immutability, execute rights or exact bytes were
             // deliberately revoked; optimization must fall back before effects.
             assert_eq!(
+                // SAFETY: Revoked source authority must refuse before native effects.
                 unsafe {
                     engine.try_step_register_loop_checked(&mut arena.pause().unwrap(), &trace, 2)
                 }
@@ -462,6 +466,7 @@ fn register_trace_requires_actual_owner_and_full_vector_bridge_authority() {
         let before = engine.usage();
         // SAFETY: Deliberately foreign owner must fail before admission or entry.
         assert_eq!(
+            // SAFETY: A deliberately foreign owner must fail before admission or entry.
             unsafe {
                 engine.try_step_register_loop_checked(
                     &mut foreign.pause().unwrap(),
@@ -484,6 +489,7 @@ fn register_trace_requires_actual_owner_and_full_vector_bridge_authority() {
         // SAFETY: The original owned stack deliberately loses live write rights;
         // even a memory-free body must preserve the complete stack admission.
         assert_eq!(
+            // SAFETY: The owned stack deliberately lacks write rights; entry must refuse.
             unsafe {
                 engine.try_step_register_loop_checked(
                     &mut arena.pause().unwrap(),
@@ -510,6 +516,7 @@ fn register_trace_requires_actual_owner_and_full_vector_bridge_authority() {
         // SAFETY: Invalid guest controls must fail before any hardware entry;
         // no unmasked guest FP control is installed on the host.
         assert_eq!(
+            // SAFETY: Invalid guest controls must fail before any hardware entry.
             unsafe {
                 engine.try_step_register_loop_checked(
                     &mut arena.pause().unwrap(),
@@ -543,6 +550,7 @@ fn register_trace_requires_actual_owner_and_full_vector_bridge_authority() {
         let slots = engine.machine.published_slots.clone();
         // SAFETY: The declared vector trace has no admitted full-YMM bridge.
         assert_eq!(
+            // SAFETY: The declared YMM trace lacks an admitted full-YMM bridge.
             unsafe {
                 engine.try_step_register_loop_checked(
                     &mut arena.pause().unwrap(),

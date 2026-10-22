@@ -352,8 +352,10 @@ fn repeated_refused_nested_captures_consume_session_attempt_budgets_before_any_e
         put(&mut memory, base + 0x1000, &root);
         put(&mut memory, base + 0x8000, &child);
         memory.write(base + 0x3000, &[0xa5; 4]).unwrap();
-        let mut limits = Limits::default();
-        limits.max_command_buffers = 4;
+        let limits = Limits {
+            max_command_buffers: 4,
+            ..Default::default()
+        };
         let mut driver = Driver::new(limits);
         let mut previous_work = 0;
         for attempt in 1..=2 {
