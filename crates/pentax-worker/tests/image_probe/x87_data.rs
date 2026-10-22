@@ -257,7 +257,8 @@ fn memory_matrix(width: u8) -> Vec<u8> {
     let mut p = Code::new(ENTRY);
     p.seed_context();
     // Exact literal expected 80-bit encodings, not a production conversion oracle.
-    let cases: Vec<((u64, u16), (u64, u16), u16)> = match width {
+    type TransferCase = ((u64, u16), (u64, u16), u16);
+    let cases: Vec<TransferCase> = match width {
         4 => vec![
             ((0x3f80_0000, 0), ONE, 0),
             ((0x8000_0000, 0), (0, 0x8000), 0),
