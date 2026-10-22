@@ -91,6 +91,7 @@ pub use handle_usage::HandleUsage;
 pub use ime::{AdmittedImeCallback, ImeCallbackAction, ImeVisualState};
 pub use memory::MemoryMapRefusal;
 pub use net_ctl::{AdmittedNetCtlCallback, NetCtlCallbackAction};
+pub use np::callback::{AdmittedNpCallback, NpCallbackAction};
 pub use output::{OutputStream, OutputUsage};
 pub use pentax_config::SystemConfig;
 pub use pentax_config::{UserConfig, UserName};
@@ -1194,7 +1195,9 @@ impl Kernel {
             | SaveMemoryGet
             | SaveMemorySet
             | SaveMemorySync => self.save.invoke(service, args, guest, &mut self.budget),
-            NpGetId
+            NpCheckCallback
+            | NpRegisterStateCallbackA
+            | NpGetId
             | NpGetOnlineId
             | NpGetAccountId
             | NpGetAccountCountry

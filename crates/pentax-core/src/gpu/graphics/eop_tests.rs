@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-//! Original encoder→ordered actual draw→GPU-ready frame, without fake display.
+//! Original encoder -> ordered actual draw -> GPU-ready frame, without fake display.
 use super::*;
 use crate::gpu::{
     driver::{Driver, Function, Limits as DriverLimits},
@@ -389,3 +389,6 @@ fn actual_current_draw_refuses_surface_clock_and_capture_failures_without_leakin
         // reconstruct it from the ordinary public completion report.
     }
 }
+
+#[path = "drain_flip_tests.rs"]
+mod drain_flip_tests;

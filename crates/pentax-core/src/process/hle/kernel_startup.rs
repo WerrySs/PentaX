@@ -30,6 +30,8 @@ mod pthread_once;
 pub use pthread_once::PreparedPthreadOnce;
 mod netctl_callback;
 pub use netctl_callback::PreparedNetCtlCallback;
+mod np_callback;
+pub use np_callback::PreparedNpCallback;
 mod font_callback;
 pub use font_callback::PreparedFontParserCallback;
 mod agc_callback;
@@ -712,6 +714,7 @@ pub struct PreparedNativeKernelStartup<'plan, 'image> {
     loaded_modules: module_lifecycle::LoadedModules,
     once: pthread_once::OnceState,
     netctl_callbacks: netctl_callback::NetCtlCallbackState,
+    np_callbacks: np_callback::NpCallbackState,
     font_parsers: font_callback::FontParserCallbackState,
     agc_callbacks: agc_callback::AgcCallbackState,
     ime_callbacks: ime_callback::ImeCallbackState,
@@ -821,6 +824,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::Load(_)
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
+            | NativeServiceAction::Np(_)
             | NativeServiceAction::FontParser(_)
             | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)
@@ -1123,6 +1127,26 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 stop.service_id,
                 stop.args.0,
             )
+        } else if actions && marker.registration.service == pentax_kernel::Service::NpCheckCallback
+        {
+            let action = self
+                .kernel
+                .admit_np_callbacks()
+                .map_err(KernelStartupError::Kernel)?;
+            let prepared = self.np_callbacks.prepare(
+                &mut memory,
+                action,
+                stop.syscall_pc,
+                stop.service_id,
+                stop.args.0,
+                stack_pointer,
+            );
+            if prepared.is_err() {
+                if let pentax_kernel::NpCallbackAction::Call(request) = action {
+                    self.kernel.fail_np_callback(&request);
+                }
+            }
+            prepared
         } else if actions && marker.registration.service == pentax_kernel::Service::FontCreateString
         {
             let action = self
@@ -1248,6 +1272,7 @@ fn prepare_in<'plan, 'image>(
         loaded_modules: module_lifecycle::LoadedModules::new(plan.kernel_provider_index())?,
         once: pthread_once::OnceState::new()?,
         netctl_callbacks: netctl_callback::NetCtlCallbackState::new(),
+        np_callbacks: np_callback::NpCallbackState::new(),
         font_parsers: font_callback::FontParserCallbackState::new()?,
         agc_callbacks: agc_callback::AgcCallbackState::new()?,
         ime_callbacks: ime_callback::ImeCallbackState::new()?,

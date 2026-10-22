@@ -400,11 +400,15 @@ pub fn plan_commands(
                         .filter(|n| *n <= limits.max_packets)
                         .ok_or(Error::Limit("command packets"))?;
                 }
+                // This sealed parser/ME barrier cannot write guest memory or
+                // change a completed target. It preserves, but never creates,
+                // the previous draw's eligibility. Other actions remain stale.
+                let preserves_draw = matches!(&action, MemoryAction::Drain);
                 actions.push(Action::Memory(memory.len()));
                 memory.push(action);
-                // A later flip needs a newly completed draw. A prior receipt
-                // cannot certify pixels after a possibly aliasing memory action.
-                fresh_draw = false;
+                if !preserves_draw {
+                    fresh_draw = false;
+                }
                 at = end;
                 continue;
             }

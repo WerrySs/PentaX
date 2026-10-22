@@ -310,15 +310,20 @@ impl Driver {
                     &owned_draw
                 }
                 GraphicsStep::Memory(index) => {
-                    // Consuming the current draw receipt invalidates it before
-                    // every memory/barrier action, including empty writes. A
-                    // later flip must follow a new actual owned draw.
-                    let memory = cursor.into_pause();
                     match plan.memory_action(index) {
+                        draw::MemoryAction::Drain => {
+                            // All prior work already fenced and wrote back.
+                            // Counter admission cannot alter guest backing,
+                            // target/configuration or the unique pause loan.
+                            self.drain_commands()?;
+                        }
                         draw::MemoryAction::Write(write) => {
+                            let memory = cursor.into_pause();
                             self.memory_write(memory, write, plan.command_ranges(&sources))?;
+                            cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Wait(wait) => {
+                            let memory = cursor.into_pause();
                             self.usage.preparation_work = add(
                                 self.usage.preparation_work,
                                 wait.byte_count() as u64 + 1,
@@ -332,8 +337,10 @@ impl Driver {
                             {
                                 return Err(Failure::Waiting);
                             }
+                            cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Release(release) => {
+                            let memory = cursor.into_pause();
                             self.retire_release(
                                 memory,
                                 release,
@@ -341,10 +348,12 @@ impl Driver {
                                 &mut kernel,
                                 0,
                             )?;
+                            cursor = Cursor::Paused(memory);
                         }
-                        draw::MemoryAction::Drain => self.drain_commands()?,
                     }
-                    cursor = Cursor::Paused(memory);
+                    // Every non-Drain action consumed the prior draw receipt,
+                    // including empty writes and read-only waits. A failed
+                    // action returns before any later flip can consume it.
                     continue;
                 }
                 GraphicsStep::Flip(flip) => {

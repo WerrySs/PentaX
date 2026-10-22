@@ -11,16 +11,16 @@ fn configured_memory_binds_the_tail_site_without_moving_any_prior_marker_or_obje
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1396, 69, 71)
+        (1399, 69, 71)
     );
-    assert_eq!(provider.code_bytes().len(), 0x2ca0);
+    assert_eq!(provider.code_bytes().len(), 0x2cb8);
     assert_eq!(
         (provider.objects()[0].symbol, provider.objects()[0].rva),
-        (1397, 0x10000)
+        (1400, 0x10000)
     );
     assert_eq!(
         (provider.objects()[1].symbol, provider.objects()[1].rva),
-        (1398, 0x10008)
+        (1401, 0x10008)
     );
     for (index, marker) in provider.markers()[..1317].iter().enumerate() {
         assert_eq!(

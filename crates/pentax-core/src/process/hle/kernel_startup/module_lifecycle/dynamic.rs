@@ -34,6 +34,7 @@ pub enum NativeServiceAction {
     Load(PendingModuleLoad),
     Once(super::super::PreparedPthreadOnce),
     NetCtl(super::super::PreparedNetCtlCallback),
+    Np(super::super::PreparedNpCallback),
     FontParser(super::super::PreparedFontParserCallback),
     AgcCommandGrow(super::super::PreparedAgcCommandBufferCallback),
     ImeCallback(super::super::PreparedImeCallback),

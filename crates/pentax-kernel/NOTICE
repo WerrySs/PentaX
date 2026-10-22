@@ -838,3 +838,13 @@ thread wait membership, atomic guest prefix publication and checked scheduler
 continuations. Readiness reserves no count, matching the source predicate;
 destroy/reinit with retained waiters stays an explicit unsupported transition.
 No host wait, timed-wait completion or fairness claim follows.
+
+Offline NP callback adaptation additionally uses the retained KytyPS5-Performance
+revision209dffe9032d72749257ce18680d506b891284de, src/libs/network.cpp
+NpManager::NpCheckCallback/NpRegisterStateCallbackA and src/libs/libNet.cpp.
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original MIT grant apply.
+PentaX modifications2026: process-owned append-only registrations, bounded sealed
+pending ranges, configured guest user identity, exact ordinal/duplicate errors,
+reentrant snapshots and permanently failed admission receipts. No network or
+online sign-in is modeled. Unregister is unavailable: the pinned no-op is not
+sufficient evidence for the A-specific removal ABI and its NID.

@@ -536,3 +536,12 @@ source four-byte gamma updates and NaN comparisons, owned40-byte status,
 per-open monotonic display epochs, atomic fixed-port rebasing, coalesced elapsed
 boundary publication and pre-pixels cooperative wait wakeup. Display periods do
 not establish actual presentation, host color correction or measured frame rate.
+
+Offline NP callback transport adapts the retained KytyPS5-Performance revision
+209dffe9032d72749257ce18680d506b891284de, src/libs/network.cpp
+NpManager::NpCheckCallback and src/libs/libNet.cpp. Copyright (c) 2021 InoriRus;
+GPL-2.0-only and the retained original MIT grant apply. PentaX modifications2026:
+exact current source/owner/TLS/stack/frame admission, real return receipts,
+bounded independent snapshot continuations and unconditional owner-local
+failure revocation. Original fixtures use source-defined inputs only. No online
+NP state, commercial compatibility or successful native execution is inferred.

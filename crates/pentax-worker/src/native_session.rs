@@ -13,8 +13,8 @@ use pentax_core::process::hle::{
     DynamicModuleInput, DynamicModuleStart, GeneratedUnavailableProvider, KernelStartupError,
     NativeServiceAction, NativeServiceRequest, PendingModuleLoad, PreparedAgcCommandBufferCallback,
     PreparedFontParserCallback, PreparedImeCallback, PreparedNativeKernelStartup,
-    PreparedNativeModuleStart, PreparedNativeSource, PreparedNetCtlCallback, PreparedPthreadOnce,
-    UnavailableProviderError, build_unavailable_provider,
+    PreparedNativeModuleStart, PreparedNativeSource, PreparedNetCtlCallback, PreparedNpCallback,
+    PreparedPthreadOnce, UnavailableProviderError, build_unavailable_provider,
 };
 use pentax_platform::native_dispatch::{
     NativeBlockMachine, NativeBlockStepper, NativeBlockStop, NativeCpuState, NativeDispatchError,
@@ -698,117 +698,132 @@ fn run_prepared_consumer_inner<'plan, 'image>(
     } else {
         NativeSessionPhase::MainEntry
     };
-    loop {
-        let active = current.as_ref().unwrap_or(base);
-        let epoch = session.prepare_epoch_native_source(active, &limits.block)?;
-        let outcome = execute_epoch(
-            session,
-            &epoch,
-            &mut machine,
-            starting.take(),
-            &mut state,
-            initializer,
-            limits,
-            progress,
-            consumer.as_deref_mut(),
-        );
-        // Normalize while the exact final epoch plan is still borrowed. An
-        // intermediate dynamic-module transition must not leave a stale file.
-        if limits.private_samples && !matches!(&outcome, Ok(Some(_))) {
-            progress.profile.capture_private_samples(active);
-        }
-        progress.libc_builtins = session.libc_builtin_usage();
-        // Preserve a terminal queue observation before propagating typed stops.
-        // This bounded snapshot never probes readiness or changes scheduling.
-        progress.scheduling = state.scheduling.observations(
-            session.video_registration_counts(),
-            session.graphics_usage(),
-            session.graphics_video_flip_observations(),
-            session.graphics_function_profile(),
-        );
-        match outcome? {
-            None => {
-                return state
-                    .report
-                    .take()
-                    .ok_or(NativeSessionError::FixtureInvariant("missing final report"));
+    let outcome = (|| {
+        loop {
+            let active = current.as_ref().unwrap_or(base);
+            let epoch = session.prepare_epoch_native_source(active, &limits.block)?;
+            let outcome = execute_epoch(
+                session,
+                &epoch,
+                &mut machine,
+                starting.take(),
+                &mut state,
+                initializer,
+                limits,
+                progress,
+                consumer.as_deref_mut(),
+            );
+            // Normalize while the exact final epoch plan is still borrowed. An
+            // intermediate dynamic-module transition must not leave a stale file.
+            if limits.private_samples && !matches!(&outcome, Ok(Some(_))) {
+                progress.profile.capture_private_samples(active);
             }
-            Some((pending, token)) => {
-                let input = session.read_dynamic_module(pending)?;
-                let slot = arena
-                    .get(input.slot())
-                    .ok_or(NativeSessionError::WrongPreparedSource)?;
-                slot.set(input)
-                    .map_err(|_| NativeSessionError::WrongPreparedSource)?;
-                let input = slot.get().ok_or(NativeSessionError::WrongPreparedSource)?;
-                let bias = session.dynamic_load_bias(input)?;
-                let view = pentax_loader::open_executable(input.bytes())
-                    .map_err(|_| NativeSessionError::SourceWindow)?;
-                let policies = session.dynamic_fallback_policies(&epoch)?;
-                let added = pentax_linker::ModuleInput::new(view, bias);
-                let extension_limits = session.dynamic_extension_limits();
-                let unavailable_limits = session.dynamic_unavailable_limits()?;
-                let missing = pentax_linker::plan_missing_functions_for_extension(
-                    active,
-                    added,
-                    &policies,
-                    &extension_limits,
-                    unavailable_limits.max_functions as u64,
-                )
-                .map_err(NativeSessionError::Extension)?;
-                let delta = if missing.functions().is_empty() {
-                    None
-                } else {
-                    let provider = build_unavailable_provider(missing, &unavailable_limits)
-                        .map_err(|error| match error {
-                            UnavailableProviderError::Allocation => NativeSessionError::Allocation,
-                            UnavailableProviderError::Budget(name) => {
-                                NativeSessionError::Budget(name)
-                            }
-                            UnavailableProviderError::Layout => NativeSessionError::Core(
-                                KernelStartupError::InvalidProvider("dynamic unavailable layout"),
-                            ),
-                        })?;
-                    let slot = unavailable_arena
+            progress.libc_builtins = session.libc_builtin_usage();
+            // Preserve a terminal queue observation before propagating typed stops.
+            // This bounded snapshot never probes readiness or changes scheduling.
+            progress.scheduling = state.scheduling.observations(
+                session.video_registration_counts(),
+                session.graphics_usage(),
+                session.graphics_video_flip_observations(),
+                session.graphics_function_profile(),
+            );
+            match outcome? {
+                None => {
+                    return state
+                        .report
+                        .take()
+                        .ok_or(NativeSessionError::FixtureInvariant("missing final report"));
+                }
+                Some((pending, token)) => {
+                    let input = session.read_dynamic_module(pending)?;
+                    let slot = arena
                         .get(input.slot())
                         .ok_or(NativeSessionError::WrongPreparedSource)?;
-                    slot.set(provider)
+                    slot.set(input)
                         .map_err(|_| NativeSessionError::WrongPreparedSource)?;
-                    Some(slot.get().ok_or(NativeSessionError::WrongPreparedSource)?)
-                };
-                let guest = pentax_linker::ModuleInput::new(
-                    pentax_loader::open_executable(input.bytes())
-                        .map_err(|_| NativeSessionError::SourceWindow)?,
-                    bias,
-                );
-                let next = if let Some(delta) = delta {
-                    let delta_input = pentax_linker::ModuleInput::new(
-                        pentax_loader::open_executable(delta.image())
+                    let input = slot.get().ok_or(NativeSessionError::WrongPreparedSource)?;
+                    let bias = session.dynamic_load_bias(input)?;
+                    let view = pentax_loader::open_executable(input.bytes())
+                        .map_err(|_| NativeSessionError::SourceWindow)?;
+                    let policies = session.dynamic_fallback_policies(&epoch)?;
+                    let added = pentax_linker::ModuleInput::new(view, bias);
+                    let extension_limits = session.dynamic_extension_limits();
+                    let unavailable_limits = session.dynamic_unavailable_limits()?;
+                    let missing = pentax_linker::plan_missing_functions_for_extension(
+                        active,
+                        added,
+                        &policies,
+                        &extension_limits,
+                        unavailable_limits.max_functions as u64,
+                    )
+                    .map_err(NativeSessionError::Extension)?;
+                    let delta = if missing.functions().is_empty() {
+                        None
+                    } else {
+                        let provider = build_unavailable_provider(missing, &unavailable_limits)
+                            .map_err(|error| match error {
+                                UnavailableProviderError::Allocation => {
+                                    NativeSessionError::Allocation
+                                }
+                                UnavailableProviderError::Budget(name) => {
+                                    NativeSessionError::Budget(name)
+                                }
+                                UnavailableProviderError::Layout => {
+                                    NativeSessionError::Core(KernelStartupError::InvalidProvider(
+                                        "dynamic unavailable layout",
+                                    ))
+                                }
+                            })?;
+                        let slot = unavailable_arena
+                            .get(input.slot())
+                            .ok_or(NativeSessionError::WrongPreparedSource)?;
+                        slot.set(provider)
+                            .map_err(|_| NativeSessionError::WrongPreparedSource)?;
+                        Some(slot.get().ok_or(NativeSessionError::WrongPreparedSource)?)
+                    };
+                    let guest = pentax_linker::ModuleInput::new(
+                        pentax_loader::open_executable(input.bytes())
                             .map_err(|_| NativeSessionError::SourceWindow)?,
-                        session.dynamic_unavailable_bias(input)?,
+                        bias,
                     );
-                    pentax_linker::append_symbolic_modules_with_fallbacks(
-                        active,
-                        &[guest, delta_input],
-                        &policies,
-                        &extension_limits,
-                    )
-                } else {
-                    pentax_linker::append_symbolic_modules_with_fallbacks(
-                        active,
-                        &[guest],
-                        &policies,
-                        &extension_limits,
-                    )
+                    let next = if let Some(delta) = delta {
+                        let delta_input = pentax_linker::ModuleInput::new(
+                            pentax_loader::open_executable(delta.image())
+                                .map_err(|_| NativeSessionError::SourceWindow)?,
+                            session.dynamic_unavailable_bias(input)?,
+                        );
+                        pentax_linker::append_symbolic_modules_with_fallbacks(
+                            active,
+                            &[guest, delta_input],
+                            &policies,
+                            &extension_limits,
+                        )
+                    } else {
+                        pentax_linker::append_symbolic_modules_with_fallbacks(
+                            active,
+                            &[guest],
+                            &policies,
+                            &extension_limits,
+                        )
+                    }
+                    .map_err(NativeSessionError::Extension)?;
+                    let start = session.publish_dynamic_batch(
+                        &epoch,
+                        input,
+                        &next,
+                        delta,
+                        &limits.block,
+                    )?;
+                    current = Some(next);
+                    starting = Some((start, token));
                 }
-                .map_err(NativeSessionError::Extension)?;
-                let start =
-                    session.publish_dynamic_batch(&epoch, input, &next, delta, &limits.block)?;
-                current = Some(next);
-                starting = Some((start, token));
             }
         }
+    })();
+    if outcome.is_err() {
+        session.abort_np_callbacks();
     }
+    outcome
 }
 
 #[derive(Clone, Copy)]
@@ -816,6 +831,7 @@ enum SuspendedInitializer {
     Module(DynamicModuleStart),
     Once(PreparedPthreadOnce),
     NetCtl(PreparedNetCtlCallback),
+    Np(PreparedNpCallback),
     FontParser(PreparedFontParserCallback),
     ImeCallback(PreparedImeCallback),
     AgcCommandGrow(PreparedAgcCommandBufferCallback),
@@ -1351,6 +1367,9 @@ fn execute_epoch<'plan, 'image>(
                             SuspendedInitializer::NetCtl(start) => {
                                 session.complete_netctl_callback_call(proof, start, &returned)?
                             }
+                            SuspendedInitializer::Np(start) => session.complete_np_callback_call(
+                                proof, start, &returned, nested, &engine,
+                            )?,
                             SuspendedInitializer::FontParser(start) => session
                                 .complete_font_parser_call(
                                     proof, start, &returned, nested, &engine,
@@ -1377,6 +1396,7 @@ fn execute_epoch<'plan, 'image>(
                                 if !matches!(
                                     start,
                                     SuspendedInitializer::NetCtl(_)
+                                        | SuspendedInitializer::Np(_)
                                         | SuspendedInitializer::FontParser(_)
                                         | SuspendedInitializer::ImeCallback(_)
                                         | SuspendedInitializer::AgcCommandGrow(_)
@@ -1404,6 +1424,23 @@ fn execute_epoch<'plan, 'image>(
                                     ),
                                 )?;
                                 *frame = (SuspendedInitializer::NetCtl(next), call, phase);
+                            }
+                            NativeServiceAction::Np(next) => {
+                                let call = engine.continue_syscall_call(
+                                    &mut session.pause()?,
+                                    nested,
+                                    next.entry(),
+                                    next.args(),
+                                );
+                                progress.dispatch = engine.usage();
+                                let call = call?;
+                                session.observe_np_callback_call(proof, next, &call)?;
+                                let frame = state.frames.last_mut().ok_or(
+                                    NativeSessionError::FixtureInvariant(
+                                        "missing Np callback frame",
+                                    ),
+                                )?;
+                                *frame = (SuspendedInitializer::Np(next), call, phase);
                             }
                             NativeServiceAction::FontParser(next) => {
                                 let call = engine.continue_syscall_call(
@@ -1652,6 +1689,25 @@ fn execute_epoch<'plan, 'image>(
                             session.observe_netctl_callback_call(proof, start, &call)?;
                             state.frames.push((
                                 SuspendedInitializer::NetCtl(start),
+                                call,
+                                progress.phase,
+                            ));
+                        }
+                        NativeServiceAction::Np(start) => {
+                            if state.frames.len() >= 32 {
+                                return Err(NativeSessionError::Budget("callback frames"));
+                            }
+                            let call = engine.begin_syscall_call(
+                                &mut session.pause()?,
+                                token,
+                                start.entry(),
+                                start.args(),
+                            );
+                            progress.dispatch = engine.usage();
+                            let call = call?;
+                            session.observe_np_callback_call(proof, start, &call)?;
+                            state.frames.push((
+                                SuspendedInitializer::Np(start),
                                 call,
                                 progress.phase,
                             ));

@@ -285,9 +285,13 @@ memory profiles and privately owned payloads; no caller can attach a detached
 numeric action to native execution. Full temporary parser capacities and work
 are conservatively charged inside the unchanged graphics limits; no quota is
 credited when that temporary storage is dropped. The total action count stays
-bounded by twice max_draws. A memory action invalidates the preceding draw's
-flip eligibility. A subsequent flip needs a newly completed draw and current
-owner-bound receipt. Core execution reuses actual write permissions, physical
+bounded by twice max_draws. The exact parser/ME Drain packet preserves an
+existing completed draw's flip eligibility and current owner-bound receipt:
+every prior GPU operation has already fenced and completed its same-owner
+writeback, and Drain only admits its work/command counters. It writes no guest
+memory, changes no target/configuration, and creates no new draw authority.
+All other memory actions, including empty writes, invalidate the preceding
+draw's eligibility. A later flip then needs a newly completed draw. Core execution reuses actual write permissions, physical
 command-source disjointness, completed GPU fences, checked label writes and
 post-write notifications. Unsatisfied waits stop explicitly; prior effects
 cannot be replayed. GDS, unknown wait/dispatch modes, indirect draws, opaque

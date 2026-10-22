@@ -674,6 +674,8 @@ pub enum Service {
     AvailableFlexibleMemorySize,
     ModuleInfoForUnwind,
     PthreadYield,
+    NpCheckCallback,
+    NpRegisterStateCallbackA,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1765,6 +1767,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < NP_CALLBACK_REGISTRATIONS.len() {
+        entries[output] = NP_CALLBACK_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1868,6 +1876,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + AVAILABLE_MEMORY_REGISTRATIONS.len()
             + MODULE_UNWIND_REGISTRATIONS.len()
             + PTHREAD_YIELD_REGISTRATIONS.len()
+            + NP_CALLBACK_REGISTRATIONS.len()
     },
 >();
 
@@ -4846,6 +4855,35 @@ const FIBER_EXECUTION_REGISTRATIONS: [Registration; 12] = {
             module: "libSceFiber",
             library: "libSceFiber",
             ..ret
+        },
+    ]
+};
+
+// Append only the canonical public roles and the one observed paired Check scope.
+const NP_CALLBACK_REGISTRATIONS: [Registration; 3] = {
+    let check = Registration {
+        service: Service::NpCheckCallback,
+        nid: "3Zl8BePTh9Y",
+        source_name: "NpCheckCallback",
+        arguments: 0,
+        module: "NpManager",
+        library: "NpManager",
+        module_version: (1, 1),
+        library_version: 1,
+    };
+    [
+        check,
+        Registration {
+            module: "libSceNpManager",
+            library: "libSceNpManager",
+            ..check
+        },
+        Registration {
+            service: Service::NpRegisterStateCallbackA,
+            nid: "qQJfO8HAiaY",
+            source_name: "NpRegisterStateCallbackA",
+            arguments: 2,
+            ..check
         },
     ]
 };

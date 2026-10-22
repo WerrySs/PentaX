@@ -143,6 +143,6 @@ mod tests {
                 None
             );
         }
-        assert_eq!(super::super::REGISTRATIONS.len(), 1396);
+        assert_eq!(super::super::REGISTRATIONS.len(), 1399);
     }
 }

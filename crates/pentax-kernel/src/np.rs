@@ -6,6 +6,8 @@
 use crate::budget::{Budget, Limits};
 use crate::{CallArgs, Failure, GuestAccess, GuestError, GuestWrite, Service};
 
+pub(crate) mod callback;
+
 const INVALID_ARGUMENT: u64 = 0x8055_0003;
 const SIGNED_OUT: u64 = 0x8055_0006;
 const INVALID_SIZE: u64 = 0x8055_0011;
@@ -28,6 +30,7 @@ struct Request {
     result: u64,
 }
 pub(crate) struct NpState {
+    callbacks: callback::Callbacks,
     requests: Vec<Request>,
     maximum: usize,
 }
@@ -38,6 +41,7 @@ impl NpState {
             .iter()
             .filter(|request| request.state != State::Free)
             .count()
+            + self.callbacks.retained()
     }
 
     pub(crate) fn new(limits: Limits) -> Result<Self, Failure> {
@@ -46,7 +50,11 @@ impl NpState {
         requests
             .try_reserve_exact(maximum)
             .map_err(|_| Failure::Allocation)?;
-        Ok(Self { requests, maximum })
+        Ok(Self {
+            requests,
+            maximum,
+            callbacks: callback::Callbacks::new(limits.max_handles),
+        })
     }
     fn create(&mut self, asynchronous: bool, budget: &mut Budget) -> Result<u64, Failure> {
         budget.work(self.requests.len() as u64 + 1)?;
@@ -114,6 +122,9 @@ impl NpState {
         budget.work(1)?;
         let [first, second, third, ..] = args.0;
         match service {
+            NpCheckCallback | NpRegisterStateCallbackA => {
+                return self.callbacks.invoke(service, args, budget);
+            }
             NpGetId | NpGetOnlineId | NpGetAccountId | NpGetAccountCountry => {
                 if second == 0 {
                     return Err(Failure::Unsupported("source-null NP account output"));

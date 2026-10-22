@@ -1596,3 +1596,6 @@ fn execute_only_code_cannot_read_itself_as_guest_data() {
 
 #[path = "image_probe/x87_conditional_moves.rs"]
 mod x87_conditional_moves;
+
+#[path = "image_probe/np_callbacks.rs"]
+mod np_callbacks;

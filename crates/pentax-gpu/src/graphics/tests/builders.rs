@@ -282,3 +282,83 @@ fn graphics_memory_actions_remain_ordered_owned_bounded_and_break_old_flip_autho
     repaired.extend([0xc004_105c, 1, 0, 0, 0, 0]);
     assert_eq!(plan(&repaired).usage().flips, 1);
 }
+
+#[test]
+fn graphics_exact_drain_preserves_a_draw_but_never_creates_or_repairs_flip_eligibility() {
+    let drain = [0xc000_4200, 0];
+    let flip = [0xc004_105c, 1, 0, 1, 7, 0];
+    let mut words = commands(&[]);
+    words.extend(drain);
+    words.extend(flip);
+    let encoded = bytes(&words);
+    let planned = plan(&words);
+    assert_eq!(planned.draws().len(), 1);
+    assert_eq!(planned.usage().flips, 1);
+    assert_eq!(planned.actions().len(), 3);
+    assert!(matches!(planned.actions()[0], Action::Draw(0)));
+    assert!(matches!(planned.actions()[1], Action::Memory(0)));
+    assert!(matches!(planned.memory_action(0), MemoryAction::Drain));
+    assert!(matches!(planned.actions()[2], Action::Flip(_)));
+    let roots = [crate::compute::CommandRange {
+        address: 0x4000,
+        size: encoded.len() as u64,
+    }];
+    let mut ordered = OrderedCommands::prepare(
+        &[&encoded],
+        &roots,
+        GraphicsState::empty(),
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(matches!(
+        ordered.next_step().unwrap(),
+        Some(OrderedStep::Draw(_))
+    ));
+    let Some(OrderedStep::Memory(index)) = ordered.next_step().unwrap() else {
+        panic!("drain missing")
+    };
+    assert!(matches!(ordered.memory_action(index), MemoryAction::Drain));
+    assert!(matches!(
+        ordered.next_step().unwrap(),
+        Some(OrderedStep::Flip(_))
+    ));
+    assert!(ordered.next_step().unwrap().is_none());
+    ordered.final_state().unwrap();
+
+    let write = [0xc003_3700, 0x4000_0200 | (3 << 25), 0x30000, 0, 17];
+    for mut stale in [
+        Vec::new(),
+        {
+            let mut value = commands(&[]);
+            value.extend(write);
+            value
+        },
+        {
+            let mut value = commands(&[]);
+            value.extend(flip);
+            value
+        },
+    ] {
+        stale.extend(drain);
+        stale.extend(flip);
+        assert!(matches!(
+            plan_commands(
+                &[&bytes(&stale)],
+                GraphicsState::empty(),
+                &Default::default()
+            ),
+            Err(Error::Unsupported("GPU flip needs a fresh draw"))
+        ));
+    }
+    let mut malformed = commands(&[]);
+    malformed.extend([0xc000_4200, 1]);
+    malformed.extend(flip);
+    assert!(
+        plan_commands(
+            &[&bytes(&malformed)],
+            GraphicsState::empty(),
+            &Default::default()
+        )
+        .is_err()
+    );
+}

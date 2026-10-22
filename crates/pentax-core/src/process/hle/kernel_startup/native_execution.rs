@@ -234,6 +234,7 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
             | NativeServiceAction::Load(_)
             | NativeServiceAction::Once(_)
             | NativeServiceAction::NetCtl(_)
+            | NativeServiceAction::Np(_)
             | NativeServiceAction::FontParser(_)
             | NativeServiceAction::AgcCommandGrow(_)
             | NativeServiceAction::ImeCallback(_)

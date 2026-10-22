@@ -640,3 +640,6 @@ fn np_webapi2_provider_refuses_other_versions_types_and_namespace_spellings() {
         ));
     }
 }
+
+#[path = "np_callback_tests.rs"]
+mod np_callback;
