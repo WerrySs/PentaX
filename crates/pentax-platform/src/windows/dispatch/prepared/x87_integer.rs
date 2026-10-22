@@ -146,7 +146,7 @@ pub(super) fn execute(
     if form.load {
         memory.read(address, &mut input[..form.size])?;
     } else {
-        memory.preflight_write(address, form.size)?;
+        memory.preflight_write(address, transferred)?;
     }
     let mut encoded = [0; 15];
     memory.fetch_source(instruction.ip(), &mut encoded[..instruction.len()])?;
