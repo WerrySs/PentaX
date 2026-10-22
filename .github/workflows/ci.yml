@@ -44,7 +44,9 @@ jobs:
             ${{ runner.temp }}/pentax-cargo/git/db
             target
           key: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
-          restore-keys: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+          restore-keys: |
+            cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            cargo-v1-${{ runner.os }}-
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check formatting
@@ -79,7 +81,9 @@ jobs:
             ${{ runner.temp }}/pentax-cargo/git/db
             target
           key: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
-          restore-keys: cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+          restore-keys: |
+            cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            cargo-v1-${{ runner.os }}-
       - name: Use the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check the complete Windows workspace with Clippy
@@ -104,6 +108,14 @@ jobs:
       - name: Test software CPU identification and atomic refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::cpu_identification_tests:: -- --test-threads=1
+      - name: Test checked x87 control, data and arithmetic state
+        run: >-
+          cargo test --locked -p pentax-platform --lib x87_ -- --test-threads=1
+      - name: Test original native x87 data and arithmetic consumers
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe -- x87_data:: x87_arithmetic:: x87_comparisons:: --test-threads=1
       - name: Test bounded snapshot candidate diagnostics
         run: cargo test --locked -p pentax-worker --bin pentax-worker static_candidates_are_aggregate_private_value_independent_and_stop_at_bounds -- --test-threads=1
       - name: Test native YMM admission and context preservation

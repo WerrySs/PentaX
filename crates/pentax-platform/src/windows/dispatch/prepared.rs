@@ -492,6 +492,8 @@ mod vector_shifts;
 mod vectors;
 #[path = "prepared/x87_arithmetic.rs"]
 mod x87_arithmetic;
+#[path = "prepared/x87_comparison.rs"]
+mod x87_comparison;
 #[path = "prepared/x87_control.rs"]
 mod x87_control;
 #[path = "prepared/x87_data.rs"]

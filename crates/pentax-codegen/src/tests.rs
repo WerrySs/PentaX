@@ -879,3 +879,6 @@ mod x87_data;
 
 #[path = "tests/x87_arithmetic.rs"]
 mod x87_arithmetic;
+
+#[path = "tests/x87_comparison.rs"]
+mod x87_comparison;
