@@ -510,3 +510,10 @@ scheduler and authenticated post-cleanup return records. Sole join claims,
 serial/current-thread checks, atomic optional result writes, cycle detection
 and original tests are PentaX changes. Native stacks and context slots remain
 bounded until owner teardown instead of the source's immediate stack freeing.
+PthreadDetach adaptation: src/kernel/pthread.cpp:3495-3507 and POSIX wrapper
+4238-4242, plus src/libs/libKernel.cpp registrations, from KytyPS5-Performance
+revision 209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+PentaX resolves retained runtime lifecycle and registered owner handles before
+detachment. It protects accepted Join claims, preserves actual cleanup/return
+provenance, and retains bounded stacks/TLS/contexts until owner teardown.
+Original Rust state checks and native guest programs contain no commercial data.

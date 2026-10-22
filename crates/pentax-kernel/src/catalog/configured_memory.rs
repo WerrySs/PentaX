@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn configured_memory_appends_one_exact_pointer_argument_without_namespace_aliases() {
-        assert_eq!(REGISTRATIONS.len(), 1381);
+        assert_eq!(REGISTRATIONS.len(), 1391);
         assert_eq!(&REGISTRATIONS[1317..1318], &CONFIGURED_MEMORY_REGISTRATIONS);
         assert_eq!(
             Service::ConfiguredFlexibleMemorySize as usize,

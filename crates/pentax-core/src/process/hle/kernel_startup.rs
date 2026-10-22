@@ -1044,6 +1044,19 @@ impl<'plan, 'image> PreparedNativeKernelStartup<'plan, 'image> {
                 stop.service_id,
                 stop.args.0,
             )
+        } else if actions
+            && matches!(
+                marker.registration.service,
+                pentax_kernel::Service::PthreadDetach | pentax_kernel::Service::PosixPthreadDetach
+            )
+        {
+            pthread_create::detach::begin(
+                &mut self.kernel,
+                &mut memory,
+                &mut self.thread_runtime,
+                marker.registration.service,
+                stop.args,
+            )
         } else if actions && marker.registration.service == pentax_kernel::Service::PthreadJoin {
             pthread_wait::begin_join(
                 &mut self.kernel,

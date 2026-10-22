@@ -265,6 +265,23 @@ failures do not become fabricated errno results; a refused current transaction
 retains no new cache entry. Distinct physical aliases remain explicit refusals.
 Resolving metadata does not read file contents or execute APR command records.
 
+The remaining nine exact APR imports extend this same owned identity registry:
+`ResolveFilepathsToIds`, both `ResolveFilepathsWithPrefix` variants, all four
+`ForEach` variants, `GetFileSize` and `GetFileStat`. Prefixes are captured once
+and concatenated literally within the same 1024-byte path bound. `ForEach`
+accepts an int32 result array, continues semantic item errors and returns the
+actual success count; each array element carries the source kernel error word.
+A null result array retains first-error behavior. Successful item stores occur
+in ID/size/result order; failed items store result before sentinels. Guest
+permission, allocation and quota refusals remain explicit typed stops.
+
+`GetFileSize` returns the cached resolution size (zero for directories), while
+`GetFileStat` obtains current metadata through the same selected mount capability
+and writes the checked 120-byte source layout. IDs are process-owned, truncate
+their ABI argument to uint32 and never become ambient host paths or descriptors.
+The original unit and native consumer fixtures are source-only until separately
+compiled and executed; these APIs establish no commercial rendering claim.
+
 The reviewed SaveData/SaveData_native base profile shares process-owned state.
 Initialization ignores its optional input and records a receipt without clearing
 events or resetting transaction identifiers. Creation issues monotonic positive
@@ -1432,3 +1449,18 @@ owner-lifetime allocation policy until teardown. This deliberate policy does
 not claim the reference implementation's immediate `FreeGuestStack` reclamation
 or authorize reuse of a joined context. Original native fixtures independently
 exercise migrated fibers, a real sleeping-child join and failure after RET.
+
+### Pthread detachment
+
+The prepared owner implements kernel `PthreadDetach` and the exact POSIX
+`pthread_detach` binding with registered process-owned handles. Null returns
+EINVAL; unknown or already joined handles return ESRCH. Active, completed
+unjoined and current threads can be detached. Repeating detach succeeds as in
+the pinned source. The POSIX wrapper returns positive errno without changing
+the selected thread's errno cell; the kernel role keeps its kernel error words.
+
+Detachment updates retained kernel and created-thread metadata.
+An already accepted Join claim returns EINVAL instead of invalidating its
+waiter. Detached threads still run their real entry, cleanup and return path;
+their stacks, TLS, handles and CPU records remain bounded until owner teardown.
+This policy does not claim immediate source-style resource reclamation.

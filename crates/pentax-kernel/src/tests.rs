@@ -6,6 +6,8 @@ use super::*;
 mod ampr;
 #[path = "tests/apr.rs"]
 mod apr;
+#[path = "tests/apr_imports.rs"]
+mod apr_imports;
 #[path = "tests/apr_submit.rs"]
 mod apr_submit;
 #[path = "tests/dialog.rs"]
@@ -1323,7 +1325,7 @@ fn failed_file_output_does_not_advance_logical_cursor_or_escape_roots() {
     assert_eq!(guest.get(ARG + 128, 8), b"original");
     for path in [
         b"/original/../data.txt\0".as_slice(),
-        b"D:/arbitrary.txt\0",
+        b"D\x3a/arbitrary.txt\0",
         b"/other/data.txt\0",
     ] {
         guest.put(64, path);

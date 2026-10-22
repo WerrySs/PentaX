@@ -173,8 +173,18 @@ impl Kernel {
                 self.time.invoke(Nanosleep, args, guest, &mut self.budget),
                 false,
             ),
-            AprResolveFilepathsToIdsAndFileSizes => (
-                self.files.resolve_apr_paths(args, guest, &mut self.budget),
+            AprResolveFilepathsToIdsAndFileSizes
+            | AprResolveFilepathsToIds
+            | AprGetFileStat
+            | AprGetFileSize
+            | AprResolveFilepathsWithPrefixToIds
+            | AprResolveFilepathsWithPrefixToIdsAndFileSizes
+            | AprResolveFilepathsToIdsForEach
+            | AprResolveFilepathsToIdsAndFileSizesForEach
+            | AprResolveFilepathsWithPrefixToIdsForEach
+            | AprResolveFilepathsWithPrefixToIdsAndFileSizesForEach => (
+                self.files
+                    .invoke_apr_import(service, args, guest, &mut self.budget),
                 false,
             ),
             AprSubmitCommandBufferAndGetResult

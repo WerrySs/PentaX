@@ -9,6 +9,9 @@ use crate::{CallArgs, Errno, Failure, GuestAccess, GuestWrite};
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
+mod imports;
+use imports::Paths;
+
 #[derive(Clone, Copy)]
 struct Resolved {
     id: u32,
@@ -98,16 +101,28 @@ fn range(address: u64, length: u64) -> Result<(), Failure> {
 }
 
 fn path(guest: &impl GuestAccess, address: u64, budget: &mut Budget) -> Result<String, Failure> {
+    prefixed_path(guest, address, "", 0, budget)
+}
+
+fn prefixed_path(
+    guest: &impl GuestAccess,
+    address: u64,
+    prefix: &str,
+    held: usize,
+    budget: &mut Budget,
+) -> Result<String, Failure> {
     if address == 0 {
         return Err(Errno::Fault.into());
     }
     let maximum = budget.limits.max_name_bytes.min(1024);
-    let mut bytes = budget.buffer(maximum)?;
-    for index in 0..maximum {
+    let mut bytes = budget.buffer_held(maximum, held)?;
+    bytes[..prefix.len()].copy_from_slice(prefix.as_bytes());
+    for index in 0..maximum - prefix.len() {
         let at = address.checked_add(index as u64).ok_or(Errno::Fault)?;
-        budget.read(guest, at, &mut bytes[index..index + 1])?;
-        if bytes[index] == 0 {
-            bytes.truncate(index);
+        let target = prefix.len() + index;
+        budget.read(guest, at, &mut bytes[target..target + 1])?;
+        if bytes[target] == 0 {
+            bytes.truncate(target);
             return String::from_utf8(bytes).map_err(|_| Failure::Unsupported("non-UTF8 APR path"));
         }
     }
@@ -172,9 +187,25 @@ impl FileState {
         guest: &mut impl GuestAccess,
         budget: &mut Budget,
     ) -> Result<u64, Failure> {
-        let [list, count, ids, sizes, error_index, _] = args.0;
-        let count = count as u32;
-        if list == 0 || count == 0 || count > 1024 || (ids == 0 && sizes == 0) {
+        self.resolve_apr_common(Paths::sizes(args), guest, budget)
+    }
+
+    fn resolve_apr_common(
+        &mut self,
+        request: Paths,
+        guest: &mut impl GuestAccess,
+        budget: &mut Budget,
+    ) -> Result<u64, Failure> {
+        let Paths {
+            list,
+            count,
+            ids,
+            sizes,
+            error_index,
+            prefix,
+            results,
+        } = request;
+        if list == 0 || count == 0 || count > 1024 || (ids == 0 && sizes == 0 && results == 0) {
             return Err(Errno::Invalid.into());
         }
         // Match source numeric preflight ordering. Live backing permission and
@@ -188,7 +219,19 @@ impl FileState {
         if sizes != 0 {
             range(sizes, u64::from(count) * 8)?;
         }
+        if results != 0 {
+            range(results, u64::from(count) * 4)?;
+        }
         range(list, u64::from(count) * 8)?;
+
+        // The source snapshots the prefix once and concatenates it literally;
+        // no separator insertion, host path expansion or canonical ID folding.
+        let prefix = if prefix == 0 {
+            String::new()
+        } else {
+            path(guest, prefix, budget)?
+        };
+        let mut success_count = 0;
 
         for index in 0..u64::from(count) {
             let mut pending = None;
@@ -196,7 +239,7 @@ impl FileState {
             // Output aliases can deliberately change later pointer/string data.
             let result = (|| {
                 let pointer = budget.u64(guest, list + index * 8)?;
-                let path = path(guest, pointer, budget)?;
+                let path = prefixed_path(guest, pointer, &prefix, prefix.capacity(), budget)?;
                 if path.is_empty() {
                     return Err(Errno::Invalid.into());
                 }
@@ -207,8 +250,8 @@ impl FileState {
                     return Ok(info);
                 }
                 let retained = owned_name(&path)?;
-                budget.scratch(path.capacity() + retained.capacity())?;
-                budget.record_scratch(path.capacity() + retained.capacity());
+                budget.scratch(prefix.capacity() + path.capacity() + retained.capacity())?;
+                budget.record_scratch(prefix.capacity() + path.capacity() + retained.capacity());
                 budget.can_retain_apr_path(retained.capacity())?;
                 reserve(&mut self.apr.entries, budget)?;
                 if head.is_none() {
@@ -258,11 +301,19 @@ impl FileState {
             let id = info.id.to_le_bytes();
             let size = info.resolve_size().to_le_bytes();
             let failed_index = (index as u32).to_le_bytes();
+            let item_result = info.error.map_or(0, Errno::kernel_code).to_le_bytes();
             let mut fields = [GuestWrite {
                 address: 0,
                 bytes: &[],
             }; 3];
             let mut length = 0;
+            if info.error.is_some() && results != 0 {
+                fields[length] = GuestWrite {
+                    address: results + index * 4,
+                    bytes: &item_result,
+                };
+                length += 1;
+            }
             if ids != 0 {
                 fields[length] = GuestWrite {
                     address: ids + index * 4,
@@ -274,6 +325,13 @@ impl FileState {
                 fields[length] = GuestWrite {
                     address: sizes + index * 8,
                     bytes: &size,
+                };
+                length += 1;
+            }
+            if info.error.is_none() && results != 0 {
+                fields[length] = GuestWrite {
+                    address: results + index * 4,
+                    bytes: &item_result,
                 };
                 length += 1;
             }
@@ -296,10 +354,14 @@ impl FileState {
                 self.apr.paths.insert(hash, index);
             }
             if let Some(error) = info.error {
-                return Err(error.into());
+                if results == 0 {
+                    return Err(error.into());
+                }
+            } else {
+                success_count += 1;
             }
         }
-        Ok(0)
+        Ok(if results == 0 { 0 } else { success_count })
     }
 
     /// Read a previously resolved identity through its selected capability.

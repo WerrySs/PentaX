@@ -21,6 +21,7 @@ pub(crate) struct ThreadContext {
     pub(crate) waiting: bool,
     pub(crate) time_wait: Option<crate::time::TimeWait>,
     pub(crate) self_pointer: Option<u64>,
+    pub(crate) detached: bool,
     pub(crate) errno: Option<u64>,
     pub(crate) net_errno: Option<u64>,
     pub(crate) values: Option<Vec<Specific>>,
@@ -43,6 +44,7 @@ impl ThreadContext {
             waiting: false,
             time_wait: None,
             self_pointer: None,
+            detached: false,
             errno: None,
             net_errno: None,
             values: None,
@@ -74,6 +76,27 @@ pub(crate) struct ThreadContexts {
 }
 
 impl ThreadContexts {
+    pub(crate) fn detach(
+        &mut self,
+        pointer: u64,
+        budget: &mut crate::budget::Budget,
+    ) -> Result<bool, Failure> {
+        budget.work(self.entries.len() as u64 + 1)?;
+        let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.self_pointer == Some(pointer))
+        else {
+            return Ok(false);
+        };
+        // The pinned source succeeds when the flag was already set. Cleanup
+        // and the prepared owner's stack/TLS lifetime are unchanged.
+        if !entry.detached {
+            entry.detached = true;
+        }
+        Ok(true)
+    }
+
     pub(crate) fn require_registered(
         &self,
         context: u64,
@@ -129,6 +152,7 @@ impl ThreadContexts {
         )?;
         let mut entry = ThreadContext::new(context, id);
         entry.self_pointer = Some(pointer);
+        entry.detached = attributes.detached;
         entry.priority = attributes.priority;
         entry.policy = attributes.policy;
         entry.affinity = attributes.affinity;

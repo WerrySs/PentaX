@@ -410,6 +410,11 @@ jobs:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
         run: >-
           cargo test --locked -p pentax-worker --test image_probe -- kernel_results::fiber_execution:: kernel_results::fiber:: --test-threads=1
+      - name: Test native pthread detachment and APR import variants
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe -- kernel_results::pthread_detach:: kernel_results::apr_imports:: --test-threads=1
       - name: Test native event-flag parking and complete thread context restoration
         env:
           PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe

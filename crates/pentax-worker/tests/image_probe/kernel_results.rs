@@ -49,6 +49,8 @@ mod agc_register_builders;
 mod font_parser;
 #[path = "ime_callbacks.rs"]
 mod ime_callbacks;
+#[path = "pthread_detach.rs"]
+mod pthread_detach;
 
 #[test]
 fn runtime_stop_identifies_the_failed_admitted_call() {
@@ -174,6 +176,8 @@ mod timestamp_counter;
 mod acm_context;
 #[path = "ampr.rs"]
 mod ampr;
+#[path = "apr_imports.rs"]
+mod apr_imports;
 #[path = "audio_out2.rs"]
 mod audio_out2;
 #[path = "audio_out2_lifecycle.rs"]

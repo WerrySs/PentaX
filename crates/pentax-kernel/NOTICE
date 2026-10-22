@@ -230,6 +230,13 @@ Ported sources:
     IDs, cached misses, directory size and first-error outputs with POSIX errno;
     PentaX substitutes existing read-only mount capabilities and independently
     bounded owner caches for ambient host paths and unbounded global maps
+    APR resolver/query variants additionally adapt ResolvePathsCommon and the
+    ten resolver/stat/size exports in src/libs/libAmpr.cpp, lines 335..407 and
+    481..607 at the pinned revision: literal prefix snapshots, per-item result
+    arrays/success counts, error/store order, cached file sizes and FileStat.
+    PentaX retains checked per-item transactions and capability-relative current
+    metadata instead of callbacks (the source ForEach ABI has no callback),
+    raw pointers or ambient host path lookups. Original fixtures are independent.
     AMPR read-record construction/measurement further retains exact record and
     header effects, queued arguments, gather state and lookup/reset ordering;
     PentaX uses bounded owned queues and ordered transactional overlays rather
@@ -757,3 +764,10 @@ scheduler and authenticated post-cleanup return records. Sole join claims,
 serial/current-thread checks, atomic optional result writes, cycle detection
 and original tests are PentaX changes. Native stacks and context slots remain
 bounded until owner teardown instead of the source's immediate stack freeing.
+PthreadDetach adaptation: src/kernel/pthread.cpp:3495-3507 and POSIX wrapper
+4238-4242, plus src/libs/libKernel.cpp registrations, from KytyPS5-Performance
+revision 209dffe9032d72749257ce18680d506b891284de (GPL-2.0-only; InoriRus).
+PentaX retains null validation, repeated-success flag updates and the separate
+kernel/positive POSIX error domains. Registered-handle checks, Join-claim
+protection, owner-lifetime resource retention and original fixtures are PentaX
+safety policies; no host detach, immediate free or resource reuse is claimed.

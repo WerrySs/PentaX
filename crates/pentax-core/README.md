@@ -893,3 +893,14 @@ owner-lifetime allocation policy until teardown. This deliberate policy does
 not claim the reference implementation's immediate `FreeGuestStack` reclamation
 or authorize reuse of a joined context. Original native fixtures independently
 exercise migrated fibers, a real sleeping-child join and failure after RET.
+
+### Prepared pthread detachment
+
+Detach resolves the selected owner's actual registered handle, including the
+initial thread, before changing retained lifecycle state. Created-thread
+publication, completed Join state and sole Join claims remain authoritative;
+detachment cannot cancel an accepted waiter or manufacture a return. Source
+validation and work admission precede infallible kernel/created-record updates.
+No guest output, errno cell, host pthread or backing mapping is modified by
+detach. Real entry execution and cleanup continue under the existing scheduler,
+with bounded stack/TLS/context retention until owner teardown.

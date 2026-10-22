@@ -661,6 +661,16 @@ pub enum Service {
     PosixPwrite,
     PosixFtruncate,
     PosixMkdir,
+    AprResolveFilepathsToIds,
+    AprGetFileStat,
+    AprGetFileSize,
+    AprResolveFilepathsWithPrefixToIds,
+    AprResolveFilepathsWithPrefixToIdsAndFileSizes,
+    AprResolveFilepathsToIdsForEach,
+    AprResolveFilepathsToIdsAndFileSizesForEach,
+    AprResolveFilepathsWithPrefixToIdsForEach,
+    AprResolveFilepathsWithPrefixToIdsAndFileSizesForEach,
+    PosixPthreadDetach,
 }
 
 /// Pinned identities and their explicit libScePosix spelling aliases.
@@ -1722,6 +1732,18 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < APR_IMPORT_REGISTRATIONS.len() {
+        entries[output] = APR_IMPORT_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
+    index = 0;
+    while index < PTHREAD_DETACH_REGISTRATIONS.len() {
+        entries[output] = PTHREAD_DETACH_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1820,8 +1842,14 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + SAVE_DIRECTORY_REGISTRATIONS.len()
             + SAVE_FILE_REGISTRATIONS.len()
             + FIBER_EXECUTION_REGISTRATIONS.len()
+            + APR_IMPORT_REGISTRATIONS.len()
+            + PTHREAD_DETACH_REGISTRATIONS.len()
     },
 >();
+
+#[path = "catalog/pthread_detach.rs"]
+mod pthread_detach;
+use pthread_detach::PTHREAD_DETACH_REGISTRATIONS;
 
 #[path = "catalog/font.rs"]
 mod font;
@@ -1968,6 +1996,10 @@ const ENTITLEMENT_ACCESS_REGISTRATIONS: [Registration; 7] = {
 mod entitlement_access_tests;
 
 // Kept last in the generated catalogue so existing service markers stay stable.
+#[path = "catalog/apr_imports.rs"]
+mod apr_imports;
+use apr_imports::APR_IMPORT_REGISTRATIONS;
+
 const APR_PATH_REGISTRATIONS: &[Registration] = &[Registration {
     service: Service::AprResolveFilepathsToIdsAndFileSizes,
     nid: "gEpBkcwxUjw",

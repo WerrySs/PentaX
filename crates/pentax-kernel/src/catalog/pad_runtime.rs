@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn pad_runtime_appends_seven_exact_roles_without_old_alias_expansion() {
-        assert_eq!(REGISTRATIONS.len(), 1381);
+        assert_eq!(REGISTRATIONS.len(), 1391);
         assert_eq!(&REGISTRATIONS[1318..1325], &PAD_RUNTIME_REGISTRATIONS);
         assert_eq!(
             REGISTRATIONS[1317].service,

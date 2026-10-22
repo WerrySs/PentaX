@@ -5,6 +5,7 @@
 use super::*;
 use pentax_kernel::{AdmittedPthreadCreate, PthreadCreateAction, ThreadAttributes};
 use pentax_linker::SourceIdentity;
+pub(super) mod detach;
 mod join;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod tests;

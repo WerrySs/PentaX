@@ -44,6 +44,7 @@ mod posix;
 mod pthread_attr;
 mod pthread_condition;
 mod pthread_create;
+mod pthread_detach;
 mod pthread_join;
 mod pthread_keys;
 mod pthread_mutex;
@@ -92,6 +93,7 @@ pub use pentax_config::{UserConfig, UserName};
 pub use pthread_attr::ThreadAttributes;
 pub use pthread_condition::{ConditionWait, ConditionWaitAction};
 pub use pthread_create::{AdmittedPthreadCreate, PthreadCreateAction};
+pub use pthread_detach::pthread_detach_error;
 pub use pthread_mutex::{MutexWait, MutexWaitAction};
 pub use pthread_once::{AdmittedPthreadOnce, PthreadOnceAction};
 pub use pthread_rwlock::{RwlockWait, RwlockWaitAction};
@@ -1362,6 +1364,15 @@ impl Kernel {
             | PosixNanosleep
             | PosixWrite
             | AprResolveFilepathsToIdsAndFileSizes
+            | AprResolveFilepathsToIds
+            | AprGetFileStat
+            | AprGetFileSize
+            | AprResolveFilepathsWithPrefixToIds
+            | AprResolveFilepathsWithPrefixToIdsAndFileSizes
+            | AprResolveFilepathsToIdsForEach
+            | AprResolveFilepathsToIdsAndFileSizesForEach
+            | AprResolveFilepathsWithPrefixToIdsForEach
+            | AprResolveFilepathsWithPrefixToIdsAndFileSizesForEach
             | AprSubmitCommandBufferAndGetResult
             | AprSubmitCommandBuffer
             | AprSubmitCommandBufferAndGetId
@@ -1515,7 +1526,10 @@ impl Kernel {
             | PosixCondWait
             | PthreadJoin
             | PthreadExit
-            | PthreadDetach => Err(Failure::Unsupported("guest-thread execution and lifecycle")),
+            | PthreadDetach
+            | PosixPthreadDetach => {
+                Err(Failure::Unsupported("guest-thread execution and lifecycle"))
+            }
             GetProcParam => guest.process_parameters(),
             Dlsym => {
                 let [handle, name, output, ..] = args.0;
