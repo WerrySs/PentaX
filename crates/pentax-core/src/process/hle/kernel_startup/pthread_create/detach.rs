@@ -32,10 +32,10 @@ impl ThreadRuntime {
         // which has no created-thread record. Numeric unregistered handles
         // cannot detach anything. All fallible work precedes both state writes.
         let value = kernel.complete_pthread_detach(service, args.0[0], guest)?;
-        if value == 0 {
-            if let Some(index) = index {
-                self.records[index].attributes.detached = true;
-            }
+        if value == 0
+            && let Some(index) = index
+        {
+            self.records[index].attributes.detached = true;
         }
         Ok(value)
     }
