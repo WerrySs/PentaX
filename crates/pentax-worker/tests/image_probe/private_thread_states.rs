@@ -255,6 +255,10 @@ fn without_durations(mut fields: HashMap<String, String>) -> HashMap<String, Str
         "sample_plan_ns",
         "sample_dispatch_ns",
         "service_ns",
+        "service_time_top",
+        "service_other_ns",
+        "service_overflow_ns",
+        "service_unattributed_ns",
     ] {
         fields.remove(key);
     }
