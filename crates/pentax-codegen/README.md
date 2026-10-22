@@ -152,13 +152,15 @@ BMI support does not authorize vector state. Native consumers must check actual
 host BMI support before entry; no software BMI fallback is provided here.
 
 `with_native_ymm_registers()` explicitly requests a separate closed profile of
-70 exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
+a closed set of exact register-only VEX forms: VMOVDQA/VMOVDQU in both opcode directions,
 VPAND/VPANDN/VPOR/VPXOR, VPCMPGTQ, and VPACKSSWB/SSDW/USWB/USDW, each with
 128/256-bit vectors, plus VADDPS/PD, VSUBPS/PD and VMULPS/PD at both widths,
 VMOVAPS/UPS/APD/UPD in both opcode directions and VAND/ANDN/OR/XOR PS/PD
-at both widths.
+at both widths. The six approximate reciprocal forms additionally cover
+VRCPPS/VRSQRTPS at 128/256 bits and VRCPSS/VRSQRTSS at 128 bits.
 Every operand must be a same-width XMM0–15 or YMM0–15. This request alone excludes
-memory encodings, GPR transfers, scalar or other floating-point operations,
+memory encodings, GPR transfers, scalar floating-point operations beyond those
+two estimate forms, other floating-point operations,
 vector-state control and EVEX. Existing legacy SSE2 admission is unchanged.
 The request requires declared AVX plus each decoded instruction's exact feature
 requirements, including AVX2 for the 256-bit integer operations. Decoder
@@ -172,6 +174,35 @@ without it, the default mediated path remains in use. Its closed aggregate
 `native_ymm_mode=sse2|avx|avx2` field reports that actual engine mode, not host
 identity or the guest CPUID profile. No guest feature advertisement is changed,
 and no performance gain is claimed without execution measurements.
+
+The approximate reciprocal and reciprocal-square-root families retain actual
+hardware estimate instructions. They are never rewritten to IEEE division or
+square root. The four legacy SSE forms keep their existing native profile;
+native VEX register forms require the same explicit vector-state request,
+declared AVX and independently admitted host/OS vector bridge. The six VEX
+forms' exact 4/16/32-byte memory reads stay on the checked copied-state path, even when other
+native floating-point memory profiles are requested. Packed forms have one
+source; scalar VEX forms merge bits 127:32 from source1 and estimate source2's
+low lane. VEX.128 clears the destination's upper half; VEX.256 replaces all
+eight single-precision lanes. Aliased sources are captured before publication.
+
+The checked platform path applies actual SSE RCPSS/RSQRTSS to copied numeric
+lane bits within the existing host-MXCSR save/install/restore boundary. It keeps
+guest rounding, DAZ, FTZ and sticky status unchanged: these estimate instructions
+raise no SIMD floating-point exceptions and ignore rounding controls. Zero and
+denormal inputs produce signed infinity; tiny reciprocal outputs flush to signed
+zero independently of FTZ. Negative normal reciprocal-square-root inputs produce
+the architectural indefinite result, and NaNs retain the instruction's quieting
+semantics. The documented finite relative-error bound is 1.5*2^-12; estimate
+bits remain implementation dependent rather than a cross-CPU bitwise promise.
+Memory must pass the current owner's complete scalar/vector read before any
+guest CPU result is published, with existing work and vector quotas retained.
+These semantics follow Intel's
+[instruction-set reference](https://cdrdv2.intel.com/v1/dl/getContent/671241),
+Volume2B, RCPPS/RCPSS/RSQRTPS/RSQRTSS. Original fixtures check the closed native
+feature gates, copied-state aliases, exact read extents, exceptional values,
+MXCSR preservation and failures before effects; they do not establish a
+commercial frame or measured speedup.
 
 The thirty-two additional copy/logical forms require only AVX, including their
 256-bit forms. They transfer raw bits: signaling NaNs are neither classified

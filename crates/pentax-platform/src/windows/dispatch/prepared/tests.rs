@@ -6,6 +6,8 @@
 
 #[path = "tests/align_right.rs"]
 mod align_right_tests;
+#[path = "tests/approximate_vectors.rs"]
+mod approximate_vectors;
 #[path = "tests/arithmetic_vectors.rs"]
 mod arithmetic_vectors;
 #[path = "tests/atomics.rs"]

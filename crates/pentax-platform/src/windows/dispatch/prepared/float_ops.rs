@@ -15,6 +15,8 @@ pub(super) enum Operation {
     Min,
     Max,
     Sqrt,
+    Reciprocal,
+    ReciprocalSqrt,
     Convert,
 }
 
@@ -100,7 +102,9 @@ pub(super) fn form(code: Code) -> Option<Form> {
         | VEX_Vdivss_xmm_xmm_xmmm32
         | VEX_Vminss_xmm_xmm_xmmm32
         | VEX_Vmaxss_xmm_xmm_xmmm32
-        | VEX_Vsqrtss_xmm_xmm_xmmm32 => (16, 4, true),
+        | VEX_Vsqrtss_xmm_xmm_xmmm32
+        | VEX_Vrcpss_xmm_xmm_xmmm32
+        | VEX_Vrsqrtss_xmm_xmm_xmmm32 => (16, 4, true),
         VEX_Vaddsd_xmm_xmm_xmmm64
         | VEX_Vsubsd_xmm_xmm_xmmm64
         | VEX_Vmulsd_xmm_xmm_xmmm64
@@ -114,14 +118,18 @@ pub(super) fn form(code: Code) -> Option<Form> {
         | VEX_Vdivps_xmm_xmm_xmmm128
         | VEX_Vminps_xmm_xmm_xmmm128
         | VEX_Vmaxps_xmm_xmm_xmmm128
-        | VEX_Vsqrtps_xmm_xmmm128 => (16, 4, false),
+        | VEX_Vsqrtps_xmm_xmmm128
+        | VEX_Vrcpps_xmm_xmmm128
+        | VEX_Vrsqrtps_xmm_xmmm128 => (16, 4, false),
         VEX_Vaddps_ymm_ymm_ymmm256
         | VEX_Vsubps_ymm_ymm_ymmm256
         | VEX_Vmulps_ymm_ymm_ymmm256
         | VEX_Vdivps_ymm_ymm_ymmm256
         | VEX_Vminps_ymm_ymm_ymmm256
         | VEX_Vmaxps_ymm_ymm_ymmm256
-        | VEX_Vsqrtps_ymm_ymmm256 => (32, 4, false),
+        | VEX_Vsqrtps_ymm_ymmm256
+        | VEX_Vrcpps_ymm_ymmm256
+        | VEX_Vrsqrtps_ymm_ymmm256 => (32, 4, false),
         VEX_Vaddpd_xmm_xmm_xmmm128
         | VEX_Vsubpd_xmm_xmm_xmmm128
         | VEX_Vmulpd_xmm_xmm_xmmm128
@@ -148,6 +156,8 @@ pub(super) fn form(code: Code) -> Option<Form> {
         Mnemonic::Vsqrtss | Mnemonic::Vsqrtsd | Mnemonic::Vsqrtps | Mnemonic::Vsqrtpd => {
             Operation::Sqrt
         }
+        Mnemonic::Vrcpss | Mnemonic::Vrcpps => Operation::Reciprocal,
+        Mnemonic::Vrsqrtss | Mnemonic::Vrsqrtps => Operation::ReciprocalSqrt,
         _ => return None,
     };
     Some(Form {
@@ -214,6 +224,16 @@ pub(super) fn calculate(
         (Operation::Max, true) => arithmetic!("maxsd"),
         (Operation::Sqrt, false) => arithmetic!("sqrtss"),
         (Operation::Sqrt, true) => arithmetic!("sqrtsd"),
+        // RCP/RSQRT are estimates, not DIV/SQRT compositions. The actual SSE
+        // estimate instruction supplies each copied single-precision lane,
+        // including its denormal/NaN/signed-zero semantics and lack of SIMD
+        // exceptions. Scalar merge and VEX upper clearing are handled outside
+        // this closed numeric operation. No double-precision estimate exists.
+        (Operation::Reciprocal, false) => arithmetic!("rcpss"),
+        (Operation::ReciprocalSqrt, false) => arithmetic!("rsqrtss"),
+        (Operation::Reciprocal | Operation::ReciprocalSqrt, true) => {
+            return Err(NativeDispatchError::UnsupportedVectorInstruction);
+        }
         // `double` is the result precision. The other XMM operand holds the
         // copied scalar source; the existing boundary restores host MXCSR.
         (Operation::Convert, false) => arithmetic!("cvtsd2ss"),

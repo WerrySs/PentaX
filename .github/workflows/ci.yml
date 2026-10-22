@@ -281,6 +281,14 @@ jobs:
       - name: Test admitted packed floating-point results and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_packed_float_tests:: -- --test-threads=1
+      - name: Test checked reciprocal estimates, state and memory boundaries
+        run: >-
+          cargo test --locked -p pentax-platform --lib approximate_vectors:: -- --test-threads=1
+      - name: Test original native reciprocal estimate continuations
+        env:
+          PENTAX_TEST_WORKER: ${{ github.workspace }}/target/release/pentax-worker.exe
+        run: >-
+          cargo test --locked -p pentax-worker --test image_probe kernel_results::native_vector_approximations:: -- --test-threads=1
       - name: Test checked packed floating-point memory reads and refusals
         run: >-
           cargo test --locked -p pentax-platform --lib tests::native_packed_float_memory_tests:: -- --test-threads=1

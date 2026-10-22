@@ -1073,7 +1073,13 @@ impl NativeBlockStepper<'_, '_, '_> {
             next.xmm[destination..destination + 16].copy_from_slice(&output[..16]);
             next.ymm_upper[destination..destination + 16].copy_from_slice(&output[16..]);
         } else if let Some(form) = float_ops::form(instruction.code()) {
-            let unary = !form.scalar && form.operation == float_ops::Operation::Sqrt;
+            let unary = !form.scalar
+                && matches!(
+                    form.operation,
+                    float_ops::Operation::Sqrt
+                        | float_ops::Operation::Reciprocal
+                        | float_ops::Operation::ReciprocalSqrt
+                );
             let operand = if unary { 1 } else { 2 };
             if instruction.op_count() != operand + 1 {
                 return Err(NativeDispatchError::UnsupportedVectorInstruction);

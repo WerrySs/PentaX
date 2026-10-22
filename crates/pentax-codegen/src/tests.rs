@@ -2,6 +2,7 @@
 
 mod affine_loop_trace;
 mod align_right;
+mod approximations;
 mod bit_strings;
 mod bmi;
 mod cpu_identification;

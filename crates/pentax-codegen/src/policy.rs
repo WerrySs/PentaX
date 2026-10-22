@@ -947,8 +947,8 @@ fn native_fma_registers(instruction: &Instruction) -> bool {
         })
 }
 
-/// Seventy-one exact decoded forms, all register-only. The twelve packed
-/// ADD/SUB/MUL floating-point forms require the runtime's checked masked MXCSR
+/// Closed exact decoded forms, all register-only. The packed ADD/SUB/MUL
+/// and reciprocal-estimate forms require the runtime's checked masked MXCSR
 /// profile, just like already admitted legacy SSE arithmetic. W/L,
 /// mandatory prefixes and reserved fields remain the pinned decoder's contract.
 /// Memory encodings sharing a Code are explicitly excluded below.
@@ -980,7 +980,9 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vmovapd_xmm_xmmm128
         | VEX_Vmovapd_xmmm128_xmm
         | VEX_Vmovupd_xmm_xmmm128
-        | VEX_Vmovupd_xmmm128_xmm => (16, 2),
+        | VEX_Vmovupd_xmmm128_xmm
+        | VEX_Vrcpps_xmm_xmmm128
+        | VEX_Vrsqrtps_xmm_xmmm128 => (16, 2),
         VEX_Vmovdqa_ymm_ymmm256
         | VEX_Vmovdqa_ymmm256_ymm
         | VEX_Vmovdqu_ymm_ymmm256
@@ -992,7 +994,9 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vmovapd_ymm_ymmm256
         | VEX_Vmovapd_ymmm256_ymm
         | VEX_Vmovupd_ymm_ymmm256
-        | VEX_Vmovupd_ymmm256_ymm => (32, 2),
+        | VEX_Vmovupd_ymmm256_ymm
+        | VEX_Vrcpps_ymm_ymmm256
+        | VEX_Vrsqrtps_ymm_ymmm256 => (32, 2),
         VEX_Vpand_xmm_xmm_xmmm128
         | VEX_Vpandn_xmm_xmm_xmmm128
         | VEX_Vpor_xmm_xmm_xmmm128
@@ -1015,7 +1019,9 @@ fn native_ymm_registers(instruction: &Instruction) -> bool {
         | VEX_Vorps_xmm_xmm_xmmm128
         | VEX_Vorpd_xmm_xmm_xmmm128
         | VEX_Vxorps_xmm_xmm_xmmm128
-        | VEX_Vxorpd_xmm_xmm_xmmm128 => (16, 3),
+        | VEX_Vxorpd_xmm_xmm_xmmm128
+        | VEX_Vrcpss_xmm_xmm_xmmm32
+        | VEX_Vrsqrtss_xmm_xmm_xmmm32 => (16, 3),
         VEX_Vpand_ymm_ymm_ymmm256
         | VEX_Vpandn_ymm_ymm_ymmm256
         | VEX_Vpor_ymm_ymm_ymmm256

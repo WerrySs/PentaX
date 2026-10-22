@@ -122,6 +122,8 @@ mod native_scalar_float;
 mod native_scalar_fma;
 #[path = "native_streaming_stores.rs"]
 mod native_streaming_stores;
+#[path = "native_vector_approximations.rs"]
+mod native_vector_approximations;
 #[path = "native_vector_memory.rs"]
 mod native_vector_memory;
 #[path = "native_vector_register_bits.rs"]
