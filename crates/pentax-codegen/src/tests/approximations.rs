@@ -18,7 +18,7 @@ fn encoding(opcode: u8, wide: bool, scalar: bool, memory: bool) -> Vec<u8> {
         if scalar {
             0x12
         } else {
-            0x78 | u8::from(wide) * 4
+            0x78 | (u8::from(wide) * 4)
         },
         opcode,
         if memory { 0x38 } else { 0xfe },

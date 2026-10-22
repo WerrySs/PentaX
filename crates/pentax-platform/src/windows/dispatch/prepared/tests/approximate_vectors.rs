@@ -80,7 +80,7 @@ fn encoding(
         if scalar {
             ((!merge & 15) << 3) | 2
         } else {
-            0x78 | u8::from(wide) * 4
+            0x78 | (u8::from(wide) * 4)
         },
         opcode,
         ((destination & 7) << 3) | if memory { 0 } else { 0xc0 | (source & 7) },
