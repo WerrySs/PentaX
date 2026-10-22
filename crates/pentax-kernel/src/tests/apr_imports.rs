@@ -293,10 +293,21 @@ fn apr_identity_queries_use_cached_size_current_stat_layout_and_source_error_ord
         assert_eq!(u32_at(&guest, errno), expected);
     }
     let mut other = owner(&file, Default::default());
+    // Each owner has its own guest address space, including its errno mapping.
+    let mut other_guest = TestGuest::new();
+    other_guest.put(0x300, &85_u64.to_le_bytes());
     assert_eq!(
-        invoke(&mut other, &mut guest, Service::AprGetFileSize, &[1, SIZES]),
+        invoke(
+            &mut other,
+            &mut other_guest,
+            Service::AprGetFileSize,
+            &[1, SIZES]
+        ),
         Ok(u64::from(u32::MAX))
     );
+    assert_eq!(other_guest.u64(0x300), 85);
+    let other_errno = errno(&mut other, &mut other_guest);
+    assert_eq!(u32_at(&other_guest, other_errno), 2);
     guest.regions[0].protection = 1;
     assert_eq!(
         invoke(&mut kernel, &mut guest, Service::AprGetFileStat, &[1, STAT]),
@@ -353,6 +364,7 @@ fn apr_prefix_is_literal_snapshot_bounded_and_refused_items_do_not_publish_ids()
         &file,
         Limits {
             max_scratch_bytes: 1024,
+            max_io_bytes: 1024,
             ..Default::default()
         },
     );
@@ -444,6 +456,8 @@ fn apr_late_foreach_output_refusal_keeps_actual_prefix_without_caching_failed_it
     paths(&mut guest, &["/original/data.txt", "/original/missing"]);
     guest.put(0x200, &[0x55; 8]);
     let results = ARG + PAGE - 4;
+    // This original Guest adapter reports refused output transactions as
+    // WriteDenied, including an unmapped later store; no current-item effects.
     assert_eq!(
         invoke(
             &mut kernel,
@@ -451,7 +465,7 @@ fn apr_late_foreach_output_refusal_keeps_actual_prefix_without_caching_failed_it
             Service::AprResolveFilepathsToIdsForEach,
             &[LIST, 2, IDS, results]
         ),
-        Err(Failure::Guest(GuestError::Unmapped))
+        Err(Failure::Guest(GuestError::WriteDenied))
     );
     assert_eq!(u32_at(&guest, IDS), 1);
     assert_eq!(u32_at(&guest, IDS + 4), 0x5555_5555);
