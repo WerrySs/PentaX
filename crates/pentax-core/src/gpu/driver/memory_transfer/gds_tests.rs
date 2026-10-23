@@ -263,8 +263,14 @@ fn retained_gds_tightens_next_plan_before_allocation_without_double_charging_sta
             let result = submit(&mut driver, &mut memory, base, 0x20, &stream);
             if below {
                 if with_staging {
-                    // The plan fits but its real four-byte staging does not.
-                    assert_eq!(result, Err(Failure::Limit));
+                    // Plan admission checks its four-byte staging footprint
+                    // before the runtime can allocate or publish it.
+                    assert_eq!(
+                        result,
+                        Err(Failure::Preparation(compute::Error::Limit(
+                            "transfer staging bytes"
+                        )))
+                    );
                 } else {
                     // Even a no-output Drain must admit its complete plan.
                     assert!(
