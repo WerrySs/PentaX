@@ -334,8 +334,41 @@ fn graphics_wait_guards_live_tls_private_executor_arguments_site_and_generation_
     limits.startup.kernel.max_thread_contexts = 2;
     with_native_image_session(&[&input], &limits, |session, layout| {
         let main = session.prepare_main_thread().unwrap();
-        let child = session.prepare_thread_context(1).unwrap();
+        // NativeImage supplies one real initial TLS instance. Admit the second
+        // through the normal pthread constructor; a context quota is not storage.
         let scratch = layout.entry.stack.address + 0x2000;
+        let thread_source = session
+            .prepare_native_source(&BlockLimits::default())
+            .unwrap();
+        let marker = *session
+            .plan
+            .factory
+            .markers()
+            .iter()
+            .find(|marker| marker.registration.service == Service::PthreadCreate)
+            .unwrap();
+        let pc = session.plan.entry(marker) + 5;
+        let NativeServiceAction::CreateThread(pending) = session
+            .service_action(
+                &thread_source,
+                NativeServiceRequest {
+                    owner_id: session.owner_id(),
+                    syscall_pc: pc,
+                    next_pc: pc + 2,
+                    service_id: marker.service_id.into(),
+                    args: [scratch + 0x700, 0, layout.entry.entry, 0, 0, 0],
+                    vector_args: None,
+                    stack_pointer: None,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("actual pthread creation admission missing");
+        };
+        let child = session
+            .prepare_created_thread(&thread_source, pending)
+            .unwrap();
+        assert_eq!(session.tls().instances().len(), 2);
         let base = setup(session, scratch);
         let args = stream(session, base);
         let request = request(session, driver::Function::CommandBuffer, args, None);
@@ -385,7 +418,7 @@ fn graphics_wait_guards_live_tls_private_executor_arguments_site_and_generation_
                 .advance_thread_wait(&pending, wrong_token, &proof, &wrong_engine)
                 .is_err()
         );
-        session.activate_thread_context(&child).unwrap();
+        session.activate_thread_context(child.thread()).unwrap();
         assert!(!session.thread_wait_ready(&pending).unwrap()); // A different selected TLS may observe only.
         assert!(matches!(
             session.advance_thread_wait(&pending, token, &proof, &engine),
