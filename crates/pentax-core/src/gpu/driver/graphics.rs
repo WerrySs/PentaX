@@ -737,6 +737,9 @@ impl Driver {
     }
 }
 
+// Keep the fixed fenced counter snapshot inline. Allocating after GPU effects
+// would add a fallible step while retiring the owned current draw receipt.
+#[allow(clippy::large_enum_variant)]
 enum Cursor<'borrow, 'owner> {
     Paused(&'borrow mut PausedNativeMemory<'owner>),
     Draw(super::super::graphics::CurrentDraw<'borrow, 'owner>),
