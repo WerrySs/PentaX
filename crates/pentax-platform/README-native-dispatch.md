@@ -664,3 +664,24 @@ migrate between admitted pthreads. Suspended HLE callbacks refuse thread/TLS
 migration before exchange, preserving their sealed tokens. Live parked contexts
 share the existing finite thread-context cap; dropping an invalid generation
 releases its slot. These operations execute no guest code.
+
+### Mediated F16C conversions
+
+The four VEX128/256 `VCVTPS2PH` and `VCVTPH2PS` forms operate on copied
+integer bits under the existing all-masked guest MXCSR profile. They use no
+host F16C/AVX instruction, floating intermediate, new native feature authority
+or host control change. PS-to-half selects the immediate rounding direction
+or MXCSR.RC, honors DAZ, ignores FTZ and retains signed zero and quieted NaN
+payloads. A separate unbounded-exponent precision probe determines tininess
+without double-rounding the actual output. Half-to-PS exactly expands finite
+values, including subnormals regardless of DAZ, and quiets signaling NaNs.
+Active lane exception flags accumulate in guest MXCSR; unmasked profiles remain
+explicitly refused by the existing state/control policy.
+
+Narrow register results clear the rest of XMM and YMM; VEX128 expansion clears
+YMM's upper half. Aliased inputs are captured before destination publication.
+Memory operands access exactly eight or sixteen bytes, permit unaligned
+addresses and retain live owner/rights and whole-span failure checks. A failed
+store publishes neither a partial result nor changed CPU/control state. Existing
+source, prefix, work, counter and next-target admission remains in force.
+These bounded original consumers do not establish game rendering or playability.

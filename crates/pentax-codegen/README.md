@@ -626,3 +626,9 @@ prove current source, owner, CPU/vector mode, stack, both targets, cache bytes a
 all quotas before entry, and bound the logical span at every scheduling, frame,
 progress, sample and observation deadline. This is not general block chaining or
 an asserted improvement in commercial game performance.
+
+The four exact VEX F16C conversion forms retain their decoded operand widths,
+register/memory roles and immediate in a mediated exit. They acquire no native
+emission authority from AVX or F16C declarations. The platform resolves them
+through bounded integer-only conversion over owned guest state; no host F16C
+instruction, guest feature advertisement or native memory bypass is introduced.

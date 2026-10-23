@@ -7,6 +7,7 @@ mod bit_strings;
 mod bmi;
 mod cpu_identification;
 mod element_permutations;
+mod f16c;
 mod fixture;
 mod immediate_permutations;
 mod lane_extract;

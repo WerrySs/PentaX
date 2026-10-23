@@ -45,6 +45,8 @@ mod affine_loop_trace_tests;
 mod cache_causality_tests;
 #[path = "tests/cpu_identification.rs"]
 mod cpu_identification_tests;
+#[path = "tests/f16c.rs"]
+mod f16c_tests;
 #[path = "tests/fibers.rs"]
 mod fibers;
 #[path = "tests/float_integer_convert.rs"]

@@ -1608,3 +1608,6 @@ mod agc_memory_sync;
 
 #[path = "image_probe/agc_markers.rs"]
 mod agc_markers;
+
+#[path = "image_probe/f16c_conversions.rs"]
+mod f16c_conversions;

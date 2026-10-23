@@ -342,6 +342,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || integer_conversion(instruction.code()).is_some()
         || float_integer_conversion(instruction.code()).is_some()
         || packed_convert::form(instruction.code()).is_some()
+        || f16c::supported(instruction.code())
         || precision_conversion(instruction.code()).is_some()
         || float_ops::form(instruction.code()).is_some()
         || rounding::form(instruction.code()).is_some()
@@ -656,7 +657,14 @@ impl NativeBlockStepper<'_, '_, '_> {
             .ok_or(NativeDispatchError::Budget("vector operations"))?;
         let mut next = self.machine.state;
         let mut transferred = 0;
-        if x87_control::supported(instruction.code()) {
+        if f16c::supported(instruction.code()) {
+            transferred = f16c::execute(
+                instruction,
+                &mut next,
+                memory,
+                self.machine.usage.vector_bytes,
+            )?;
+        } else if x87_control::supported(instruction.code()) {
             transferred = x87_control::execute(
                 instruction,
                 &mut next,
@@ -2183,7 +2191,7 @@ impl NativeBlockStepper<'_, '_, '_> {
     }
 }
 
-fn vector_register(
+pub(super) fn vector_register(
     instruction: &Instruction,
     operand: u32,
     size: usize,
@@ -2213,7 +2221,7 @@ fn integer_slot(
     gpr_slot(register.full_register()).ok_or(NativeDispatchError::UnsupportedVectorInstruction)
 }
 
-fn register_slot(
+pub(super) fn register_slot(
     instruction: &Instruction,
     operand: u32,
     size: usize,

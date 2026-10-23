@@ -455,6 +455,8 @@ mod register_trace;
 pub use libc_builtin::NativeLibcBuiltin;
 #[path = "prepared/cpu_identification.rs"]
 mod cpu_identification;
+#[path = "prepared/f16c.rs"]
+mod f16c;
 #[path = "prepared/fibers.rs"]
 mod fibers;
 #[path = "prepared/float_ops.rs"]

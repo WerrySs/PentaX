@@ -52,7 +52,7 @@ impl PausedNativeMemory<'_> {
             .filter(|v| *v <= maximum)
             .ok_or(NativeMemoryError::BudgetExceeded)?;
         self.owner.check(left.address, left.size, None)?;
-        self.owner.check(right.address, right.size, None)?;
+        self.preflight_alias_rhs(right, rp)?;
         // The full mapped checks and original conservative charge precede every
         // shortcut. Any virtual overlap necessarily shares actual backing bytes.
         if left.address < right_end && right.address < left_end {
@@ -93,6 +93,31 @@ impl PausedNativeMemory<'_> {
         }
         Ok(work)
     }
+    fn preflight_alias_rhs(&self, span: NativeRange, pages: u64) -> Result<(), NativeMemoryError> {
+        // The caller already checked both extents and the ORIGINAL complete
+        // work budget, then the complete current LEFT mapping in that order.
+        // Every hit still checks liveness; only exact positive full-span mapped
+        // coverage survives, and every mapping/rights/revoke attempt clears it.
+        self.owner.live()?;
+        let proofs = self.owner.alias_rhs_preflight.get();
+        if pages >= 2 && proofs.contains(&Some(span)) {
+            return Ok(());
+        }
+        #[cfg(test)]
+        self.owner
+            .alias_rhs_preflight_scans
+            .set(self.owner.alias_rhs_preflight_scans.get().saturating_add(1));
+        self.owner.check(span.address, span.size, None)?;
+        if pages >= 2 {
+            self.owner.alias_rhs_preflight.set([Some(span), proofs[0]]);
+        }
+        // At most two exact-key visits are added only when RHS has >=2pages.
+        // Existing linear allowance has at least that slack even after BOTH
+        // full checks, failed private classification and Cartesian fallback:
+        // 3*(lp+rp)-(2*lp+rp+min(lp,rp)) >= 2. No work is refunded or added.
+        Ok(())
+    }
+
     /// Check for repeated physical bytes through self-aliasing. No bytes change
     /// and no capability escapes. The returned charge also admits one same-size
     /// None-effect output transaction on this exclusively held owner.
@@ -538,3 +563,6 @@ mod tests;
 
 #[cfg(test)]
 mod private_disjoint_tests;
+
+#[cfg(test)]
+mod rhs_mapped_tests;

@@ -56,6 +56,11 @@ pub struct NativeAddressSpace {
     // These owner-local proofs contain no payload or execution authority and
     // share the existing before-mutation invalidation point with stack proofs.
     provider_preflight: Cell<[Option<NativeRange>; 2]>,
+    // Two exact positive MAPPED-only RHS spans for physical disjointness.
+    // No rights, payload, source identity or alias result is retained. One-page
+    // spans are checked normally so transient return/data slots cannot evict
+    // the repeated large protected code intervals. Mutation clears both first.
+    alias_rhs_preflight: Cell<[Option<NativeRange>; 2]>,
     names: Vec<NameEntry>,
     name_work: u64,
     next_mapping_lifetime: u64,
@@ -84,6 +89,8 @@ pub struct NativeAddressSpace {
     stack_preflight_scans: Cell<u64>,
     #[cfg(test)]
     provider_preflight_scans: Cell<[u64; 2]>,
+    #[cfg(test)]
+    alias_rhs_preflight_scans: Cell<u64>,
 }
 
 impl NativeAddressSpace {
@@ -104,6 +111,7 @@ impl NativeAddressSpace {
             pages: Vec::new(),
             stack_preflight: Cell::new(None),
             provider_preflight: Cell::new([None; 2]),
+            alias_rhs_preflight: Cell::new([None; 2]),
             names: Vec::new(),
             name_work: 0,
             next_mapping_lifetime: 1,
@@ -132,6 +140,8 @@ impl NativeAddressSpace {
             stack_preflight_scans: Cell::new(0),
             #[cfg(test)]
             provider_preflight_scans: Cell::new([0; 2]),
+            #[cfg(test)]
+            alias_rhs_preflight_scans: Cell::new(0),
         })
     }
     /// Stable identity of this exact owner, including after moves. This getter
@@ -291,6 +301,7 @@ impl NativeAddressSpace {
         // Ordinary checked CPU/GPU payload writes do not change these metadata.
         self.stack_preflight.set(None);
         self.provider_preflight.set([None; 2]);
+        self.alias_rhs_preflight.set([None; 2]);
     }
     fn operation(&mut self) -> Result<(), NativeMemoryError> {
         #[cfg(test)]

@@ -32,3 +32,13 @@ checked guest stack/source selection, atomic ABI publication, per-thread roots,
 bounded migration policy and original fixtures. Full CPU/control-state transport
 and lazy bounded contextless stacks are PentaX policies, not claims that the
 reference assembly saves floating/vector state or implements these safety checks.
+
+The F16C mediation is original integer-only Rust code derived from public
+architecture descriptions, without imported emulator implementation or SDK
+material. Semantics references: Intel SDM Volume 2C, VCVTPS2PH/VCVTPH2PS;
+AMD APM 26568 revision 3.26, pages 850-853; AMD APM 24592 revision 3.24,
+pages 221-223 (Result_round tininess and masked exceptions).
+https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2c-manual.pdf
+https://docs.amd.com/v/u/en-US/26568_3.26_APM_Vol4
+https://kib.kiev.ua/x86docs/AMD/AMD64/24592_APM_v1-r3.24.pdf
+This addition retains GPL-2.0-only and the existing upstream/dependency notices.
