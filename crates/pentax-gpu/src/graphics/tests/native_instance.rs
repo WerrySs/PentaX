@@ -50,7 +50,10 @@ impl Memory for NativeSource {
     }
 }
 fn native_draw(memory: &NativeSource) -> Draw {
-    let mut words = commands(&[(RegisterSpace::Sh, 0x8b, 0x0003_0002)]);
+    let mut words = commands(&[
+        (RegisterSpace::Sh, 0x8b, 0x0003_0002),
+        (RegisterSpace::Uconfig, 0x24b, 0),
+    ]);
     words.truncate(words.len() - 3);
     words.extend([
         0xc000_2a00,
