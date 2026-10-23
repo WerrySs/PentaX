@@ -425,3 +425,5 @@ mod primitive;
 mod transfers;
 
 mod draw_indirect;
+
+mod native_instance;

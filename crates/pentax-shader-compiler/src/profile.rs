@@ -195,6 +195,7 @@ pub enum StageDescription {
 #[derive(Clone, Debug)]
 pub struct Profile {
     desc: StageDescription,
+    vertex_instance_contract: crate::VertexInstanceContract,
 }
 
 pub(crate) const MAX_BUFFERS: usize = 64;
@@ -309,9 +310,26 @@ impl Profile {
                 }
             }
         }
-        Ok(Self { desc })
+        Ok(Self {
+            desc,
+            vertex_instance_contract: crate::VertexInstanceContract::Dynamic,
+        })
     }
 
+    // Only the dedicated analyzer issues this private context. Generic public
+    // Profile::new/compile/analyze have no caller boolean or context setter.
+    pub(crate) fn native_indirect_vertex(mut self) -> Result<Self, ProfileError> {
+        if !matches!(&self.desc, StageDescription::Vertex(vertex) if vertex.start_instance_sgpr.is_none())
+        {
+            return Err(ProfileError::NativeIndirectInstanceContract);
+        }
+        self.vertex_instance_contract =
+            crate::VertexInstanceContract::NativeIndirectFirstInstanceZero;
+        Ok(self)
+    }
+    pub(crate) fn vertex_instance_contract(&self) -> crate::VertexInstanceContract {
+        self.vertex_instance_contract
+    }
     pub fn stage(&self) -> ShaderStage {
         match self.desc {
             StageDescription::Vertex(_) => ShaderStage::Vertex,
@@ -334,7 +352,10 @@ impl Profile {
             StageDescription::Compute(c) => &mut c.common,
         };
         common.buffers = buffers;
-        Self::new(self.desc)
+        let context = self.vertex_instance_contract;
+        let mut result = Self::new(self.desc)?;
+        result.vertex_instance_contract = context;
+        Ok(result)
     }
 
     pub fn common(&self) -> &CommonDescription {

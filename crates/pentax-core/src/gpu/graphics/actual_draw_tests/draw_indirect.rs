@@ -383,3 +383,163 @@ fn actual_indirect_native_shader_consumes_signed_base_first_instance_and_live_fi
         "agc_draw_index_indirect_gpu_available=true agc_draw_index_indirect_gpu_draws=1 agc_draw_index_indirect_gpu_instances=2"
     );
 }
+
+#[test]
+#[ignore = "requires a local Vulkan device and an outer owning timeout gate"]
+fn actual_indirect_native_v8_instances_consume_relative_ids_and_logical_first_instance_once() {
+    use pentax_shader_compiler::{InputInterface, VertexInstanceContract};
+
+    let (mut owner, base) = owner();
+    let mut memory = owner.pause().unwrap();
+    // Use the actual native fetch convention: indices3,4,5 plus signed SGPR0=-3
+    // select logical vertices0,1,2. Vulkan must not add that offset a second time.
+    let mut vertex = vec![binary(0x25, 5, 0, 5)];
+    vertex.extend(
+        vertex_shader()
+            .into_iter()
+            .filter(|word| *word != binary(3, 0, 0, 0)),
+    );
+    vertex.truncate(vertex.len() - 3); // Replace only final export/END.
+    vertex.extend([
+        binary(8, 0, 240, 0), // x *= .5: each triangle is16 pixels wide.
+        binary(8, 1, 240, 1), // y *= .5: each triangle is16 pixels high.
+        binary(3, 0, 241, 0), // x -= .5.
+        binary(3, 1, 241, 1), // y -= .5.
+        unary(6, 6, 1),       // Logical firstInstance SGPR1 -> f32.
+        binary(8, 6, 255, 6),
+        0.125_f32.to_bits(),
+        binary(3, 0, 262, 0), // x += firstInstance*.125.
+        unary(6, 7, 264),     // Actual live relative-instance v8 -> f32.
+        binary(3, 1, 263, 1), // y += relative instance0/1.
+    ]);
+    vertex.extend(export(12, [0, 1, 2, 3]));
+    vertex.push(0xbf81_0000);
+    memory.write(base + 0x4000, &bytes(&vertex)).unwrap();
+
+    let args = base + 0x9000;
+    let indices = [0xffffu16, 3, 4, 5]
+        .into_iter()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let arguments = bytes(&[9, 2, 1, (-3i32) as u32, 5]);
+    memory.write(base + 0x8000, &indices).unwrap();
+    memory.write(args, &arguments).unwrap();
+    memory.write(base + 0x10000 - 16, &[0x9b; 16]).unwrap();
+    memory
+        .write(base + 0x10000 + TARGET_BYTES as u64, &[0xe7; 16])
+        .unwrap();
+    let draw_words = stream(&mut memory, base, args);
+    {
+        // This is a genuine compile from the same sealed draw, current guest
+        // shader and arguments used below. No context/feature setter or host
+        // SPIR-V module is substituted. The driver compiles through this same
+        // preparation path again at its actual ordered execution turn.
+        let draw = resolve(&memory, base, &draw_words);
+        let prepared = pentax_gpu::graphics::prepare_draw(
+            &draw,
+            &crate::gpu::Memory(&memory),
+            &Default::default(),
+        )
+        .unwrap();
+        let manifest = prepared.vertex().manifest();
+        assert_eq!(
+            manifest.vertex_instance_contract(),
+            VertexInstanceContract::NativeIndirectFirstInstanceZero,
+        );
+        assert!(manifest.inputs().contains(&InputInterface::InstanceIndex));
+        assert!(!manifest.inputs().contains(&InputInterface::BaseInstance));
+        assert!(!manifest.required_features().draw_parameters());
+        assert_eq!(prepared.validate_native_instance_contract(), Ok(()));
+        assert_eq!(
+            (prepared.vertex_offset(), prepared.first_instance()),
+            (0, 0)
+        );
+        assert_eq!((prepared.vertex_count(), prepared.instance_count()), (3, 2));
+        let offsets = prepared.native_indirect_offsets().unwrap();
+        assert_eq!(
+            (
+                offsets.base_vertex(),
+                offsets.first_instance(),
+                offsets.first_index()
+            ),
+            (-3, 5, 1),
+        );
+        assert_eq!(prepared.indices().unwrap().bytes(), &[3, 0, 4, 0, 5, 0]);
+        let layout = manifest.push_data().unwrap();
+        for (register, expected) in [(0, (-3i32) as u32), (1, 5)] {
+            let index = layout
+                .user_sgprs
+                .iter()
+                .position(|found| *found == register)
+                .unwrap();
+            assert_eq!(
+                &prepared.vertex_push_data()[index * 4..index * 4 + 4],
+                &expected.to_le_bytes(),
+            );
+        }
+    }
+    assert_eq!(
+        read(&memory, base + 0x10000, TARGET_BYTES),
+        SENTINEL.repeat(WIDTH * HEIGHT),
+    );
+    // Reset the argument bytes before submission. Only the real earlier
+    // WRITE_DATA action supplies the subsequent live20-byte indirect read.
+    memory.write(args, &[0; 20]).unwrap();
+    let mut words = draw_words;
+    let indirect = words.len() - 5;
+    words.splice(
+        indirect..indirect,
+        [
+            0xc007_3700,
+            0x100,
+            args as u32,
+            (args >> 32) as u32,
+            9,
+            2,
+            1,
+            (-3i32) as u32,
+            5,
+        ],
+    );
+    memory.write(base + 0x1000, &bytes(&words)).unwrap();
+    memory
+        .write(base + 0x20, &(base + 0x1000).to_le_bytes())
+        .unwrap();
+    memory
+        .write(base + 0x28, &(words.len() as u32).to_le_bytes())
+        .unwrap();
+    memory.write(base + 4, &0u32.to_le_bytes()).unwrap();
+    let mut driver = Driver::new(Default::default());
+    assert_eq!(
+        driver.submit(
+            &mut memory,
+            Function::CommandBuffer,
+            [base, base + 0x20, 0, 0, 0, 0],
+        ),
+        Ok(0),
+    );
+    assert_eq!(driver.usage().draws, 1);
+    assert_eq!(driver.usage().vertices, 6);
+    assert_eq!(driver.usage().memory_commands, 1);
+    assert_eq!(driver.usage().written_bytes, TARGET_BYTES as u64 + 20);
+    let actual = read(&memory, base + 0x10000, TARGET_BYTES);
+    // NDC x[-.125,.375] maps to pixels28..44 after logical SGPR1=5.
+    // Relative v8=0/1 gives y8..24 and40..56. These interior points are
+    // separated by an untouched gap; neither duplicated instance0 nor use of
+    // the logical firstInstance5 as the instance ID can satisfy both.
+    assert_eq!(pixel(&actual, 31, 14), RED);
+    assert_eq!(pixel(&actual, 31, 46), RED);
+    for (x, y) in [(31, 28), (31, 36), (24, 14), (24, 46), (48, 14), (60, 60)] {
+        assert_eq!(pixel(&actual, x, y), SENTINEL);
+    }
+    assert_eq!(read(&memory, base + 0x10000 - 16, 16), [0x9b; 16]);
+    assert_eq!(
+        read(&memory, base + 0x10000 + TARGET_BYTES as u64, 16),
+        [0xe7; 16],
+    );
+    assert_eq!(read(&memory, base + 0x8000, indices.len()), indices);
+    assert_eq!(read(&memory, args, 20), arguments);
+    println!(
+        "agc_native_instance_gpu_available=true agc_native_instance_gpu_draws=1 agc_native_instance_gpu_instances=2"
+    );
+}

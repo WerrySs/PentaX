@@ -33,7 +33,7 @@ mod translate;
 #[cfg(test)]
 mod tests;
 
-pub use analysis::{BufferRequirement, ShaderAnalysis, analyze};
+pub use analysis::{BufferRequirement, ShaderAnalysis, analyze, analyze_native_indirect_vertex};
 pub use budget::{LimitKind, Limits};
 pub use cfg::Cfg;
 pub use error::*;
@@ -228,6 +228,7 @@ fn manifest_of(
         budget.push(&mut outputs, entry, 128, LimitKind::SourceTable)?;
     }
     Ok(Manifest {
+        vertex_instance_contract: profile.vertex_instance_contract(),
         required_features,
         stage,
         push_data,

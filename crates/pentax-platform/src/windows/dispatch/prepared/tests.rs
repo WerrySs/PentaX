@@ -131,6 +131,8 @@ mod segments_integer;
 mod shift_vectors;
 #[path = "tests/shuffle_vectors.rs"]
 mod shuffle_vectors;
+#[path = "tests/sse4a_bitfields.rs"]
+mod sse4a_bitfields_tests;
 #[path = "tests/streaming_loads.rs"]
 mod streaming_loads;
 #[path = "tests/strings.rs"]

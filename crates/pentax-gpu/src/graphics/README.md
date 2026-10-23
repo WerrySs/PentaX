@@ -468,7 +468,8 @@ requires for native fetches. First index changes the guest index span once;
 the uploaded buffer starts at that span, so Vulkan firstIndex is0. Raw logical
 offsets remain attached to the sealed draw/prepared product for original
 consumers. Embedded fetch rewriting, destinations beyond the existing vertex
-user-SGPR bank, index8 and relative-instance shaders needing DrawParameters stay
+user-SGPR bank and index8 stay typed unsupported. Relative-instance shaders
+requiring DrawParameters outside the explicit native-indirect context remain
 typed unsupported. No device feature or direct-draw behavior is promoted.
 
 Static ordered admission reserves every potential action and fixed live-read/
@@ -478,3 +479,12 @@ real SGPR/instance state and consumes prior draw eligibility. Late failures reta
 actual earlier effects and refuse replay. Arguments may be produced by earlier
 permitted writes; they are not globally mislabeled as immutable command bytes.
 Current target/argument physical aliases are explicitly refused before GPU work.
+The follow-on native indirect instance context selects the compiler's dedicated
+vertex analysis only from a sealed live indexed-indirect draw. It specializes
+BaseInstance0 before actual emission, so native v8 can consume relative instance
+IDs without declaring DrawParameters. Logical firstInstance remains the actual
+source SGPR patch. Generic/direct shader translation and required-feature
+refusals remain unchanged. The completed prepared product and Vulkan backend
+both reject a mismatch between compiler context and draw mode before device
+work; the backend uses the same firstInstance0 value it validated. This enables
+no embedded-fetch rewriting or general feature suppression.

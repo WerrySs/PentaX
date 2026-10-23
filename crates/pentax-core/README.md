@@ -1033,6 +1033,7 @@ Actual count/clamp, instance count, first index and ordered user-SGPR patches
 are retained, including zero-work state changes. Native shaders consume signed
 base-vertex and first-instance values in those patches; Vulkan offsets remain
 zero by the proven native-fetch convention. This does not enable embedded-fetch
-rewriting, unsupported SGPR destinations, index8, or DrawParameters-dependent
-relative-instance shaders. Original ordinary and separately ignored physical
+rewriting, unsupported SGPR destinations or index8. Relative-instance shaders
+use a sealed native-indirect compiler context; generic/direct DrawParameters
+requirements and refusals remain unchanged. Original ordinary and separately ignored physical
 GPU consumers are source fixtures; their presence is not a rendering result.

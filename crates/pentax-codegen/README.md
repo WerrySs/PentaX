@@ -1,5 +1,15 @@
 # PentaX code generation
 
+The exact register-only SSE4a EXTRQ and INSERTQ immediate/register forms remain
+`InstructionClass` mediated exits. Declaring SSE4A or requesting other native
+vector profiles never promotes them to host instruction emission. The decoded
+XMM operands and both immediate bytes remain available to the checked runtime,
+which implements their bitfields with integer software and refuses undefined
+field ranges. Original planner fixtures cover all four forms, high registers,
+aliases and exact control-byte retention with and without declared SSE4A.
+See [AMD APM 26568 rev3.26](https://docs.amd.com/v/u/en-US/26568_3.26_APM_Vol4),
+EXTRQ pages 172-173 and INSERTQ pages 195-196.
+
 An explicit, default-off `with_affine_loop_trace()` request permits a separate
 optional two-iteration template on a materialized self-target conditional loop.
 The ordinary block remains unchanged and contains no guest branch. The template

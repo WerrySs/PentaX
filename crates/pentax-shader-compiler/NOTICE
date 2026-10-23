@@ -81,3 +81,13 @@ previous destination and j-coordinate before implicit host interpolation.
 Unknown/computed provenance is refused; no numerical P1 approximation or raw
 barycentric support is claimed. All new positive/negative shader fixtures are
 original PentaX inputs. The existing port licenses and notices remain unchanged.
+The explicit native indexed-indirect BaseInstance0 context additionally follows
+public KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/host_gpu/renderer/renderDraw.cpp: native indirect shader offsets
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/renderDraw.cpp#L1367
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 attach an immutable compiler
+context, specialize the actual IR before emission, preserve that dependency
+through buffer specialization, and validate it against sealed preparation and
+backend mode. Original live-v8 fixtures inspect real interfaces/capabilities;
+no device feature is enabled or concealed by this context.

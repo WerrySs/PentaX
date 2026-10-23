@@ -1059,7 +1059,13 @@ fn entry_block(
             e.set(Op::SetScalarRegister, 3, u32v((1 << 28) | wave))?;
             let vertex = builtin(&mut e, Builtin::VertexIndex, 0)?;
             e.set(Op::SetVectorRegister, 5, vertex)?;
-            let base = builtin(&mut e, Builtin::BaseInstance, 0)?;
+            let base = if profile.vertex_instance_contract()
+                == crate::VertexInstanceContract::NativeIndirectFirstInstanceZero
+            {
+                u32v(0)
+            } else {
+                builtin(&mut e, Builtin::BaseInstance, 0)?
+            };
             let instance = builtin(&mut e, Builtin::InstanceIndex, 0)?;
             let relative = e.isub(instance, base)?;
             e.set(Op::SetVectorRegister, 8, relative)?;

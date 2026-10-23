@@ -100,3 +100,19 @@ pub fn analyze(
         requirements,
     })
 }
+
+/// Analyze only the native indexed-indirect vertex convention. The caller must
+/// bind execution to firstInstance0; the read-only emitted manifest retains
+/// that dependency for preparation/backend validation. This creates no GPU
+/// authority and changes no generic compile/analyze/profile policy.
+pub fn analyze_native_indirect_vertex(
+    program: &ShaderProgram,
+    description: crate::VertexDescription,
+    limits: &Limits,
+) -> Result<ShaderAnalysis, CompileError> {
+    let profile = Profile::new(crate::StageDescription::Vertex(description))
+        .map_err(CompileError::Profile)?
+        .native_indirect_vertex()
+        .map_err(CompileError::Profile)?;
+    analyze(program, profile, limits)
+}

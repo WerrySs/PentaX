@@ -1632,3 +1632,6 @@ mod agc_indirect_dispatch;
 
 #[path = "image_probe/agc_draw_index_indirect.rs"]
 mod agc_draw_index_indirect;
+
+#[path = "image_probe/sse4a_bitfields.rs"]
+mod sse4a_bitfields;

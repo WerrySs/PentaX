@@ -324,14 +324,28 @@ struct BufferSource {
 fn compile_stage(
     program: &ShaderProgram,
     profile: Profile,
-    state: &GraphicsState,
+    draw: &Draw,
     vertex: bool,
     compiler: &CompilerLimits,
     budget: &mut Budget<'_>,
 ) -> Result<(CompiledShader, Option<BufferSource>), Error> {
+    let state = &draw.state;
     let users = profile.common().user_sgpr_count;
+    let native = vertex && draw.native_offsets.is_some();
     budget.peak(compiler.max_bytes)?;
-    let analysis = analyze(program, profile, compiler).map_err(|_| Error::Compile)?;
+    let analysis = if native {
+        let StageDescription::Vertex(description) = profile.description() else {
+            return Err(Error::Compile);
+        };
+        pentax_shader_compiler::analyze_native_indirect_vertex(
+            program,
+            description.clone(),
+            compiler,
+        )
+    } else {
+        analyze(program, profile, compiler)
+    }
+    .map_err(|_| Error::Compile)?;
     let mut description = None;
     let source = if let [requirement] = analysis.buffers() {
         if !requirement.read
@@ -392,6 +406,14 @@ fn compile_stage(
         .map_err(|_| Error::Compile)?;
     budget.host(compiled.retained_host_bytes())?;
     validate_manifest(&compiled)?;
+    let expected = if native {
+        pentax_shader_compiler::VertexInstanceContract::NativeIndirectFirstInstanceZero
+    } else {
+        pentax_shader_compiler::VertexInstanceContract::Dynamic
+    };
+    if compiled.manifest().vertex_instance_contract() != expected {
+        return Err(Error::Unsupported("native indirect compiler context"));
+    }
     if compiled.manifest().buffers().len() != usize::from(source.is_some()) {
         return Err(Error::Unsupported("graphics buffer specialization"));
     }
@@ -600,7 +622,7 @@ pub fn prepare_draw_with_target(
     let (vertex, vertex_source) = compile_stage(
         &vertex_program,
         vertex_profile,
-        &draw.state,
+        draw,
         true,
         &compiler,
         &mut budget,
@@ -608,7 +630,7 @@ pub fn prepare_draw_with_target(
     let (pixel, pixel_source) = compile_stage(
         &pixel_program,
         pixel_profile,
-        &draw.state,
+        draw,
         false,
         &compiler,
         &mut budget,
@@ -747,7 +769,9 @@ pub fn prepare_draw_with_target(
         (decoded.bytes, Some(input))
     };
     budget.usage.target_bytes = config.bytes;
-    Ok(PreparedDraw {
+    // The fixed256-step manifest/interface envelope above also covers this
+    // constant-size product/context consistency check; it adds no allocation.
+    let prepared = PreparedDraw {
         vertex,
         pixel,
         input,
@@ -766,5 +790,7 @@ pub fn prepare_draw_with_target(
         vertex_buffer,
         pixel_buffer,
         usage: budget.usage,
-    })
+    };
+    prepared.validate_native_instance_contract()?;
+    Ok(prepared)
 }

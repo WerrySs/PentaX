@@ -35,6 +35,7 @@ mod register_loop_trace;
 mod rounding;
 mod saturating_packs;
 mod source_window;
+mod sse4a_bitfields;
 mod timestamp_counter;
 mod vector_masks;
 mod vex_comparisons;

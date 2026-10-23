@@ -1,5 +1,24 @@
 # Native block dispatch
 
+The four register-only SSE4a EXTRQ/INSERTQ forms execute through checked integer
+software mediation. They require no host SSE4a feature or emitted SSE4a bytes.
+Length and index use six bits each; length zero means 64. EXTRQ register controls
+come from source bits 5:0 and 13:8, while INSERTQ register controls come from
+source bits 69:64 and 77:72. EXTRQ zero-fills the remaining low quadword;
+INSERTQ changes only the selected low-quadword field. All source data and
+controls are snapshotted before aliases can change. AMD defines index plus
+effective length greater than 64 as undefined; this profile returns the typed
+unsupported-vector error without publishing CPU state. AMD also leaves the
+upper XMM quadword undefined: preserving it is this emulator's deterministic
+policy, not an architectural guarantee. Legacy upper YMM, flags, GPRs, MXCSR
+and TLS remain unchanged. Existing prefix, continuation, work and operation
+budgets apply; these register-only instructions transfer no memory bytes.
+See [AMD APM 26568 rev3.26, January 2026](https://docs.amd.com/v/u/en-US/26568_3.26_APM_Vol4),
+EXTRQ pages 172-173 and INSERTQ pages 195-196. Original planner and copied-state
+fixtures cover all four forms, high registers, aliases, all six-bit control
+pairs, ignored control bits, range refusals, malformed shapes and budget
+refusals; separate original native guest consumers exercise thread entry.
+
 The checked PMADDWD/VPMADDWD mediator multiplies signed 16-bit elements and
 adds adjacent product pairs into 32-bit results with wrapping addition. It does
 not saturate: two pairs of -32768 values produce `0x80000000`. The exact legacy

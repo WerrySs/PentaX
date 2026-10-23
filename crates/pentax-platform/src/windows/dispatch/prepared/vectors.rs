@@ -343,6 +343,7 @@ pub(super) fn supported(instruction: &Instruction) -> bool {
         || float_integer_conversion(instruction.code()).is_some()
         || packed_convert::form(instruction.code()).is_some()
         || f16c::supported(instruction.code())
+        || sse4a_bitfields::supported(instruction.code())
         || precision_conversion(instruction.code()).is_some()
         || float_ops::form(instruction.code()).is_some()
         || rounding::form(instruction.code()).is_some()
@@ -657,7 +658,9 @@ impl NativeBlockStepper<'_, '_, '_> {
             .ok_or(NativeDispatchError::Budget("vector operations"))?;
         let mut next = self.machine.state;
         let mut transferred = 0;
-        if f16c::supported(instruction.code()) {
+        if sse4a_bitfields::supported(instruction.code()) {
+            sse4a_bitfields::execute(instruction, &mut next)?;
+        } else if f16c::supported(instruction.code()) {
             transferred = f16c::execute(
                 instruction,
                 &mut next,

@@ -117,10 +117,20 @@ pub enum OutputInterface {
     },
 }
 
+/// Explicit compile-time dependency on the native indexed-indirect draw ABI.
+/// This is metadata, not memory or GPU execution authority.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VertexInstanceContract {
+    #[default]
+    Dynamic,
+    NativeIndirectFirstInstanceZero,
+}
+
 /// Immutable description of the emitted module's external contract.
 #[derive(Clone, Debug)]
 pub struct Manifest {
     pub(crate) required_features: RequiredFeatures,
+    pub(crate) vertex_instance_contract: VertexInstanceContract,
     pub(crate) stage: ShaderStage,
     pub(crate) push_data: Option<PushData>,
     pub(crate) shader_data_binding: Option<u32>,
@@ -157,6 +167,9 @@ impl Manifest {
             )
     }
 
+    pub fn vertex_instance_contract(&self) -> VertexInstanceContract {
+        self.vertex_instance_contract
+    }
     pub fn required_features(&self) -> &RequiredFeatures {
         &self.required_features
     }

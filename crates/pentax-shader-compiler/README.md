@@ -157,3 +157,12 @@ The local validation used official SPIRV-Tools
 `01e0577914a75a2569c846778c2f93aa8e6feddd`, the working fork's submodule pins,
 with `spirv-val --target-env vulkan1.1`. These checks establish structural validity
 of the original output modules, not GPU execution or arbitrary-shader correctness.
+A separate `analyze_native_indirect_vertex` entry accepts only the explicit native
+indexed-indirect vertex convention. It issues a private profile context with
+BaseInstance fixed to0 before IR optimization and SPIR-V emission, rejecting a
+start-instance SGPR override or nonvertex program. Buffer specialization retains
+that context, and a read-only manifest records the dependency. Actual emitted
+capabilities and interfaces are still derived normally. Generic `Profile::new`,
+`compile` and `analyze` keep dynamic BaseInstance and their previous requirements.
+The dedicated entry grants no GPU authority: the graphics bridge must bind its
+sealed prepared mode and the backend must enforce actual firstInstance0.

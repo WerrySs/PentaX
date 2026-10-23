@@ -481,6 +481,8 @@ mod saturating_packs;
 mod scalar_convert;
 #[path = "prepared/segments.rs"]
 mod segments;
+#[path = "prepared/sse4a_bitfields.rs"]
+mod sse4a_bitfields;
 #[path = "prepared/strings.rs"]
 mod strings;
 #[path = "prepared/threads.rs"]

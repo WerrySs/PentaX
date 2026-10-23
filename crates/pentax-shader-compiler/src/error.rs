@@ -209,6 +209,7 @@ pub enum ProfileError {
     ResourceRegister,
     BufferStride,
     BufferIndexStride,
+    NativeIndirectInstanceContract,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

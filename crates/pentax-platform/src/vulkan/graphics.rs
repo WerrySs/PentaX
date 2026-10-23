@@ -276,6 +276,16 @@ pub(super) fn run(
 ) -> Result<GraphicsReadback, VulkanError> {
     // All pure input/manifest/work admission precedes loader/device calls.
     let mut budget = Budget::new(limits);
+    let first_instance = prepared.first_instance();
+    let vertex_offset = prepared.vertex_offset();
+    prepared
+        .validate_native_instance_contract()
+        .map_err(|_| VulkanError::InvalidCompilerContract("native indirect instance context"))?;
+    if prepared.native_indirect_offsets().is_some() && (first_instance != 0 || vertex_offset != 0) {
+        return Err(VulkanError::InvalidCompilerContract(
+            "native indirect instance context",
+        ));
+    }
     let length = extent(prepared.width(), prepared.height())?;
     if !prepared.width().is_multiple_of(64)
         || prepared.input().len() != length
@@ -570,9 +580,9 @@ pub(super) fn run(
                 batch.raw,
                 indices.count(),
                 prepared.instance_count(),
-                0, // The uploaded index span already starts at the actual firstIndex.
-                prepared.vertex_offset(), // Native guest fetch consumes patched SGPRs once.
-                prepared.first_instance(),
+                0,             // The uploaded index span already starts at the actual firstIndex.
+                vertex_offset, // Same value validated against the native compiler context above.
+                first_instance,
             );
         } else {
             device.raw.cmd_draw(
@@ -580,7 +590,7 @@ pub(super) fn run(
                 prepared.vertex_count(),
                 prepared.instance_count(),
                 prepared.first_vertex(),
-                prepared.first_instance(),
+                first_instance,
             );
         }
         device.raw.cmd_end_render_pass(batch.raw);

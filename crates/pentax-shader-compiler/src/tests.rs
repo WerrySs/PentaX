@@ -521,3 +521,5 @@ fn original_raw_and_scalar_buffer_load_shapes_retain_live_data() {
         validate(&format!("scalar-buffer-copy-{count}"), &module);
     }
 }
+
+mod native_instance;

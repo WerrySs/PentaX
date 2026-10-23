@@ -319,6 +319,23 @@ impl PreparedDraw {
     pub fn native_indirect_offsets(&self) -> Option<NativeIndirectOffsets> {
         self.native_offsets
     }
+    /// Check the opaque prepared mode against the actual compiler contracts.
+    /// This does not waive any emitted feature or resource requirement.
+    pub fn validate_native_instance_contract(&self) -> Result<(), Error> {
+        use pentax_shader_compiler::VertexInstanceContract;
+        let expected = if self.native_offsets.is_some() {
+            VertexInstanceContract::NativeIndirectFirstInstanceZero
+        } else {
+            VertexInstanceContract::Dynamic
+        };
+        if self.vertex.manifest().vertex_instance_contract() == expected
+            && self.pixel.manifest().vertex_instance_contract() == VertexInstanceContract::Dynamic
+        {
+            Ok(())
+        } else {
+            Err(Error::Unsupported("native indirect instance contract"))
+        }
+    }
     pub fn first_vertex(&self) -> u32 {
         0
     }
