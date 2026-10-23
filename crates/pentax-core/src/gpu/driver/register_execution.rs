@@ -28,15 +28,6 @@ pub(super) enum ComputeStep {
     Dispatch(compute::Dispatch),
 }
 impl ComputeCommands {
-    #[cfg(test)]
-    pub(super) fn prepare(
-        memory: &PausedNativeMemory<'_>,
-        root: compute::CommandRange,
-        initial: compute::ComputeState,
-        limits: &compute::CommandLimits,
-    ) -> Result<Self, Failure> {
-        Self::prepare_source(&super::super::Memory(memory), root, initial, limits)
-    }
     pub(super) fn prepare_source<M: compute::Memory>(
         memory: &M,
         root: compute::CommandRange,
