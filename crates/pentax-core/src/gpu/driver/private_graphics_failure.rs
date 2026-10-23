@@ -593,8 +593,8 @@ mod tests {
         ] {
             let bytes = command_bytes(&words);
             let error = draw::plan_commands(&[&bytes], draw::GraphicsState::empty(), &limits())
-                .err()
-                .expect("original refusal missing");
+                .map(|_| ())
+                .expect_err("original refusal missing");
             assert!(matches!(error, draw::Error::Unsupported(_)));
             let failure = Failure::GraphicsPreparation(error);
             let before = failure;
