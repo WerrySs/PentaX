@@ -687,3 +687,11 @@ libAgcDriver.cpp registration MWiElSNE8j8, as retained in the
 upstream source inventory. Existing copyright and license terms above apply.
 Original PentaX native thread-wait transport retains the original executor
 continuation and callback frames; no upstream scheduler implementation is copied.
+
+The scoped GetLodStats producer additionally follows public KytyPS5/KytyPS5
+revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 src/libs/agc.cpp
+(AgcDcbGetLodStats) and libAgcDriver.cpp registration vuSXe69VILM:
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L3759
+Existing copyright and license terms above apply. Original PentaX integration
+captures both stack scalars before a genuine allocator callback. No upstream
+report renderer, shader feedback implementation or report data is included.

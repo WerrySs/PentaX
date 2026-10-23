@@ -10,8 +10,9 @@ use super::{
 };
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
-    BufferAccess, BufferDescription, CommonDescription, CompiledShader, Limits as CompilerLimits,
-    Profile, ShaderProgram, StageDescription, VertexDescription, WaveSize, analyze,
+    BufferAccess, BufferDescription, CommonDescription, CompiledShader, ImageDescription,
+    Limits as CompilerLimits, Profile, SamplerDescription, ShaderProgram, StageDescription,
+    VertexDescription, WaveSize, analyze,
 };
 
 fn context(state: &GraphicsState, register: u32) -> Result<u32, Error> {
@@ -299,6 +300,29 @@ fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
     {
         return Err(Error::Unsupported("graphics resource/subgroup manifest"));
     }
+    if manifest.images().len() > 16
+        || manifest.samplers().len() > 16
+        || manifest.stage() != ShaderStage::Pixel
+            && (!manifest.images().is_empty() || !manifest.samplers().is_empty())
+        || manifest.images().iter().enumerate().any(|(index, image)| {
+            image.profile_index != index
+                || image.binding != 58 + index as u32
+                || image.user_sgpr > 8
+                || !image.user_sgpr.is_multiple_of(4)
+        })
+        || manifest
+            .samplers()
+            .iter()
+            .enumerate()
+            .any(|(index, sampler)| {
+                sampler.profile_index != index
+                    || sampler.binding != 74 + index as u32
+                    || sampler.user_sgpr > 12
+                    || !sampler.user_sgpr.is_multiple_of(4)
+            })
+    {
+        return Err(Error::Unsupported("graphics sampled resource manifest"));
+    }
     let buffers = manifest.buffers();
     let binding = if manifest.stage() == ShaderStage::Pixel {
         57
@@ -321,6 +345,12 @@ struct BufferSource {
     range: crate::compute::CommandRange,
 }
 
+#[derive(Default)]
+struct SampledSources {
+    images: Vec<crate::image_descriptor::Image2D>,
+    samplers: Vec<crate::image_descriptor::Sampler>,
+}
+
 fn compile_stage(
     program: &ShaderProgram,
     profile: Profile,
@@ -328,7 +358,7 @@ fn compile_stage(
     vertex: bool,
     compiler: &CompilerLimits,
     budget: &mut Budget<'_>,
-) -> Result<(CompiledShader, Option<BufferSource>), Error> {
+) -> Result<(CompiledShader, Option<BufferSource>, SampledSources), Error> {
     let state = &draw.state;
     let users = profile.common().user_sgpr_count;
     let native = vertex && draw.native_offsets.is_some();
@@ -399,11 +429,131 @@ fn compile_stage(
     } else {
         return Err(Error::Unsupported("graphics buffer count"));
     };
+    if analysis.images().len() > 16
+        || analysis.samplers().len() > 16
+        || vertex && (!analysis.images().is_empty() || !analysis.samplers().is_empty())
+    {
+        return Err(Error::Unsupported("pixel sampled resource count/stage"));
+    }
+    let mut sampled = SampledSources::default();
+    let mut images = Vec::new();
+    let mut samplers = Vec::new();
+    let initial_description_bytes = analysis.images().len()
+        * std::mem::size_of::<ImageDescription>()
+        + analysis.samplers().len() * std::mem::size_of::<SamplerDescription>();
+    let initial_image_bytes =
+        analysis.images().len() * std::mem::size_of::<crate::image_descriptor::Image2D>();
+    let initial_sampler_bytes =
+        analysis.samplers().len() * std::mem::size_of::<crate::image_descriptor::Sampler>();
+    budget.peak(
+        compiler
+            .max_bytes
+            .checked_add(initial_description_bytes)
+            .and_then(|n| n.checked_add(initial_image_bytes))
+            .and_then(|n| n.checked_add(initial_sampler_bytes))
+            .ok_or(Error::Limit("sampled compiler metadata"))?,
+    )?;
+    budget.host(initial_description_bytes)?;
+    budget.host(initial_image_bytes)?;
+    budget.host(initial_sampler_bytes)?;
+    sampled
+        .images
+        .try_reserve_exact(analysis.images().len())
+        .map_err(|_| Error::Allocation)?;
+    sampled
+        .samplers
+        .try_reserve_exact(analysis.samplers().len())
+        .map_err(|_| Error::Allocation)?;
+    images
+        .try_reserve_exact(analysis.images().len())
+        .map_err(|_| Error::Allocation)?;
+    samplers
+        .try_reserve_exact(analysis.samplers().len())
+        .map_err(|_| Error::Allocation)?;
+    let description_bytes = images.capacity() * std::mem::size_of::<ImageDescription>()
+        + samplers.capacity() * std::mem::size_of::<SamplerDescription>();
+    budget.host(description_bytes - initial_description_bytes)?;
+    budget.host(
+        sampled.images.capacity() * std::mem::size_of::<crate::image_descriptor::Image2D>()
+            - initial_image_bytes,
+    )?;
+    budget.host(
+        sampled.samplers.capacity() * std::mem::size_of::<crate::image_descriptor::Sampler>()
+            - initial_sampler_bytes,
+    )?;
+    for requirement in analysis.images() {
+        if !requirement.user_sgpr.is_multiple_of(4)
+            || requirement
+                .user_sgpr
+                .checked_add(8)
+                .is_none_or(|end| end > users)
+        {
+            return Err(Error::Unsupported("sampled image user registers"));
+        }
+        budget.work(8)?;
+        let mut words = [0; 8];
+        for (index, word) in words.iter_mut().enumerate() {
+            *word = sh(
+                state,
+                0x0c + u32::from(requirement.user_sgpr) + index as u32,
+            )?;
+        }
+        let descriptor = crate::image_descriptor::decode_image(
+            words,
+            &crate::image_descriptor::Limits {
+                max_dimension: budget.limits.max_dimension,
+                max_levels: 16,
+                max_bytes: budget.limits.max_host_bytes as u64,
+            },
+        )
+        .map_err(|_| Error::Unsupported("sampled image descriptor"))?;
+        if descriptor.counter_id.is_some() {
+            return Err(Error::Unsupported("sampled image LOD feedback"));
+        }
+        if descriptor.min_lod_u4_8 != 0 {
+            // The same S# may serve different images. Its clamp cannot replace
+            // the image-specific clamp without an admitted shader/device mode.
+            return Err(Error::Unsupported("sampled image minimum LOD"));
+        }
+        sampled.images.push(descriptor);
+        images.push(ImageDescription {
+            user_sgpr: requirement.user_sgpr,
+        });
+    }
+    for requirement in analysis.samplers() {
+        if !requirement.user_sgpr.is_multiple_of(4)
+            || requirement
+                .user_sgpr
+                .checked_add(4)
+                .is_none_or(|end| end > users)
+        {
+            return Err(Error::Unsupported("sampler user registers"));
+        }
+        budget.work(4)?;
+        let mut words = [0; 4];
+        for (index, word) in words.iter_mut().enumerate() {
+            *word = sh(
+                state,
+                0x0c + u32::from(requirement.user_sgpr) + index as u32,
+            )?;
+        }
+        sampled.samplers.push(
+            crate::image_descriptor::decode_sampler(words)
+                .map_err(|_| Error::Unsupported("sampled image sampler"))?,
+        );
+        samplers.push(SamplerDescription {
+            user_sgpr: requirement.user_sgpr,
+        });
+    }
     // The same opaque IR and finite compiler budget continue into emission.
     // The caller supplies no new entry, interface or register policy here.
+    budget.peak(compiler.max_bytes)?;
     let compiled = analysis
-        .finish(description.as_slice())
+        .finish_with_images(description.as_slice(), &images, &samplers)
         .map_err(|_| Error::Compile)?;
+    drop(images);
+    drop(samplers);
+    budget.release(description_bytes)?;
     budget.host(compiled.retained_host_bytes())?;
     validate_manifest(&compiled)?;
     let expected = if native {
@@ -417,7 +567,12 @@ fn compile_stage(
     if compiled.manifest().buffers().len() != usize::from(source.is_some()) {
         return Err(Error::Unsupported("graphics buffer specialization"));
     }
-    Ok((compiled, source))
+    if compiled.manifest().images().len() != sampled.images.len()
+        || compiled.manifest().samplers().len() != sampled.samplers.len()
+    {
+        return Err(Error::Unsupported("sampled resource specialization"));
+    }
+    Ok((compiled, source, sampled))
 }
 
 fn snapshot_resource(
@@ -619,7 +774,7 @@ pub fn prepare_draw_with_target(
         config.pixel.profile(config.pixel_users, &mut budget)?;
     let pixel_profile =
         Profile::new(StageDescription::Pixel(pixel_description)).map_err(|_| Error::Compile)?;
-    let (vertex, vertex_source) = compile_stage(
+    let (vertex, vertex_source, vertex_sampled) = compile_stage(
         &vertex_program,
         vertex_profile,
         draw,
@@ -627,7 +782,7 @@ pub fn prepare_draw_with_target(
         &compiler,
         &mut budget,
     )?;
-    let (pixel, pixel_source) = compile_stage(
+    let (pixel, pixel_source, pixel_sampled) = compile_stage(
         &pixel_program,
         pixel_profile,
         draw,
@@ -665,6 +820,60 @@ pub fn prepare_draw_with_target(
     };
     let vertex_buffer = snapshot_resource(vertex_source, memory, target_range, &mut budget)?;
     let pixel_buffer = snapshot_resource(pixel_source, memory, target_range, &mut budget)?;
+    if !vertex_sampled.images.is_empty() || !vertex_sampled.samplers.is_empty() {
+        return Err(Error::Unsupported("vertex sampled resource profile"));
+    }
+    let image_metadata_bytes =
+        pixel_sampled.images.capacity() * std::mem::size_of::<crate::image_descriptor::Image2D>();
+    let sampler_metadata_bytes =
+        pixel_sampled.samplers.capacity() * std::mem::size_of::<crate::image_descriptor::Sampler>();
+    let mut pixel_images = Vec::new();
+    let mut pixel_samplers = Vec::new();
+    let initial_prepared_image_bytes =
+        pixel_sampled.images.len() * std::mem::size_of::<super::PreparedTexture>();
+    let initial_prepared_sampler_bytes =
+        pixel_sampled.samplers.len() * std::mem::size_of::<super::PreparedSampler>();
+    budget.host(initial_prepared_image_bytes)?;
+    budget.host(initial_prepared_sampler_bytes)?;
+    pixel_images
+        .try_reserve_exact(pixel_sampled.images.len())
+        .map_err(|_| Error::Allocation)?;
+    pixel_samplers
+        .try_reserve_exact(pixel_sampled.samplers.len())
+        .map_err(|_| Error::Allocation)?;
+    budget.host(
+        pixel_images.capacity() * std::mem::size_of::<super::PreparedTexture>()
+            - initial_prepared_image_bytes,
+    )?;
+    budget.host(
+        pixel_samplers.capacity() * std::mem::size_of::<super::PreparedSampler>()
+            - initial_prepared_sampler_bytes,
+    )?;
+    for (descriptor, manifest) in pixel_sampled
+        .images
+        .into_iter()
+        .zip(pixel.manifest().images())
+    {
+        pixel_images.push(super::textures::capture(
+            descriptor,
+            manifest.binding,
+            memory,
+            target_range,
+            &mut budget,
+        )?);
+    }
+    for (descriptor, manifest) in pixel_sampled
+        .samplers
+        .into_iter()
+        .zip(pixel.manifest().samplers())
+    {
+        pixel_samplers.push(super::PreparedSampler {
+            binding: manifest.binding,
+            descriptor,
+        });
+    }
+    budget.release(image_metadata_bytes)?;
+    budget.release(sampler_metadata_bytes)?;
     let indices = if let Some(source) = draw.indices {
         let size = usize::try_from(draw.vertex_count)
             .ok()
@@ -789,6 +998,8 @@ pub fn prepare_draw_with_target(
         indices,
         vertex_buffer,
         pixel_buffer,
+        pixel_images,
+        pixel_samplers,
         usage: budget.usage,
     };
     prepared.validate_native_instance_contract()?;

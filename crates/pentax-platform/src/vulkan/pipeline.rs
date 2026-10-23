@@ -5,16 +5,35 @@
 use super::{
     Budget, VulkanError,
     device::{Device, result},
-    resources::{Buffer, Image},
+    resources::{Buffer, Image, SampledImage, Sampler},
 };
 use ash::vk;
 use pentax_shader_compiler::CompiledShader;
+
+#[derive(Clone, Copy)]
+pub(super) struct SampledBindings<'d, 'r> {
+    pub images: &'r [SampledImage<'d>],
+    pub image_bindings: &'r [u32],
+    pub samplers: &'r [Sampler<'d>],
+    pub sampler_bindings: &'r [u32],
+}
+impl SampledBindings<'_, '_> {
+    pub const fn empty() -> Self {
+        Self {
+            images: &[],
+            image_bindings: &[],
+            samplers: &[],
+            sampler_bindings: &[],
+        }
+    }
+}
 
 enum Resource<'d, 'r> {
     Buffer(&'r Buffer<'d>),
     Graphics {
         image: &'r Image<'d>,
         buffers: [Option<&'r Buffer<'d>>; 2],
+        sampled: SampledBindings<'d, 'r>,
     },
 }
 pub(super) struct Pipeline<'d, 'r> {
@@ -197,17 +216,28 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         &mut self,
         buffers: [Option<&'r Buffer<'d>>; 2],
         count: usize,
+        sampled: SampledBindings<'d, 'r>,
         budget: &mut Budget,
     ) -> Result<(), VulkanError> {
+        let mut sizes = [vk::DescriptorPoolSize::default(); 3];
+        let mut pool_count = 0;
+        for (kind, length) in [
+            (vk::DescriptorType::STORAGE_BUFFER, count),
+            (vk::DescriptorType::SAMPLED_IMAGE, sampled.images.len()),
+            (vk::DescriptorType::SAMPLER, sampled.samplers.len()),
+        ] {
+            if length != 0 {
+                sizes[pool_count] = vk::DescriptorPoolSize::default()
+                    .ty(kind)
+                    .descriptor_count(length as u32);
+                pool_count += 1;
+            }
+        }
         budget.object()?;
-        let sizes = [vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::STORAGE_BUFFER)
-            .descriptor_count(count as u32)];
         let info = vk::DescriptorPoolCreateInfo::default()
             .max_sets(1)
-            .pool_sizes(&sizes);
-        // SAFETY: One owned set contains exactly the one/two admitted stage
-        // descriptors; no extension or dynamically sized pool is requested.
+            .pool_sizes(&sizes[..pool_count]);
+        // SAFETY: Exact bounded counts of the manifest's retained resources.
         self.pool = result(
             unsafe { self.device.raw.create_descriptor_pool(&info, None) },
             "vkCreateDescriptorPool(graphics)",
@@ -217,45 +247,72 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         let info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
             .set_layouts(&layouts);
-        // SAFETY: The owned pool has capacity for this exact retained layout;
-        // one actual handle output avoids an infallible allocation in ash.
-        let code = unsafe {
-            (self.device.raw.fp_v1_0().allocate_descriptor_sets)(
-                self.device.raw.handle(),
-                &info,
-                &mut self.set,
-            )
-        };
-        result(code.result(), "vkAllocateDescriptorSets(graphics)")?;
-        let mut infos = [vk::DescriptorBufferInfo::default(); 2];
-        let mut binding_numbers = [0; 2];
+        // SAFETY: One owned output and the exact layout from this live pool.
+        result(
+            unsafe {
+                (self.device.raw.fp_v1_0().allocate_descriptor_sets)(
+                    self.device.raw.handle(),
+                    &info,
+                    &mut self.set,
+                )
+            }
+            .result(),
+            "vkAllocateDescriptorSets(graphics)",
+        )?;
+        let mut buffers_info = [vk::DescriptorBufferInfo::default(); 2];
+        let mut buffer_bindings = [0; 2];
         let mut used = 0;
         for (stage, buffer) in buffers.into_iter().enumerate() {
             if let Some(buffer) = buffer {
-                infos[used] = vk::DescriptorBufferInfo::default()
+                buffers_info[used] = vk::DescriptorBufferInfo::default()
                     .buffer(buffer.raw)
-                    .offset(0)
                     .range(buffer.length() as u64);
-                binding_numbers[used] = if stage == 0 { 0 } else { 57 };
+                buffer_bindings[used] = if stage == 0 { 0 } else { 57 };
                 used += 1;
             }
         }
-        let mut writes = [vk::WriteDescriptorSet::default(); 2];
-        for index in 0..count {
-            writes[index] = vk::WriteDescriptorSet::default()
-                .dst_set(self.set)
-                .dst_binding(binding_numbers[index])
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[index..index + 1]);
+        let mut image_info = [vk::DescriptorImageInfo::default(); 32];
+        for (index, image) in sampled.images.iter().enumerate() {
+            image_info[index] = vk::DescriptorImageInfo::default()
+                .image_view(image.view())
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         }
-        budget.work(count as u64)?;
-        // SAFETY: All descriptor ranges cover fully uploaded owned buffers.
-        // The graphics resource retains both borrows until after batch drain;
-        // updates happen before any descriptor use or submission.
+        for (index, sampler) in sampled.samplers.iter().enumerate() {
+            image_info[16 + index] = vk::DescriptorImageInfo::default().sampler(sampler.raw);
+        }
+        let mut writes = [vk::WriteDescriptorSet::default(); 34];
+        let mut written = 0;
+        for index in 0..count {
+            writes[written] = vk::WriteDescriptorSet::default()
+                .dst_set(self.set)
+                .dst_binding(buffer_bindings[index])
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&buffers_info[index..index + 1]);
+            written += 1;
+        }
+        for (index, binding) in sampled.image_bindings.iter().enumerate() {
+            writes[written] = vk::WriteDescriptorSet::default()
+                .dst_set(self.set)
+                .dst_binding(*binding)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                .image_info(&image_info[index..index + 1]);
+            written += 1;
+        }
+        for (index, binding) in sampled.sampler_bindings.iter().enumerate() {
+            writes[written] = vk::WriteDescriptorSet::default()
+                .dst_set(self.set)
+                .dst_binding(*binding)
+                .descriptor_type(vk::DescriptorType::SAMPLER)
+                .image_info(&image_info[16 + index..17 + index]);
+            written += 1;
+        }
+        budget.work(written as u64)?;
+        // SAFETY: Every descriptor is initialized for its matching bounded
+        // owned resource. All owners outlive this pipeline and drained batch.
         unsafe {
             self.device
                 .raw
-                .update_descriptor_sets(&writes[..count], &[])
+                .update_descriptor_sets(&writes[..written], &[])
         };
         Ok(())
     }
@@ -267,7 +324,15 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         image: &'r Image<'d>,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        Self::graphics_target(device, vertex, pixel, image, false, [None, None], budget)
+        Self::graphics_target(
+            device,
+            [vertex, pixel],
+            image,
+            false,
+            [None, None],
+            SampledBindings::empty(),
+            budget,
+        )
     }
 
     /// Reuse the actual uploaded target instead of clearing diagnostic pixels.
@@ -279,20 +344,81 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         buffers: [Option<&'r Buffer<'d>>; 2],
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        Self::graphics_target(device, vertex, pixel, image, true, buffers, budget)
+        Self::graphics_target(
+            device,
+            [vertex, pixel],
+            image,
+            true,
+            buffers,
+            SampledBindings::empty(),
+            budget,
+        )
     }
 
-    fn graphics_target(
+    pub fn graphics_loaded_sampled(
         device: &'d Device,
         vertex: &CompiledShader,
         pixel: &CompiledShader,
         image: &'r Image<'d>,
-        load: bool,
         buffers: [Option<&'r Buffer<'d>>; 2],
+        sampled: SampledBindings<'d, 'r>,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        let mut out = Self::empty(device, Resource::Graphics { image, buffers });
-        let mut bindings = [vk::DescriptorSetLayoutBinding::default(); 2];
+        Self::graphics_target(
+            device,
+            [vertex, pixel],
+            image,
+            true,
+            buffers,
+            sampled,
+            budget,
+        )
+    }
+
+    fn graphics_target(
+        device: &'d Device,
+        shaders: [&CompiledShader; 2],
+        image: &'r Image<'d>,
+        load: bool,
+        buffers: [Option<&'r Buffer<'d>>; 2],
+        sampled: SampledBindings<'d, 'r>,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
+        let [vertex, pixel] = shaders;
+        if !vertex.manifest().images().is_empty()
+            || !vertex.manifest().samplers().is_empty()
+            || sampled.images.len() > 16
+            || sampled.samplers.len() > 16
+            || sampled.images.len() != sampled.image_bindings.len()
+            || sampled.samplers.len() != sampled.sampler_bindings.len()
+            || sampled.images.len() != pixel.manifest().images().len()
+            || sampled.samplers.len() != pixel.manifest().samplers().len()
+            || pixel
+                .manifest()
+                .images()
+                .iter()
+                .map(|entry| entry.binding)
+                .ne(sampled.image_bindings.iter().copied())
+            || pixel
+                .manifest()
+                .samplers()
+                .iter()
+                .map(|entry| entry.binding)
+                .ne(sampled.sampler_bindings.iter().copied())
+        {
+            return Err(VulkanError::InvalidCompilerContract(
+                "graphics sampled descriptor resources",
+            ));
+        }
+        let mut out = Self::empty(
+            device,
+            Resource::Graphics {
+                image,
+                buffers,
+                sampled,
+            },
+        );
+        let mut bindings = [vk::DescriptorSetLayoutBinding::default(); 34];
         let mut count = 0;
         for (index, shader) in [vertex, pixel].into_iter().enumerate() {
             let binding = shader.manifest().buffer_binding();
@@ -322,13 +448,32 @@ impl<'d, 'r> Pipeline<'d, 'r> {
                 count += 1;
             }
         }
+        let buffer_count = count;
+        for (kind, numbers) in [
+            (vk::DescriptorType::SAMPLED_IMAGE, sampled.image_bindings),
+            (vk::DescriptorType::SAMPLER, sampled.sampler_bindings),
+        ] {
+            for binding in numbers {
+                if bindings[..count].iter().any(|old| old.binding == *binding) {
+                    return Err(VulkanError::InvalidCompilerContract(
+                        "duplicate graphics descriptor binding",
+                    ));
+                }
+                bindings[count] = vk::DescriptorSetLayoutBinding::default()
+                    .binding(*binding)
+                    .descriptor_type(kind)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+                count += 1;
+            }
+        }
         out.layouts(
             &bindings[..count],
             vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             budget,
         )?;
         if count != 0 {
-            out.graphics_descriptors(buffers, count, budget)?;
+            out.graphics_descriptors(buffers, buffer_count, sampled, budget)?;
         }
         let attachments = [vk::AttachmentDescription::default()
             .format(vk::Format::R8G8B8A8_UNORM)
@@ -492,7 +637,17 @@ impl Drop for Pipeline<'_, '_> {
             Resource::Buffer(buffer) => {
                 let _ = buffer.raw;
             }
-            Resource::Graphics { image, buffers } => {
+            Resource::Graphics {
+                image,
+                buffers,
+                sampled,
+            } => {
+                for image in sampled.images {
+                    let _ = image.raw();
+                }
+                for sampler in sampled.samplers {
+                    let _ = sampler.raw;
+                }
                 let _ = image.raw;
                 for buffer in buffers.into_iter().flatten() {
                     let _ = buffer.raw;

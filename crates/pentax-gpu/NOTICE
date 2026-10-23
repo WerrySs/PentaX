@@ -286,3 +286,14 @@ Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT gra
 continue to apply. PentaX modifications2026 add exact reserved-word validation,
 sealed bounded static/live actions and original source-only consumers. A wait
 descriptor grants no completion, frame, port or memory authority.
+
+The pure sampled-image metadata and original resource integration additionally
+reference PUBLIC Jetsku/KytyPS5 revisionb719d67ce6bcfd21d402bd415f3e4f68e4793534:
+  src/graphics/shader/shaderBindings.h: T#/S# fields
+  src/graphics/host_gpu/renderer/pipeline/descriptors.cpp: physical/view mip geometry
+  src/graphics/host_gpu/renderer/cache/samplerCache.cpp: sampler fields
+  src/graphics/host_gpu/renderer/image/textureCommon.cpp and tile.cpp: linear mip layout
+https://github.com/Jetsku/KytyPS5/tree/b719d67ce6bcfd21d402bd415f3e4f68e4793534/src/graphics
+Existing upstream copyright/license grants retained above continue to apply.
+PentaX's bounded checked metadata, owned uploads, exclusions and fixtures are
+original Rust integrations; no commercial image, shader or report data is included.

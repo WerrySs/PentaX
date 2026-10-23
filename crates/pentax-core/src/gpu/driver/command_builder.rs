@@ -133,7 +133,8 @@ pub(crate) const INDIRECT_DRAW_EXPORTS: [(&str, Function); 1] =
     [("t1vNu082-jM", Function::AgcDcbDrawIndexIndirect)];
 
 pub(crate) fn supports(function: Function) -> bool {
-    function == Function::AgcDcbWaitUntilSafeForRendering
+    function == Function::AgcDcbGetLodStats
+        || function == Function::AgcDcbWaitUntilSafeForRendering
         || function == Function::AgcDcbSetIndexSize0600
         || EXPORTS
             .iter()
@@ -291,7 +292,8 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
         | AgcDcbCopyData
         | AgcAcbDmaData
         | AgcDcbDmaData
-        | AgcAcbDispatchIndirect => Ok(0),
+        | AgcAcbDispatchIndirect
+        | AgcDcbGetLodStats => Ok(0),
         AgcCbSetShRegisterRangeDirect
         | AgcDcbSetShRegisterDirect
         | AgcDcbSetCxRegisterDirect
@@ -309,7 +311,7 @@ fn stack_count(function: Function) -> usize {
         AgcAcbCopyData | AgcDcbCopyData => 3,
         AgcDcbAcquireMem => 1,
         AgcDcbWaitRegMem => 3,
-        AgcDcbWriteData | AgcAcbWriteData | AgcAcbWaitRegMem => 2,
+        AgcDcbWriteData | AgcAcbWriteData | AgcAcbWaitRegMem | AgcDcbGetLodStats => 2,
         _ => 0,
     }
 }
@@ -321,6 +323,17 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcDcbGetLodStats => Packet::fixed(&[
+            0xc003_8e00,
+            a[3],
+            a[2] & 0xffff_ffc0,
+            (args[2] >> 32) as u32,
+            ((a[1] & 3) << 28)
+                | ((a[6] & 1) << 19)
+                | ((a[5] & 1) << 18)
+                | ((a[4] & 0xff) << 10)
+                | ((a[7] & 0xff) << 2),
+        ]),
         AgcDcbWaitUntilSafeForRendering => Packet::fixed(&[0xc005_1018, a[1], a[2], 0, 0, 0, 0]),
         AgcDcbDrawIndexIndirect => {
             let low = a[2];
@@ -739,7 +752,8 @@ fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failur
         | AgcDcbCopyData
         | AgcAcbDmaData
         | AgcDcbDmaData
-        | AgcAcbDispatchIndirect => Ok(0),
+        | AgcAcbDispatchIndirect
+        | AgcDcbGetLodStats => Ok(0),
         AgcWaitRegMemPatchAddress | AgcWaitRegMemPatchReference => Ok(INVALID_PACKET),
         _ => Err(Failure::UnsupportedQueue),
     })

@@ -236,10 +236,17 @@ pub(super) fn execute_draw_admitted(
         .max_host_bytes
         .min(remaining_host as u64)
         .min(remaining_pixels as u64);
+    let texture_upload_bytes = prepared
+        .pixel_images()
+        .iter()
+        .try_fold(0u64, |sum, texture| {
+            sum.checked_add(texture.pixels().len() as u64)
+        })
+        .ok_or(Error::Limit)?;
     let resource_upload_bytes = [prepared.vertex_buffer(), prepared.pixel_buffer()]
         .into_iter()
         .flatten()
-        .try_fold(0u64, |bytes, resource| {
+        .try_fold(texture_upload_bytes, |bytes, resource| {
             bytes.checked_add(resource.bytes().len() as u64)
         })
         .ok_or(Error::Limit)?;
@@ -297,6 +304,17 @@ pub(super) fn execute_draw_admitted(
         let resource_work = preflight_read_source(
             paused,
             resource.range(),
+            target,
+            remaining.checked_sub(work).ok_or(Error::Limit)?,
+        )?;
+        work = work.checked_add(resource_work).ok_or(Error::Limit)?;
+    }
+    // Complete same-owner permissions and physical alias exclusions also cover
+    // each whole sampled-image backing, including source padding and mip tails.
+    for resource in prepared.pixel_images() {
+        let resource_work = preflight_read_source(
+            paused,
+            resource.source(),
             target,
             remaining.checked_sub(work).ok_or(Error::Limit)?,
         )?;

@@ -5,7 +5,7 @@
 //! A bounded, safe Rust port of the KytyPS5-Performance shader compiler path:
 //! program boundary validation, `CFG::BuildGraph` and `CFG::Structurize`,
 //! the frontend translators into a typed IR, SSA construction, constant
-//! propagation, dead-code elimination, buffer resource tracking, stage
+//! propagation, dead-code elimination, resource tracking, stage
 //! interface collection, binding layout and binary SPIR-V emission.
 //!
 //! It is not an independent implementation and not a complete port: only the
@@ -33,7 +33,10 @@ mod translate;
 #[cfg(test)]
 mod tests;
 
-pub use analysis::{BufferRequirement, ShaderAnalysis, analyze, analyze_native_indirect_vertex};
+pub use analysis::{
+    BufferRequirement, ImageRequirement, SamplerRequirement, ShaderAnalysis, analyze,
+    analyze_native_indirect_vertex,
+};
 pub use budget::{LimitKind, Limits};
 pub use cfg::Cfg;
 pub use error::*;
@@ -121,6 +124,7 @@ fn finish(
         ..passes::Layout::default()
     };
     passes::track_resources(&mut ir, &mut budget, profile, &mut layout)?;
+    passes::track_images(&mut ir, &mut budget, profile, &mut layout)?;
     passes::collect_info(&ir, &mut budget, profile, &mut layout)?;
     passes::allocate_bindings(&ir, &mut budget, profile, &mut layout)?;
     let module = spirv::emit::emit_program(&ir, &layout, profile, &mut budget)?;
@@ -181,6 +185,40 @@ fn manifest_of(
             LimitKind::SourceTable,
         )?;
     }
+    let mut images = Vec::new();
+    let mut samplers = Vec::new();
+    for (index, entry) in layout.images.iter().enumerate() {
+        budget.push(
+            &mut images,
+            ImageElement {
+                user_sgpr: entry.user_sgpr,
+                profile_index: entry.profile_index,
+                binding: spirv::emit::native_binding(
+                    stage,
+                    spirv::emit::BINDING_IMAGES + index as u32,
+                ),
+                first_use_pc: entry.first_use_pc,
+            },
+            profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+    }
+    for (index, entry) in layout.samplers.iter().enumerate() {
+        budget.push(
+            &mut samplers,
+            SamplerElement {
+                user_sgpr: entry.user_sgpr,
+                profile_index: entry.profile_index,
+                binding: spirv::emit::native_binding(
+                    stage,
+                    spirv::emit::BINDING_SAMPLERS + index as u32,
+                ),
+                first_use_pc: entry.first_use_pc,
+            },
+            profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+    }
     let mut inputs = Vec::new();
     for input in &layout.inputs {
         let entry = match input.kind {
@@ -238,6 +276,8 @@ fn manifest_of(
         buffer_binding: (!layout.buffers.is_empty())
             .then(|| spirv::emit::native_binding(stage, spirv::emit::BINDING_BUFFERS)),
         buffers,
+        images,
+        samplers,
         inputs,
         outputs,
         workgroup_size: profile.compute().map(|cs| cs.workgroup_size),

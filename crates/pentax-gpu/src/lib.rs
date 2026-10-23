@@ -64,3 +64,6 @@ pub use report::{
 
 #[cfg(test)]
 mod tests;
+
+pub mod image_descriptor;
+pub mod lod_stats;

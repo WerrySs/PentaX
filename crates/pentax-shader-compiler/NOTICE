@@ -91,3 +91,16 @@ context, specialize the actual IR before emission, preserve that dependency
 through buffer specialization, and validate it against sealed preparation and
 backend mode. Original live-v8 fixtures inspect real interfaces/capabilities;
 no device feature is enabled or concealed by this context.
+
+Original PentaX pixel image sampling2026 follows the publicly available
+Jetsku/KytyPS5 revision b719d67ce6bcfd21d402bd415f3e4f68e4793534:
+  src/graphics/shader/recompiler/backend/spirv/spirvEmitterImage.cpp:
+    sampled-image combination, implicit/explicit LOD sampling and ImageQueryLod.
+https://github.com/Jetsku/KytyPS5/blob/b719d67ce6bcfd21d402bd415f3e4f68e4793534/src/graphics/shader/recompiler/backend/spirv/spirvEmitterImage.cpp
+The existing GPL-2.0-only and retained Kyty MIT notices continue to apply.
+Descriptor provenance tracking, finite separate image/sampler bindings, immutable
+staged specialization and all image fixture programs are original PentaX code.
+The two added SPIR-V enumerants follow the Khronos SPIRV-Headers grammar:
+https://github.com/KhronosGroup/SPIRV-Headers/blob/01e0577914a75a2569c846778c2f93aa8e6feddd/include/spirv/unified1/spirv.hpp
+Khronos copyright and MIT permission remain in Khronos-MIT.txt. No GPU counter
+instrumentation or report publication is claimed by this sampling subset.

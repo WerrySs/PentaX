@@ -6,7 +6,7 @@
 // raw dwords, EmitMemory) and Attribute.cpp (V_INTERP_*, EXP and
 // ExportTargetKindFromTarget).
 // PentaX modifications: formatted, typed, sub-dword, atomic, TFE/LWE, FLAT,
-// DS, MIMG and scalar-address forms are typed refusals; descriptor SGPR bases
+// DS, unsupported MIMG modes and scalar-address forms are typed refusals; descriptor SGPR bases
 // must be 4-aligned scalar registers.
 
 use pentax_shader::{Family, Opcode as O, OperandKind, ShaderStage};
@@ -91,6 +91,7 @@ impl Translator<'_> {
             | O::SBufferLoadDwordx4
             | O::SBufferLoadDwordx8
             | O::SBufferLoadDwordx16 => self.s_buffer_load(),
+            O::ImageSample | O::ImageGetLod => self.image_sample(),
             O::SMemrealtime => Err(self.unsupported(U::RealtimeClock)),
             O::BufferLoadDword
             | O::BufferLoadDwordx2

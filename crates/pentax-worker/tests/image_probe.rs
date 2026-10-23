@@ -1638,3 +1638,6 @@ mod sse4a_bitfields;
 
 #[path = "image_probe/agc_wait_safe.rs"]
 mod agc_wait_safe;
+
+#[path = "image_probe/agc_lod_stats.rs"]
+mod agc_lod_stats;

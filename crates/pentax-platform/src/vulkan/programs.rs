@@ -94,6 +94,29 @@ pub(super) fn check_graphics_contract(
     {
         return Err(VulkanError::InvalidCompilerContract("graphics resources"));
     }
+    let images = manifest.images();
+    let samplers = manifest.samplers();
+    if images.len() > 16
+        || samplers.len() > 16
+        || stage != ShaderStage::Pixel && (!images.is_empty() || !samplers.is_empty())
+        || images.iter().enumerate().any(|(index, image)| {
+            image.profile_index != index
+                || image.binding != 58 + index as u32
+                || image.user_sgpr > 8
+                || !image.user_sgpr.is_multiple_of(4)
+        })
+        || samplers.iter().enumerate().any(|(index, sampler)| {
+            sampler.profile_index != index
+                || sampler.binding != 74 + index as u32
+                || sampler.user_sgpr > 12
+                || !sampler.user_sgpr.is_multiple_of(4)
+        })
+        || manifest.required_features().image_query() && images.is_empty()
+    {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics sampled image profile",
+        ));
+    }
     let expected_binding = if stage == ShaderStage::Vertex { 0 } else { 57 };
     let buffers = manifest.buffers();
     if buffers.len() > 1
@@ -152,6 +175,15 @@ fn check_contract_inner(
             "required device features",
         ));
     }
+    if !graphics_push
+        && (!manifest.images().is_empty()
+            || !manifest.samplers().is_empty()
+            || required.image_query())
+    {
+        return Err(VulkanError::InvalidCompilerContract(
+            "compute sampled resource profile",
+        ));
+    }
     if manifest.stage() != stage
         || manifest.entry_point() != "main"
         || manifest.descriptor_set() != 0
@@ -199,8 +231,17 @@ fn check_contract_inner(
             .checked_add(length)
             .filter(|&end| length != 0 && end <= words.len())
             .ok_or(VulkanError::InvalidCompilerContract("instruction bounds"))?;
-        if words[at] as u16 == 17 && (length != 2 || ![1, 61, 64, 4466].contains(&words[at + 1])) {
-            return Err(VulkanError::InvalidCompilerContract("SPIR-V capability"));
+        if words[at] as u16 == 17 {
+            let allowed = length == 2
+                && ([1, 61, 64, 4466].contains(&words[at + 1])
+                    || words[at + 1] == 50
+                        && graphics_push
+                        && stage == ShaderStage::Pixel
+                        && required.image_query()
+                        && !manifest.images().is_empty());
+            if !allowed {
+                return Err(VulkanError::InvalidCompilerContract("SPIR-V capability"));
+            }
         }
         at = end;
     }

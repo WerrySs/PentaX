@@ -174,6 +174,7 @@ pub enum Function {
     AgcDcbSetBaseIndirectArgs,
     AgcDcbDrawIndexIndirect,
     AgcDcbWaitUntilSafeForRendering,
+    AgcDcbGetLodStats,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.

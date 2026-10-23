@@ -9,6 +9,10 @@ use super::{
 use ash::vk;
 use std::ptr::NonNull;
 
+#[path = "resources/sampled.rs"]
+mod sampled;
+pub(super) use sampled::{SampledImage, SampledImageInfo, Sampler};
+
 pub(super) struct Buffer<'d> {
     device: &'d Device,
     pub raw: vk::Buffer,

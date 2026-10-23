@@ -11,6 +11,8 @@
 // subgroup policies are explicit checks.
 
 pub(crate) mod fold;
+mod images;
+pub(crate) use images::{discover_images, track_images};
 pub(crate) mod ssa;
 
 use pentax_shader::ShaderStage;
@@ -213,6 +215,8 @@ pub(crate) struct StageOutput {
 #[derive(Debug, Default)]
 pub(crate) struct Layout {
     pub buffers: Vec<BufferUse>,
+    pub images: Vec<images::ImageUse>,
+    pub samplers: Vec<images::ImageUse>,
     pub inputs: Vec<StageInput>,
     pub outputs: Vec<StageOutput>,
     pub user_data_registers: Vec<u8>,
@@ -231,6 +235,17 @@ impl Layout {
 
 /// Source descriptor-source recognition for the direct user-data form.
 fn user_data_base(ir: &Ir, budget: &Budget, handle: Value, pc: u32) -> Result<u8, CompileError> {
+    descriptor_base(ir, budget, handle, pc, Op::GetBufferResource, 4)
+}
+
+fn descriptor_base(
+    ir: &Ir,
+    budget: &Budget,
+    handle: Value,
+    pc: u32,
+    expected_op: Op,
+    width: u32,
+) -> Result<u8, CompileError> {
     let Some((id, inst)) = ir.producer(budget, handle)? else {
         return Err(CompileError::unsupported(
             pc,
@@ -238,13 +253,13 @@ fn user_data_base(ir: &Ir, budget: &Budget, handle: Value, pc: u32) -> Result<u8
             UnsupportedReason::DynamicDescriptor,
         ));
     };
-    if inst.op != Op::GetBufferResource {
+    if inst.op != expected_op {
         return Err(CompileError::Internal(
             "buffer operation without buffer handle",
         ));
     }
     let mut base = None;
-    for dword in 0..4u32 {
+    for dword in 0..width {
         let value = ir.resolve(budget, ir.arg(id, dword as usize))?;
         match ir.producer(budget, value)? {
             Some((_, d)) if d.op == Op::GetUserData => {
@@ -678,7 +693,8 @@ pub(crate) fn collect_info(
 }
 
 /// Source `AllocateBindings` (user data and memory offsets in push data,
-/// buffers in the Buffers array; no images, samplers, GDS, LDS or SRT here).
+/// buffers in the Buffers array; separate sampled-image and sampler bindings;
+/// no GDS, LDS or SRT).
 pub(crate) fn allocate_bindings(
     ir: &Ir,
     budget: &mut Budget,

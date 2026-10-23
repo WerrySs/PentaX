@@ -614,3 +614,6 @@ mod draw_index_indirect;
 
 #[path = "tests/wait_safe.rs"]
 mod wait_safe;
+
+#[path = "tests/lod_stats.rs"]
+mod lod_stats;

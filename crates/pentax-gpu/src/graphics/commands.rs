@@ -312,6 +312,11 @@ fn plan(
                 .ok_or(Error::Limit("command packets"))?;
             work(&mut usage, limits, 1)?;
             let header = Header::new(word(at));
+            if header.packet_type() == 3 && header.opcode() == 0x8e {
+                return Err(Error::Unsupported(
+                    "LOD statistics feedback is not supported",
+                ));
+            }
             let fail = |reason| Error::Packet {
                 buffer: buffer_index,
                 dword: at,

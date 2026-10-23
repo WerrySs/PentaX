@@ -488,3 +488,18 @@ refusals remain unchanged. The completed prepared product and Vulkan backend
 both reject a mismatch between compiler context and draw mode before device
 work; the backend uses the same firstInstance0 value it validated. This enables
 no embedded-fetch rewriting or general feature suppression.
+
+The bounded pixel image profile specializes the actual MIMG image/sampler
+requirements, decodes direct user T#/S# values, and captures the entire current
+GPU-readable source before producing owned tight mip uploads. The first profile
+is nonarray linear RGBA8 UNORM with normalized nearest/linear sampling. Physical
+mip rows retain source256-byte padding and reverse storage order; Vulkan uploads
+use checked logical extents and explicit mip offsets. The target cannot alias
+any image source, including padding. Descriptor/image/sampler counts, compiler
+arenas, vector capacities, device memory and work use the existing limits.
+
+Image-specific MIN_LOD, mip feedback, nonzero sampler bias, tiled/compressed
+textures and unmodeled controls explicitly refuse. This sampled image path does
+not implement GET_LOD_STATS reports or publish a ready header. Original CPU
+snapshot tests and the separately ignored actual sampled draw fixture cover
+different execution boundaries; neither is a commercial frame claim.

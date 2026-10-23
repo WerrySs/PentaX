@@ -108,3 +108,13 @@ presentation, textures/samplers, caches/invalidation, depth/blend specialization
 multi-queue/timeline scheduling, additional shader capabilities and graphics resource classes remain outside
 this profile. No game frame, startup or game
 compatibility is claimed by an original diagnostic result.
+
+The bounded sampled pixel path consumes only opaque compiled manifests and the
+GPU preparer's owned RGBA8 mip snapshots. Image58..73 and sampler74..89 bindings
+are checked against the pixel manifest; ImageQuery capability50 requires its
+exact compiler feature and pixel-image profile. No compute feature is promoted.
+Images, views, upload buffers, samplers and descriptors remain owned through the
+same batch fence/drain as the render target. Explicit host/transfer/shader
+barriers precede sampling; only fenced target readback reaches guest writeback.
+Unsupported format/filter/device limits and image clamps, feedback or sampler
+bias refuse without replacement samples. Existing nonimage entry points remain.

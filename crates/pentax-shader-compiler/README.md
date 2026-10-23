@@ -37,7 +37,7 @@ Unported forms return typed errors when encountered in translated code. These
 include 16-bit/packed and float64 operations, DPP/cross-lane forms, relative M0
 addressing, WQM, indirect calls/jump tables and irreducible dispatcher/goto
 fallbacks; mesh/local/tessellation stages; SRT/BDA, scalar-address/flat/global/
-scratch/DS/GDS/image memory, typed/formatted/sub-dword/atomic/status accesses;
+scratch/DS/GDS and unsupported image memory modes, typed/formatted/sub-dword/atomic/status accesses;
 and compressed, depth, auxiliary-position, or pixel-valid-mask/discard exports.
 This port does not reproduce optional device workarounds or a renderer's
 resource caches and synchronization.
@@ -166,3 +166,42 @@ capabilities and interfaces are still derived normally. Generic `Profile::new`,
 `compile` and `analyze` keep dynamic BaseInstance and their previous requirements.
 The dedicated entry grants no GPU authority: the graphics bridge must bind its
 sealed prepared mode and the backend must enforce actual firstInstance0.
+
+## Bounded pixel image sampling
+
+The image extension follows the public Jetsku/KytyPS5 revision
+`b719d67ce6bcfd21d402bd415f3e4f68e4793534` image sample and query lowerings.
+It accepts pixel-stage float 2D non-array, non-multisampled images with separate
+normalized, non-comparison samplers and zero texture-descriptor MIN_LOD. A
+nonzero per-image clamp is not represented by this initial profile and must be
+refused by resource admission, even if a shared sampler has its own LOD limits.
+`IMAGE_SAMPLE`, `IMAGE_SAMPLE_L`,
+`IMAGE_SAMPLE_LZ` and `IMAGE_GET_LOD` emit real SPIR-V sampled-image operations;
+query results retain both queried components. Coordinates and explicit LOD are
+f32. Sample DMASK components are packed into consecutive destination VGPRs.
+Sources are captured before overlapping destinations are written.
+
+`ShaderAnalysis::images()` and `samplers()` report live direct descriptor user
+SGPRs. An image must originate in eight consecutive unmodified user SGPRs and a
+sampler in four; each base is 4-aligned. Copies preserve original provenance;
+computed descriptors and indirect tables remain refused. `finish_with_images`
+continues the same budget and IR with exact `ImageDescription` and
+`SamplerDescription` lists. These describe admitted resource classes, not guest
+pointers, texture bytes, device ownership or completed work. The caller must
+validate and own the actual texture mip chain, format and sampler state. The
+compiler neither reads descriptors nor substitutes texture values.
+
+Each image gets its own set-zero binding, at kind1..16 in first-use order;
+samplers use kind17..32. The existing per-stage57 offset, buffer kind0 and
+shader-data kind54 remain unchanged. The manifest exposes each exact binding
+and profile association. Query modules explicitly declare `ImageQuery` and
+record that capability in `RequiredFeatures`. Recursive manifest allocation
+accounting includes images and samplers.
+
+Other dimensions, comparison, bias, derivatives, offsets, LOD clamps, NSA,
+A16/D16, status-return and 128-bit descriptors remain typed refusals. Queries
+currently admit only x/y DMASK bits. This extension does not provide LOD counter
+instrumentation, counter reports, texture upload, Vulkan execution or evidence
+of a rendered commercial frame. Original compiler fixtures inspect genuine
+SPIR-V operations and exact resource contracts; a separate backend must execute
+them before any physical sampling or image claim can be made.

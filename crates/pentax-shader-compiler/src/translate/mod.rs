@@ -9,6 +9,7 @@
 // lowered; register-pair overflow is rejected; source-defined defaults are
 // kept and documented in the README.
 
+mod image;
 mod memory;
 mod scalar;
 mod vector;
@@ -115,6 +116,7 @@ pub(crate) struct Decoded {
     pub src: [Opnd; 4],
     pub src_count: usize,
     pub memory: Option<MemoryAccess>,
+    pub image: Option<pentax_shader::Image>,
     pub export: Option<Export>,
 }
 
@@ -130,6 +132,7 @@ impl Decoded {
             src: encoded.map(Opnd::from_decoded),
             src_count: inst.sources().len(),
             memory: inst.memory(),
+            image: inst.image().copied(),
             export: inst.export(),
         }
     }
@@ -913,6 +916,7 @@ pub(crate) fn translate_program(
                 src: [Opnd::special(OperandKind::Unknown); 4],
                 src_count: 0,
                 memory: None,
+                image: None,
                 export: None,
             },
             branch_condition: None,

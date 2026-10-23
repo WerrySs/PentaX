@@ -21,6 +21,16 @@ pub struct BufferRequirement {
     pub first_use_pc: u32,
 }
 
+/// One live direct eight-dword image descriptor. No memory or device authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageRequirement {
+    pub user_sgpr: u8,
+    pub first_use_pc: u32,
+}
+
+/// One live direct four-dword sampler descriptor.
+pub type SamplerRequirement = ImageRequirement;
+
 /// Opaque optimized IR and its original stage contract. The same finite budget
 /// continues through specialization and emission; no IR or profile mutation is
 /// exposed. Dropping this value performs no guest or device operation.
@@ -30,9 +40,18 @@ pub struct ShaderAnalysis {
     budget: Budget,
     undefined: u32,
     requirements: Vec<BufferRequirement>,
+    images: Vec<ImageRequirement>,
+    samplers: Vec<SamplerRequirement>,
 }
 
 impl ShaderAnalysis {
+    pub fn images(&self) -> &[ImageRequirement] {
+        &self.images
+    }
+    pub fn samplers(&self) -> &[SamplerRequirement] {
+        &self.samplers
+    }
+
     pub fn buffers(&self) -> &[BufferRequirement] {
         &self.requirements
     }
@@ -53,14 +72,45 @@ impl ShaderAnalysis {
         self,
         descriptions: &[BufferDescription],
     ) -> Result<CompiledShader, CompileError> {
+        self.finish_with_images(descriptions, &[], &[])
+    }
+
+    /// Specialize exact live resources without exposing IR or descriptor memory.
+    /// Image descriptions admit only float sampled 2D images, sampler descriptions
+    /// only normalized, non-comparison sampling; backend ownership stays external.
+    pub fn finish_with_images(
+        self,
+        descriptions: &[BufferDescription],
+        image_descriptions: &[crate::ImageDescription],
+        sampler_descriptions: &[crate::SamplerDescription],
+    ) -> Result<CompiledShader, CompileError> {
         let Self {
             ir,
             profile,
             mut budget,
             undefined,
             requirements,
+            images,
+            samplers,
         } = self;
-        drop(requirements);
+        drop((requirements, images, samplers));
+        let mut images = Vec::new();
+        let mut samplers = Vec::new();
+        budget.reserve(
+            &mut images,
+            image_descriptions.len(),
+            crate::profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+        budget.reserve(
+            &mut samplers,
+            sampler_descriptions.len(),
+            crate::profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+        budget.charge_usize(image_descriptions.len() + sampler_descriptions.len())?;
+        images.extend_from_slice(image_descriptions);
+        samplers.extend_from_slice(sampler_descriptions);
         let mut buffers = Vec::new();
         budget.reserve(
             &mut buffers,
@@ -72,6 +122,7 @@ impl ShaderAnalysis {
         buffers.extend_from_slice(descriptions);
         let profile = profile
             .with_buffers(buffers)
+            .and_then(|profile| profile.with_images(images, samplers))
             .map_err(CompileError::Profile)?;
         crate::finish(ir, &profile, budget, undefined)
     }
@@ -79,25 +130,31 @@ impl ShaderAnalysis {
 
 /// Lower once through the same CFG, SSA, constant propagation, dead-code and
 /// policy passes as `compile`, then discover actual live direct resources.
-/// The caller supplies an empty buffer profile and later supplies exact buffer
+/// The caller supplies an empty resource profile and later supplies exact
 /// specializations; no descriptor memory or callbacks enter the compiler.
 pub fn analyze(
     program: &ShaderProgram,
     profile: Profile,
     limits: &Limits,
 ) -> Result<ShaderAnalysis, CompileError> {
-    if !profile.common().buffers.is_empty() {
+    if !profile.common().buffers.is_empty()
+        || !profile.common().images.is_empty()
+        || !profile.common().samplers.is_empty()
+    {
         return Err(CompileError::Profile(ProfileError::PredeclaredBuffers));
     }
     let mut budget = Budget::new(limits);
     let (ir, undefined) = crate::lower(program, &profile, &mut budget)?;
     let requirements = passes::discover_buffers(&ir, &mut budget)?;
+    let (images, samplers) = passes::discover_images(&ir, &mut budget)?;
     Ok(ShaderAnalysis {
         ir,
         profile,
         budget,
         undefined,
         requirements,
+        images,
+        samplers,
     })
 }
 

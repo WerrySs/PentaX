@@ -100,3 +100,9 @@ optional Vulkan feature, descriptor indexing or allocation-cap increase is
 introduced. The primary resource-count contracts are:
 https://docs.vulkan.org/spec/latest/chapters/limits.html
 https://docs.vulkan.org/spec/latest/chapters/descriptorsets.html
+
+The sampled-image extension uses the separately admitted GPU descriptor/mip
+metadata and original Rust Vulkan resource/barrier integration. Public field and
+layout references are retained in pentax-gpu/NOTICE at Jetsku/KytyPS5
+revisionb719d67ce6bcfd21d402bd415f3e4f68e4793534. All resource/barrier integration and fixtures here are original Rust additions;
+no replacement shader, texture pixels or statistics report is included.

@@ -1049,3 +1049,10 @@ refuses a wait stream before effects. See
 `../pentax-gpu/src/graphics/continuation.md` for ownership and transport details.
 Original token/CPU-frame fixtures and the separately ignored driver presentation
 fixture are distinct from a rendered game frame or performance result.
+
+The exact scoped GetLodStats producer encodes five words through the existing
+checked allocator and captures both stack scalars before a real grow callback.
+Its null-buffer and allocation-failure paths retain the source returns.
+Encoding does not publish statistics: submitted LOD packets explicitly refuse
+before an executable plan is exposed. Shader mip feedback, report collection,
+reset and completion publication require a separate execution implementation.

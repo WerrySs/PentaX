@@ -516,11 +516,11 @@ mod tests {
             driver.presentation_limits().unwrap().max_held_bytes,
             max_held - 1024
         );
-        // The session pixel ceiling does not replace the independent graphics
+        // The consumer aggregate ceiling can tighten the independent graphics
         // compiler/workspace ceiling. Actual external memory counts in both.
         assert_eq!(
             driver.graphics_host_limit().unwrap(),
-            driver.limits.graphics.max_host_bytes - 1024
+            driver.limits.graphics.max_host_bytes.min(max_held) - 1024
         );
         let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 65536).unwrap();
         assert!(matches!(

@@ -25,6 +25,7 @@ pub use ordered::{OrderedCommands, OrderedStep};
 mod linkage;
 mod prepare;
 mod state;
+mod textures;
 pub use commands::{
     Action, CommandLimits, CommandLocation, CommandPlan, CommandUsage, Draw, Flip, plan_commands,
 };
@@ -32,6 +33,7 @@ pub use linkage::{ShaderInterfaces, validate_shader_interfaces};
 pub use prepare::prepare_draw;
 pub use prepare::prepare_draw_with_target;
 pub use state::GraphicsState;
+pub use textures::{PreparedSampler, PreparedTexture, UploadedMip};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -254,6 +256,8 @@ pub struct PreparedDraw {
     indices: Option<PreparedIndices>,
     vertex_buffer: Option<PreparedBuffer>,
     pixel_buffer: Option<PreparedBuffer>,
+    pixel_images: Vec<PreparedTexture>,
+    pixel_samplers: Vec<PreparedSampler>,
     usage: Usage,
 }
 impl fmt::Debug for PreparedDraw {
@@ -268,6 +272,12 @@ impl fmt::Debug for PreparedDraw {
     }
 }
 impl PreparedDraw {
+    pub fn pixel_images(&self) -> &[PreparedTexture] {
+        &self.pixel_images
+    }
+    pub fn pixel_samplers(&self) -> &[PreparedSampler] {
+        &self.pixel_samplers
+    }
     pub fn vertex(&self) -> &CompiledShader {
         &self.vertex
     }

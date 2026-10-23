@@ -19,9 +19,14 @@ pub struct RequiredFeatures {
     pub(crate) draw_parameters: bool,
     pub(crate) subgroup_basic: bool,
     pub(crate) subgroup_ballot: bool,
+    pub(crate) image_query: bool,
 }
 
 impl RequiredFeatures {
+    pub fn image_query(&self) -> bool {
+        self.image_query
+    }
+
     /// SPIR-V header version word, currently 1.3 (`0x0001_0300`).
     pub fn spirv_version(&self) -> u32 {
         self.spirv_version
@@ -84,6 +89,25 @@ pub struct BufferElement {
     pub first_use_pc: u32,
 }
 
+/// One separate sampled-image descriptor, in live first-use order. It confers
+/// no guest memory access. The binding is exact, in descriptor set zero.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageElement {
+    pub user_sgpr: u8,
+    pub profile_index: usize,
+    pub binding: u32,
+    pub first_use_pc: u32,
+}
+
+/// One separate normalized, non-comparison sampler descriptor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SamplerElement {
+    pub user_sgpr: u8,
+    pub profile_index: usize,
+    pub binding: u32,
+    pub first_use_pc: u32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputInterface {
     VertexIndex,
@@ -136,6 +160,8 @@ pub struct Manifest {
     pub(crate) shader_data_binding: Option<u32>,
     pub(crate) buffer_binding: Option<u32>,
     pub(crate) buffers: Vec<BufferElement>,
+    pub(crate) images: Vec<ImageElement>,
+    pub(crate) samplers: Vec<SamplerElement>,
     pub(crate) inputs: Vec<InputInterface>,
     pub(crate) outputs: Vec<OutputInterface>,
     pub(crate) workgroup_size: Option<[u32; 3]>,
@@ -144,12 +170,29 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub fn images(&self) -> &[ImageElement] {
+        &self.images
+    }
+    pub fn samplers(&self) -> &[SamplerElement] {
+        &self.samplers
+    }
+
     /// Actual recursive vector capacities retained by this manifest. Fixed
     /// metadata is inline; there are no other owned allocations in its fields.
     pub fn retained_host_bytes(&self) -> usize {
-        self.buffers
+        self.images
             .capacity()
-            .saturating_mul(std::mem::size_of::<BufferElement>())
+            .saturating_mul(std::mem::size_of::<ImageElement>())
+            .saturating_add(
+                self.samplers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<SamplerElement>()),
+            )
+            .saturating_add(
+                self.buffers
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<BufferElement>()),
+            )
             .saturating_add(
                 self.inputs
                     .capacity()

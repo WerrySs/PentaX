@@ -707,3 +707,6 @@ mod primitive;
 
 #[path = "actual_draw_tests/draw_indirect.rs"]
 mod draw_indirect;
+
+#[path = "actual_draw_tests/sampled.rs"]
+mod sampled;

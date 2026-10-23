@@ -384,6 +384,11 @@ fn plan_commands_for_queue(
         budget.work(1)?;
         let at = frame.at;
         let header = Header::new(frame.word(at));
+        if header.packet_type() == 3 && header.opcode() == 0x8e {
+            return Err(Error::Unsupported(
+                "LOD statistics feedback is not supported",
+            ));
+        }
         let fail = |reason| Error::Packet { dword: at, reason };
         let length = if header.raw() == 0x8000_0000 {
             1

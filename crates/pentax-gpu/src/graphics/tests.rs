@@ -428,3 +428,7 @@ mod transfers;
 mod draw_indirect;
 
 mod native_instance;
+
+mod lod_stats;
+
+mod sampled_textures;

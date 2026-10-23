@@ -321,6 +321,21 @@ impl Device {
             .optimal_tiling_features
             .contains(vk::FormatFeatureFlags::TRANSFER_DST)
     }
+
+    pub fn sampled_rgba_supported(&self, linear: bool) -> bool {
+        // SAFETY: Fixed core format on the selected retained physical device.
+        let properties = unsafe {
+            self.instance
+                .raw
+                .get_physical_device_format_properties(self.physical, vk::Format::R8G8B8A8_UNORM)
+        };
+        let mut required =
+            vk::FormatFeatureFlags::SAMPLED_IMAGE | vk::FormatFeatureFlags::TRANSFER_DST;
+        if linear {
+            required |= vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR;
+        }
+        properties.optimal_tiling_features.contains(required)
+    }
 }
 
 impl Drop for Device {

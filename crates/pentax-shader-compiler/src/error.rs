@@ -86,7 +86,7 @@ pub enum UnsupportedReason {
     BarrierOutsideWorkgroup,
     /// S_LOAD through a scalar address: an SRT or BDA path that is not ported.
     ScalarAddressLoad,
-    /// A descriptor that is not four consecutive unmodified user SGPRs.
+    /// A descriptor that is not the required consecutive unmodified user SGPRs.
     DynamicDescriptor,
     MisalignedDescriptor,
     FormattedBuffer,
@@ -98,6 +98,7 @@ pub enum UnsupportedReason {
     LocalDataShare,
     GlobalDataShare,
     ImageOperation,
+    ImageMode,
     PerVertexInterpolation,
     InterpolationOnNonPixel,
     ExportTarget(u8),
@@ -143,7 +144,7 @@ impl UnsupportedReason {
             Self::BarrierOutsideWorkgroup => "S_BARRIER outside a compute workgroup",
             Self::ScalarAddressLoad => "scalar address loads (SRT/BDA) are not ported",
             Self::DynamicDescriptor => {
-                "descriptor is not four consecutive unmodified user SGPRs (dynamic SRT/BDA)"
+                "descriptor is not consecutive unmodified user SGPRs (dynamic SRT/BDA)"
             }
             Self::MisalignedDescriptor => "buffer descriptor SGPR base is not 4-aligned",
             Self::FormattedBuffer => "formatted buffer access is not ported",
@@ -154,7 +155,8 @@ impl UnsupportedReason {
             Self::FlatOrGlobalMemory => "FLAT/GLOBAL/SCRATCH memory (BDA) is not ported",
             Self::LocalDataShare => "LDS (DS) operations are not ported",
             Self::GlobalDataShare => "GDS operations are not ported",
-            Self::ImageOperation => "MIMG image operations are not ported",
+            Self::ImageOperation => "this MIMG image operation is not ported",
+            Self::ImageMode => "image mode requires an unsupported dimension, operand or stage",
             Self::PerVertexInterpolation => {
                 "raw per-vertex interpolation reads (PerVertexKHR) are not ported"
             }
@@ -203,7 +205,7 @@ pub enum ProfileError {
     StartInstanceRegister,
     VertexRegisterOverlap,
     ResourceCount,
-    /// Staged discovery requires an unspecialized buffer profile.
+    /// Staged discovery requires an unspecialized resource profile.
     PredeclaredBuffers,
     DuplicateResource,
     ResourceRegister,
@@ -215,17 +217,39 @@ pub enum ProfileError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceErrorKind {
     /// A buffer is accessed through user SGPRs that the profile does not declare.
-    MissingBuffer { user_sgpr: u8 },
+    MissingBuffer {
+        user_sgpr: u8,
+    },
     /// A declared buffer is never accessed (the profile must be exact).
-    UnusedBuffer { user_sgpr: u8 },
+    UnusedBuffer {
+        user_sgpr: u8,
+    },
     /// The program writes a buffer declared read-only.
-    AccessMismatch { user_sgpr: u8 },
+    AccessMismatch {
+        user_sgpr: u8,
+    },
     /// The program reads a buffer declared write-only.
-    ReadOfWriteOnly { user_sgpr: u8 },
+    ReadOfWriteOnly {
+        user_sgpr: u8,
+    },
     /// Descriptor dwords read from user SGPRs outside the declared user range.
-    OutsideUserData { user_sgpr: u8 },
+    OutsideUserData {
+        user_sgpr: u8,
+    },
     /// The source's 64-buffer table is full.
     BufferLimit,
+    MissingImage {
+        user_sgpr: u8,
+    },
+    MissingSampler {
+        user_sgpr: u8,
+    },
+    UnusedImage {
+        user_sgpr: u8,
+    },
+    UnusedSampler {
+        user_sgpr: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

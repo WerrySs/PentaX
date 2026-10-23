@@ -169,6 +169,7 @@ impl<'a> Builder<'a> {
                 self.required_features
                     .signed_zero_inf_nan_preserve_capability = true
             }
+            value if value == CapabilityImageQuery => self.required_features.image_query = true,
             value if value == CapabilityInt64 => self.required_features.shader_int64 = true,
             value if value == CapabilityDrawParameters => {
                 self.required_features.draw_parameters = true

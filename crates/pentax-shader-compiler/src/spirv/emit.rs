@@ -31,6 +31,8 @@ type R<T> = Result<T, CompileError>;
 
 /// Source `DescriptorBindingKind` values used here, and `NativeBinding`.
 pub(crate) const BINDING_BUFFERS: u32 = 0;
+pub(crate) const BINDING_IMAGES: u32 = 1;
+pub(crate) const BINDING_SAMPLERS: u32 = 17;
 pub(crate) const BINDING_SHADER_DATA: u32 = 54;
 const BINDING_GROUP: u32 = 57;
 
@@ -64,6 +66,8 @@ struct Emit<'a, 'b> {
     main_func: u32,
     push_var: u32,
     buffers_var: u32,
+    image_vars: Vec<u32>,
+    sampler_vars: Vec<u32>,
     shader_data_var: u32,
     inputs: Vec<(StageInput, u32)>,
     outputs: Vec<(crate::passes::StageOutput, u32)>,
@@ -159,6 +163,7 @@ impl Emit<'_, '_> {
             Type::U32x3 => self.ty_uvec(3),
             Type::U32x4 => self.ty_uvec(4),
             Type::F32x2 => self.ty_fvec(2),
+            Type::F32x4 => self.ty_fvec(4),
             Type::Void | Type::Resource => {
                 Err(CompileError::Internal("value type has no SPIR-V id"))
             }
@@ -1542,7 +1547,15 @@ impl Emit<'_, '_> {
                 let either = self.u32op(OpBitwiseOr, &[low, high])?;
                 self.cmp_const(OpINotEqual, either, 0)?
             }
-            Op::GetBufferResource => 0,
+            Op::GetBufferResource | Op::GetImageResource | Op::GetSamplerResource => 0,
+            Op::ImageSampleImplicit | Op::ImageSampleLod | Op::ImageQueryLod => {
+                self.emit_image(id)?
+            }
+            Op::CompositeExtractF32x2 | Op::CompositeExtractF32x4 => {
+                let value = self.arg(id, 0)?;
+                let ty = self.ty_f32()?;
+                self.op(OpCompositeExtract, ty, &[value, inst.aux])?
+            }
             Op::ReadConstBuffer => self.emit_read_const_buffer(id)?,
             Op::LoadBufferU32 => self.emit_buffer_load(id, 1)?,
             Op::LoadBufferU32x2 => self.emit_buffer_load(id, 2)?,
@@ -1891,8 +1904,86 @@ impl Emit<'_, '_> {
         Ok(variable)
     }
 
+    fn sampled_image_type(&mut self) -> R<u32> {
+        let f32_type = self.ty_f32()?;
+        // Sampled float 2D, no depth/array/multisampling, unknown storage format.
+        self.b.ty(
+            OpTypeImage,
+            &[f32_type, Dim2D, 0, 0, 0, 1, ImageFormatUnknown],
+        )
+    }
+
+    fn emit_image(&mut self, id: InstId) -> R<u32> {
+        let inst = self.ir.inst(id);
+        let image_index = (inst.aux & 0xffff) as usize;
+        let sampler_index = (inst.aux >> 16) as usize;
+        let image_var = *self
+            .image_vars
+            .get(image_index)
+            .ok_or(CompileError::Internal("image binding index"))?;
+        let sampler_var = *self
+            .sampler_vars
+            .get(sampler_index)
+            .ok_or(CompileError::Internal("sampler binding index"))?;
+        let image_type = self.sampled_image_type()?;
+        let sampler_type = self.b.ty(OpTypeSampler, &[])?;
+        let image = self.op(OpLoad, image_type, &[image_var])?;
+        let sampler = self.op(OpLoad, sampler_type, &[sampler_var])?;
+        let sampled_type = self.b.ty(OpTypeSampledImage, &[image_type])?;
+        let sampled = self.op(OpSampledImage, sampled_type, &[image, sampler])?;
+        let coords = self.arg(id, 2)?;
+        let op = self.ir.inst(id).op;
+        if op == Op::ImageQueryLod {
+            self.b.require_capability(CapabilityImageQuery)?;
+            let ty = self.ty_fvec(2)?;
+            self.op(OpImageQueryLod, ty, &[sampled, coords])
+        } else {
+            let ty = self.ty_fvec(4)?;
+            if op == Op::ImageSampleLod {
+                let lod = self.arg(id, 3)?;
+                self.op(
+                    OpImageSampleExplicitLod,
+                    ty,
+                    &[sampled, coords, ImageOperandsLodMask, lod],
+                )
+            } else {
+                self.op(OpImageSampleImplicitLod, ty, &[sampled, coords])
+            }
+        }
+    }
+
     /// Source `DefineDescriptors` (push data, Buffers, ShaderData).
     fn define_descriptors(&mut self) -> R<()> {
+        for index in 0..self.layout.images.len() {
+            let ty = self.sampled_image_type()?;
+            let variable = self.define_binding(
+                ty,
+                StorageClassUniformConstant,
+                "sampled_image",
+                BINDING_IMAGES + index as u32,
+            )?;
+            self.b.budget().push(
+                &mut self.image_vars,
+                variable,
+                crate::profile::MAX_IMAGES,
+                LimitKind::SourceTable,
+            )?;
+        }
+        for index in 0..self.layout.samplers.len() {
+            let ty = self.b.ty(OpTypeSampler, &[])?;
+            let variable = self.define_binding(
+                ty,
+                StorageClassUniformConstant,
+                "sampler",
+                BINDING_SAMPLERS + index as u32,
+            )?;
+            self.b.budget().push(
+                &mut self.sampler_vars,
+                variable,
+                crate::profile::MAX_IMAGES,
+                LimitKind::SourceTable,
+            )?;
+        }
         if self.layout.push_data_start.is_some() {
             let u = self.ty_u32()?;
             let count = self.const_u32(PUSH_DWORDS)?;
@@ -2036,6 +2127,8 @@ pub(crate) fn emit_program(
         main_func: 0,
         push_var: 0,
         buffers_var: 0,
+        image_vars: Vec::new(),
+        sampler_vars: Vec::new(),
         shader_data_var: 0,
         inputs: Vec::new(),
         outputs: Vec::new(),

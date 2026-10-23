@@ -18,6 +18,9 @@ use pentax_gpu::graphics::{IndexType, PreparedDraw, ShaderInterfaces, validate_s
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::CompiledShader;
 
+#[path = "graphics/sampled.rs"]
+mod sampled;
+
 fn extent(width: u32, height: u32) -> Result<usize, VulkanError> {
     width
         .checked_mul(height)
@@ -275,6 +278,21 @@ pub(super) fn run(
     limits: GpuLimits,
 ) -> Result<GraphicsReadback, VulkanError> {
     // All pure input/manifest/work admission precedes loader/device calls.
+    let sampled_upload_bytes = sampled::upload_length(prepared)?;
+    for texture in prepared.pixel_images() {
+        if texture.descriptor().min_lod_u4_8 != 0 || texture.descriptor().counter_id.is_some() {
+            return Err(VulkanError::Unsupported(
+                "sampled image clamp/feedback profile",
+            ));
+        }
+    }
+    if prepared
+        .pixel_samplers()
+        .iter()
+        .any(|sampler| sampler.descriptor().lod_bias_s6_8 != 0)
+    {
+        return Err(VulkanError::Unsupported("sampled LOD bias"));
+    }
     let mut budget = Budget::new(limits);
     let first_instance = prepared.first_instance();
     let vertex_offset = prepared.vertex_offset();
@@ -340,6 +358,7 @@ pub(super) fn run(
     )?)?;
     // Retained upload and completed owned readback coexist through publication.
     // Buffer::read_completed charges the latter before its fallible allocation.
+    budget.host(sampled_upload_bytes as u64)?;
     upload_bytes(
         length,
         indices.map_or(0, |(indices, _)| indices.bytes().len()),
@@ -412,17 +431,40 @@ pub(super) fn run(
             storage[index] = Some(buffer);
         }
     }
-    let pipeline = Pipeline::graphics_loaded(
-        &device,
-        prepared.vertex(),
-        prepared.pixel(),
-        &image,
-        [storage[0].as_ref(), storage[1].as_ref()],
-        &mut budget,
-    )?;
+    let sampled = sampled::SampledResources::new(&device, prepared, &mut budget)?;
+    // Admit the future completed pixel Vec before any submitted GPU effect.
+    if budget
+        .usage
+        .host_bytes
+        .checked_add(length as u64)
+        .is_none_or(|bytes| bytes > budget.limits.max_host_bytes)
+    {
+        return Err(VulkanError::Limit("graphics readback host bytes"));
+    }
+    let pipeline = if prepared.pixel_images().is_empty() && prepared.pixel_samplers().is_empty() {
+        Pipeline::graphics_loaded(
+            &device,
+            prepared.vertex(),
+            prepared.pixel(),
+            &image,
+            [storage[0].as_ref(), storage[1].as_ref()],
+            &mut budget,
+        )?
+    } else {
+        Pipeline::graphics_loaded_sampled(
+            &device,
+            prepared.vertex(),
+            prepared.pixel(),
+            &image,
+            [storage[0].as_ref(), storage[1].as_ref()],
+            sampled.bindings(),
+            &mut budget,
+        )?
+    };
     // The batch is declared last and drains uncertain submissions before any
     // pipeline, framebuffer, image or buffer owner can be destroyed.
     let batch = Batch::begin(&device, &mut budget)?;
+    sampled.record(&device, &batch, prepared, &mut budget)?;
     budget.command(
         (if index_buffer.is_some() { 10 } else { 9 })
             + u32::from(pipeline.set != vk::DescriptorSet::null()),

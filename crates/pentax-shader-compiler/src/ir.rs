@@ -34,6 +34,7 @@ pub(crate) enum Type {
     U32x3,
     U32x4,
     F32x2,
+    F32x4,
     Resource,
 }
 
@@ -64,6 +65,10 @@ macro_rules! ops {
         pub(crate) enum Op { $($(#[$attr])* $name),* }
 
         impl Op {
+    pub fn is_image(self) -> bool {
+        matches!(self, Self::ImageSampleImplicit | Self::ImageSampleLod | Self::ImageQueryLod)
+    }
+
             pub fn result(self) -> Type {
                 match self { $(Op::$name => Type::$result),* }
             }
@@ -117,6 +122,8 @@ ops! {
     CompositeConstructU32x3: U32x3(U32, U32, U32);
     CompositeConstructU32x4: U32x4(U32, U32, U32, U32);
     CompositeConstructF32x2: F32x2(F32, F32);
+    CompositeExtractF32x4: F32(F32x4);
+    CompositeExtractF32x2: F32(F32x2);
     CompositeExtractU64: U32(U64);
     CompositeExtractU32x2: U32(U32x2);
     CompositeExtractU32x3: U32(U32x3);
@@ -237,6 +244,11 @@ ops! {
     Ballot: U32x4(U1);
     AnyLane: U1(U1);
     GetBufferResource: Resource(U32, U32, U32, U32);
+    GetImageResource: Resource(U32, U32, U32, U32, U32, U32, U32, U32);
+    GetSamplerResource: Resource(U32, U32, U32, U32);
+    ImageSampleImplicit: F32x4(Resource, Resource, F32x2);
+    ImageSampleLod: F32x4(Resource, Resource, F32x2, F32);
+    ImageQueryLod: F32x2(Resource, Resource, F32x2);
     ReadConstBuffer: U32(Resource, U32);
     LoadBufferU32: U32(Resource, U32, U32, U32, U1);
     LoadBufferU32x2: U32x2(Resource, U32, U32, U32, U1);

@@ -63,6 +63,24 @@ pub struct BufferDescription {
     pub access: BufferAccess,
 }
 
+/// An admitted, non-array, non-multisampled float-sampled 2D image. The
+/// caller owns descriptor decoding, format, mip storage and memory authority.
+/// This initial profile requires zero texture-descriptor MIN_LOD; nonzero
+/// per-image clamps cannot be silently folded into a shared sampler.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageDescription {
+    /// First of eight consecutive, unmodified user SGPRs (4-aligned).
+    pub user_sgpr: u8,
+}
+
+/// An admitted normalized-coordinate, non-comparison sampler. Filtering,
+/// addressing and LOD limits are validated and bound by the caller.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SamplerDescription {
+    /// First of four consecutive, unmodified user SGPRs (4-aligned).
+    pub user_sgpr: u8,
+}
+
 /// The host subgroup execution the caller guarantees (for example through a
 /// required subgroup size). Its size must equal the guest wave size; without
 /// it, no live subgroup operation (ballot, any-lane, lane id) is accepted.
@@ -84,6 +102,8 @@ pub struct CommonDescription {
     /// First push-constant dword of the shader data (source `push_data_start_dword`).
     pub push_data_start_dword: u8,
     pub buffers: Vec<BufferDescription>,
+    pub images: Vec<ImageDescription>,
+    pub samplers: Vec<SamplerDescription>,
 }
 
 impl CommonDescription {
@@ -96,6 +116,8 @@ impl CommonDescription {
             undefined_registers: UndefinedRegisterPolicy::Reject,
             push_data_start_dword: 0,
             buffers: Vec::new(),
+            images: Vec::new(),
+            samplers: Vec::new(),
         }
     }
 }
@@ -199,6 +221,7 @@ pub struct Profile {
 }
 
 pub(crate) const MAX_BUFFERS: usize = 64;
+pub(crate) const MAX_IMAGES: usize = 16;
 pub(crate) const PIXEL_INPUTS: usize = 32;
 pub(crate) const PUSH_DWORDS: u32 = 32;
 
@@ -222,8 +245,43 @@ fn validate_common(common: &CommonDescription) -> Result<(), ProfileError> {
     {
         return Err(ProfileError::SubgroupSize);
     }
-    if common.buffers.len() > MAX_BUFFERS {
+    if common.buffers.len() > MAX_BUFFERS
+        || common.images.len() > MAX_IMAGES
+        || common.samplers.len() > MAX_IMAGES
+    {
         return Err(ProfileError::ResourceCount);
+    }
+    for (width, index, reg) in common
+        .images
+        .iter()
+        .enumerate()
+        .map(|(index, image)| (8, index, image.user_sgpr))
+        .chain(
+            common
+                .samplers
+                .iter()
+                .enumerate()
+                .map(|(index, sampler)| (4, index, sampler.user_sgpr)),
+        )
+    {
+        if reg % 4 != 0
+            || u32::from(reg) < u32::from(common.user_sgpr_base)
+            || u32::from(reg) + width > end
+        {
+            return Err(ProfileError::ResourceRegister);
+        }
+        let duplicate = if width == 8 {
+            common.images[..index]
+                .iter()
+                .any(|other| other.user_sgpr == reg)
+        } else {
+            common.samplers[..index]
+                .iter()
+                .any(|other| other.user_sgpr == reg)
+        };
+        if duplicate {
+            return Err(ProfileError::DuplicateResource);
+        }
     }
     for (index, buffer) in common.buffers.iter().enumerate() {
         let first = u32::from(buffer.user_sgpr);
@@ -352,6 +410,24 @@ impl Profile {
             StageDescription::Compute(c) => &mut c.common,
         };
         common.buffers = buffers;
+        let context = self.vertex_instance_contract;
+        let mut result = Self::new(self.desc)?;
+        result.vertex_instance_contract = context;
+        Ok(result)
+    }
+
+    pub(crate) fn with_images(
+        mut self,
+        images: Vec<ImageDescription>,
+        samplers: Vec<SamplerDescription>,
+    ) -> Result<Self, ProfileError> {
+        let common = match &mut self.desc {
+            StageDescription::Vertex(v) => &mut v.common,
+            StageDescription::Pixel(p) => &mut p.common,
+            StageDescription::Compute(c) => &mut c.common,
+        };
+        common.images = images;
+        common.samplers = samplers;
         let context = self.vertex_instance_contract;
         let mut result = Self::new(self.desc)?;
         result.vertex_instance_contract = context;
