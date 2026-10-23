@@ -404,7 +404,10 @@ fn native_video_aliases_use_exact_imported_abi_real_pending_frames_and_guarded_o
         assert_eq!(status, 0, "{text}");
         assert_eq!(fields["value"], "42", "{text}");
         assert_eq!(fields["unavailable_functions"], "0", "{text}");
-        assert_eq!(fields["video_flip_ready_with_frame"], "1", "{text}");
+        // The guest checked real pending1 before closing; close retires it.
+        assert_eq!(fields["video_flip_ready_with_frame"], "0", "{text}");
+        assert_eq!(fields["video_open_ports"], "0", "{text}");
+        assert_eq!(fields["video_registered_buffers"], "0", "{text}");
         assert_eq!(fields["video_flip_acknowledged"], "0", "{text}");
         for key in [
             "graphics_command_buffers",
