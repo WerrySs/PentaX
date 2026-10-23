@@ -247,8 +247,8 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         let info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
             .set_layouts(&layouts);
-        // SAFETY: One owned output and the exact layout from this live pool.
         result(
+            // SAFETY: One owned output and the exact layout from this live pool.
             unsafe {
                 (self.device.raw.fp_v1_0().allocate_descriptor_sets)(
                     self.device.raw.handle(),

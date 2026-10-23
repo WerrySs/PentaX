@@ -108,8 +108,8 @@ impl<'d> SampledImage<'d> {
             unsafe { device.raw.allocate_memory(&allocation, None) },
             "vkAllocateMemory(sampled)",
         )?;
-        // SAFETY: Aligned offset zero in the matching dedicated allocation.
         result(
+            // SAFETY: Aligned offset zero in the matching dedicated allocation.
             unsafe { device.raw.bind_image_memory(raw, image.memory, 0) },
             "vkBindImageMemory(sampled)",
         )?;
