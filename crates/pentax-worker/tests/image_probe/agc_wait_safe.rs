@@ -534,7 +534,7 @@ fn native_wait_safe_producer_refuses_null_allocation_memory_and_false_scope_with
                 p.ptr(7, DESCRIPTOR);
                 p.word(DESCRIPTOR + 32, 0);
             }
-            3 | 4 | 5 => p.ptr(7, DESCRIPTOR),
+            3..=5 => p.ptr(7, DESCRIPTOR),
             _ => {
                 p.ptr(7, DESCRIPTOR);
                 p.word(DESCRIPTOR + 16, 0);
