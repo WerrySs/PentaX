@@ -311,6 +311,14 @@ impl Driver {
                 }
                 GraphicsStep::Memory(index) => {
                     match plan.memory_action(index) {
+                        draw::MemoryAction::Synchronize(sync) => {
+                            // The admitted pure barrier preserves the current
+                            // fenced target and the unique pause loan.
+                            self.synchronize_commands(sync)?;
+                        }
+                        draw::MemoryAction::Annotation(marker) => {
+                            self.annotation_command(marker)?;
+                        }
                         draw::MemoryAction::Drain => {
                             // All prior work already fenced and wrote back.
                             // Counter admission cannot alter guest backing,
@@ -351,7 +359,7 @@ impl Driver {
                             cursor = Cursor::Paused(memory);
                         }
                     }
-                    // Every non-Drain action consumed the prior draw receipt,
+                    // Every non-barrier action consumed the prior draw receipt,
                     // including empty writes and read-only waits. A failed
                     // action returns before any later flip can consume it.
                     continue;

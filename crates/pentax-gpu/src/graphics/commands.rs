@@ -293,6 +293,10 @@ pub fn plan_commands(
                 1
             } else if crate::queue_reset::is_header(header.raw()) {
                 2
+            } else if let Some(words) = crate::memory_sync::packet_words(header.raw()) {
+                words
+            } else if let Some(words) = crate::marker::packet_words(header.raw()) {
+                words
             } else if header.raw() == 0xc004_105c {
                 6
             } else if header.raw() == 0xc006_1060 {
@@ -342,23 +346,35 @@ pub fn plan_commands(
             }
             if length > 1
                 && header.opcode() == 0x10
+                && crate::marker::packet_words(header.raw()).is_none()
+                && crate::memory_sync::packet_words(header.raw()).is_none()
                 && matches!(word(at + 1), 0x6875_0777 | 0x6875_0778 | 0x6875_0781)
             {
                 return Err(Error::Unsupported("unsupported graphics flip marker"));
             }
-            if length == 1 || (header.opcode() == 0x10 && header.raw() != 0xc006_1060) {
+            if length == 1
+                || (header.opcode() == 0x10
+                    && header.raw() != 0xc006_1060
+                    && crate::memory_sync::packet_words(header.raw()).is_none()
+                    && crate::marker::packet_words(header.raw()).is_none())
+            {
                 at = end;
                 continue;
             }
-            if (matches!(
-                header.opcode(),
-                0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42
-            ) || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
+            if (crate::memory_sync::packet_words(header.raw()).is_some()
+                || crate::marker::packet_words(header.raw()).is_some()
+                || matches!(
+                    header.opcode(),
+                    0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42
+                )
+                || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
                 && actions.len() >= action_count
             {
                 return Err(Error::Limit("command actions"));
             }
-            if matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
+            if crate::memory_sync::packet_words(header.raw()).is_some()
+                || crate::marker::packet_words(header.raw()).is_some()
+                || matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
             {
                 if memory.capacity() == 0 {
@@ -410,10 +426,15 @@ pub fn plan_commands(
                         .filter(|n| *n <= limits.max_packets)
                         .ok_or(Error::Limit("command packets"))?;
                 }
-                // This sealed parser/ME barrier cannot write guest memory or
+                // These sealed parser/ME and synchronization barriers cannot write guest memory or
                 // change a completed target. It preserves, but never creates,
                 // the previous draw's eligibility. Other actions remain stale.
-                let preserves_draw = matches!(&action, MemoryAction::Drain);
+                let preserves_draw = matches!(
+                    &action,
+                    MemoryAction::Drain
+                        | MemoryAction::Synchronize(_)
+                        | MemoryAction::Annotation(_)
+                );
                 actions.push(Action::Memory(memory.len()));
                 memory.push(action);
                 if !preserves_draw {

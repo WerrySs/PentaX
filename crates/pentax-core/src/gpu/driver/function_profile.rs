@@ -120,6 +120,14 @@ catalogue!(
     VideoAdjustColor,
     AgcAcbResetQueue,
     AgcDcbResetQueue,
+    AgcAcbAcquireMem,
+    AgcDcbAcquireMem,
+    AgcAcbEventWrite,
+    AgcDcbEventWrite,
+    AgcAcbPushMarker,
+    AgcDcbPushMarker,
+    AgcAcbPopMarker,
+    AgcDcbPopMarker,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

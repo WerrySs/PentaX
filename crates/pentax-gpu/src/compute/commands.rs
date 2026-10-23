@@ -91,6 +91,8 @@ pub(super) enum Action {
     Wait(MemoryWait),
     Release(Release),
     Drain,
+    Synchronize(super::Synchronization),
+    Annotation(super::Marker),
 }
 /// Immutable ordered views. Only this planner can construct the write/wait
 /// payloads, and the runtime never accepts detached command actions as input.
@@ -102,6 +104,9 @@ pub enum Command<'a> {
     /// Parser/ME synchronization. The serialized executor must finish all
     /// earlier work and its same-owner writeback before continuing.
     Drain,
+    /// A source-ordered barrier over the runtime's completed fenced work.
+    Synchronize(&'a super::Synchronization),
+    Annotation(&'a super::Marker),
 }
 
 /// Ordered graphics memory operation derived from a complete captured packet.
@@ -111,6 +116,8 @@ pub enum MemoryAction {
     Wait(MemoryWait),
     Release(Release),
     Drain,
+    Synchronize(super::Synchronization),
+    Annotation(super::Marker),
 }
 /// Immutable release admitted from actual packet bytes. Interrupts are emitted
 /// only after prior work and the optional label write complete successfully.
@@ -200,6 +207,8 @@ impl CommandPlan {
             Action::Wait(value) => Command::Wait(value),
             Action::Release(value) => Command::Release(value),
             Action::Drain => Command::Drain,
+            Action::Synchronize(value) => Command::Synchronize(value),
+            Action::Annotation(value) => Command::Annotation(value),
         })
     }
     pub fn commands(&self) -> impl Iterator<Item = Command<'_>> {
@@ -209,6 +218,8 @@ impl CommandPlan {
             Action::Wait(w) => Command::Wait(w),
             Action::Release(r) => Command::Release(r),
             Action::Drain => Command::Drain,
+            Action::Synchronize(value) => Command::Synchronize(value),
+            Action::Annotation(value) => Command::Annotation(value),
         })
     }
     pub fn usage(&self) -> CommandUsage {
@@ -371,6 +382,10 @@ fn plan_commands_for_queue(
             1
         } else if crate::queue_reset::is_header(header.raw()) {
             2
+        } else if let Some(words) = crate::memory_sync::packet_words(header.raw()) {
+            words
+        } else if let Some(words) = crate::marker::packet_words(header.raw()) {
+            words
         } else if header.raw() == 0xc006_1060 {
             8
         } else if header.raw() == 0xc002_7904 {
@@ -397,6 +412,24 @@ fn plan_commands_for_queue(
             if reset == crate::queue_reset::Reset::Processor {
                 state.reset();
             }
+            continue;
+        }
+        if crate::memory_sync::packet_words(header.raw()).is_some() {
+            if actions.len() >= limits.max_actions {
+                return Err(Error::Limit("command actions"));
+            }
+            budget.work((length + size_of::<super::Synchronization>()) as u64)?;
+            let sync = crate::memory_sync::decode(&frame.bytes[at * 4..end * 4]).map_err(fail)?;
+            actions.push(Action::Synchronize(sync));
+            continue;
+        }
+        if crate::marker::packet_words(header.raw()).is_some() {
+            if actions.len() >= limits.max_actions {
+                return Err(Error::Limit("command actions"));
+            }
+            budget.work((length * 4 + size_of::<super::Marker>()) as u64)?;
+            let marker = crate::marker::decode(&frame.bytes[at * 4..end * 4]).map_err(fail)?;
+            actions.push(Action::Annotation(marker));
             continue;
         }
         if length == 1 || (header.opcode() == 0x10 && header.raw() != 0xc006_1060) {
@@ -778,6 +811,8 @@ pub(crate) fn memory_packet(
         Action::Wait(wait) => MemoryAction::Wait(wait),
         Action::Release(release) => MemoryAction::Release(release),
         Action::Drain => MemoryAction::Drain,
+        Action::Synchronize(value) => MemoryAction::Synchronize(value),
+        Action::Annotation(value) => MemoryAction::Annotation(value),
         Action::Dispatch(_) => return Err(Error::Unsupported("single memory packet profile")),
     };
     Ok((action, plan.usage))

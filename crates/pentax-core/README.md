@@ -925,3 +925,32 @@ ACB reset discards prior modeled register authority and restores only mapped
 public defaults; DCB clears context state while preserving SH, uconfig and
 independent index/instance state. Reset invalidates an earlier draw's flip
 eligibility. These contracts do not establish commercial rendering or speed.
+
+The four AGC AcquireMem/EventWrite builders preserve the pinned209 producer ABI,
+including DCB's seventh stack argument, byte narrowing, truncated encoded cache
+coordinates and actual grow callbacks. Exact canonical and observed paired AGC
+bindings are appended after the existing graphics markers. Emission alone has no
+GPU effect. Submitted tagged AcquireMem and supported partial/cache-flush events
+become explicit, bounded ordered synchronization actions. Each previous actual
+draw/dispatch has already completed its fence and owned-memory writeback before
+this receiver retires the action. The receiver does not dereference encoded cache
+coordinates, fabricate cache state, signal a fence/event or create draw readiness.
+Unsupported query/ignored events remain explicit refusals. An original ignored
+Vulkan/window fixture covers one encoded draw, synchronization, flip, real
+presentation and owned acknowledgement; it requires separate hardware execution.
+
+The four exact AGC PushMarker/PopMarker bindings encode source diagnostic
+annotations through the existing owner-bound CommandBuffer/grow path. Push
+captures the first terminating byte's length before allocation, zeroes the full
+rounded destination after the header, then copies that captured length from the
+current post-callback source. It neither snapshots text before growth nor scans
+again afterward. Null buffers and source-defined allocation failures return zero;
+late memory faults retain the actual prefix and stop further submission. Text
+length, staging, work and output remain bounded by existing limits. Color is
+ignored as in the pinned producer. SetMarker aliases remain unavailable.
+
+Submitted exact Push/Pop packets are explicit bounded annotations in static,
+captured and live ordered plans. Their binary payload is never interpreted as a
+host C string or logged. They do not change modeled GPU state, synchronize work,
+signal events or create readiness; they retain only an already current draw's
+eligibility. This source support makes no claim about a commercial game frame.

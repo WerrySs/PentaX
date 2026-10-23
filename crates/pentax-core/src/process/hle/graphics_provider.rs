@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 229] = {
+const ENTRIES: [(&str, Function, usize, usize); 245] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 229] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 229];
+    let mut entries = [BASE_ENTRIES[0]; 245];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -167,6 +167,22 @@ const ENTRIES: [(&str, Function, usize, usize); 229] = {
         let (nid, function) = resets[i];
         entries[225 + i * 2] = (nid, function, 1, 1);
         entries[226 + i * 2] = (nid, function, 2, 2);
+        i += 1;
+    }
+    let synchronization = crate::gpu::driver::MEMORY_SYNC_EXPORTS;
+    i = 0;
+    while i < synchronization.len() {
+        let (nid, function) = synchronization[i];
+        entries[229 + i * 2] = (nid, function, 1, 1);
+        entries[230 + i * 2] = (nid, function, 2, 2);
+        i += 1;
+    }
+    let markers = crate::gpu::driver::MARKER_EXPORTS;
+    i = 0;
+    while i < markers.len() {
+        let (nid, function) = markers[i];
+        entries[237 + i * 2] = (nid, function, 1, 1);
+        entries[238 + i * 2] = (nid, function, 2, 2);
         i += 1;
     }
     entries
@@ -372,7 +388,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 229);
+        assert_eq!(provider.function_count(), 245);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -459,7 +475,7 @@ mod reset_queue_tests {
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 229);
+        assert_eq!(provider.function_count(), 245);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -471,6 +487,57 @@ mod reset_queue_tests {
             assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 2);
             for pair in [1, 2] {
                 let ordinal = 225 + offset * 2 + pair - 1;
+                assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
+                let marker = provider.markers().nth(ordinal).unwrap();
+                assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+                assert_eq!(marker.function, function);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod memory_sync_tests {
+    use super::*;
+    #[test]
+    fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 245);
+        assert_eq!(
+            ENTRIES[228],
+            ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
+        );
+        for (index, (nid, function)) in crate::gpu::driver::MEMORY_SYNC_EXPORTS
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 2);
+            for pair in [1, 2] {
+                let ordinal = 229 + index * 2 + pair - 1;
+                assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
+                let marker = provider.markers().nth(ordinal).unwrap();
+                assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+                assert_eq!(marker.function, function);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod marker_binding_tests {
+    use super::*;
+    #[test]
+    fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 245);
+        assert_eq!(
+            ENTRIES[228],
+            ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
+        );
+        for (index, (nid, function)) in crate::gpu::driver::MARKER_EXPORTS.into_iter().enumerate() {
+            assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 2);
+            for pair in [1, 2] {
+                let ordinal = 237 + index * 2 + pair - 1;
                 assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
                 let marker = provider.markers().nth(ordinal).unwrap();
                 assert_eq!(marker.id(), BASE + ordinal as u32 + 1);

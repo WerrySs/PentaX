@@ -716,7 +716,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 229);
+            assert_eq!(binding.factory.function_count(), 245);
             let open = binding
                 .factory
                 .markers()

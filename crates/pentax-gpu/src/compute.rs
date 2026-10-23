@@ -4,7 +4,10 @@
 
 //! Flat compute preparation and bounded stateful command plans without GPU writes.
 //! Register fields follow the pinned Kyty compute paths, not inferred reset state.
+pub use crate::marker::{Marker, MarkerKind};
+
 use crate::Header;
+pub use crate::memory_sync::{Synchronization, SynchronizationKind};
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
     BufferAccess, BufferDescription, CommonDescription, CompiledShader, ComputeDescription,
@@ -612,3 +615,11 @@ mod tests;
 #[cfg(test)]
 #[path = "compute/reset_tests.rs"]
 mod reset_tests;
+
+#[cfg(test)]
+#[path = "compute/sync_tests.rs"]
+mod sync_tests;
+
+#[cfg(test)]
+#[path = "compute/marker_tests.rs"]
+mod marker_tests;

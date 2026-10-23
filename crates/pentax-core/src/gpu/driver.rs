@@ -18,7 +18,9 @@ mod command_builder;
 #[path = "driver/flip_encoder.rs"]
 mod flip_encoder;
 pub(crate) use command_builder::EXPORTS as COMMAND_BUILDER_EXPORTS;
+pub(crate) use command_builder::MARKER_EXPORTS;
 pub(crate) use command_builder::RESET_EXPORTS as RESET_QUEUE_EXPORTS;
+pub(crate) use command_builder::SYNC_EXPORTS as MEMORY_SYNC_EXPORTS;
 pub(crate) use command_builder::supports as is_command_builder;
 pub(crate) use command_builder::{CommandBuilderAction, PendingCommandBuilder};
 #[path = "driver/function_profile.rs"]
@@ -142,6 +144,14 @@ pub enum Function {
     VideoAdjustColor,
     AgcAcbResetQueue,
     AgcDcbResetQueue,
+    AgcAcbAcquireMem,
+    AgcDcbAcquireMem,
+    AgcAcbEventWrite,
+    AgcDcbEventWrite,
+    AgcAcbPushMarker,
+    AgcDcbPushMarker,
+    AgcAcbPopMarker,
+    AgcDcbPopMarker,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -709,6 +719,14 @@ impl Driver {
                     }
                 };
                 let dispatch = match command {
+                    compute::Command::Synchronize(sync) => {
+                        self.synchronize_commands(sync)?;
+                        continue;
+                    }
+                    compute::Command::Annotation(marker) => {
+                        self.annotation_command(marker)?;
+                        continue;
+                    }
                     compute::Command::Drain => {
                         self.drain_commands()?;
                         continue;
@@ -908,6 +926,30 @@ impl Driver {
             .map_err(|_| Failure::Memory)?;
         self.usage.written_bytes = self.usage.written_bytes.saturating_add(size);
         Ok(())
+    }
+
+    fn annotation_command(&mut self, marker: &compute::Marker) -> Result<(), Failure> {
+        // Sealed source annotation. No GPU state, memory, barrier, signal or
+        // presentation effect; no host string interpretation or text logging.
+        let _ = marker.kind();
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            1,
+            self.limits.max_preparation_work,
+        )?;
+        Ok(())
+    }
+
+    fn synchronize_commands(&mut self, sync: &compute::Synchronization) -> Result<(), Failure> {
+        // The parser retains the exact payload and admits only supported source
+        // barriers. Every preceding GPU job has already fenced and completed
+        // owned writeback; no outstanding cache replica remains to invalidate.
+        // This performs no range dereference, label write, event or fake fence.
+        match (sync.kind(), sync.payload().len()) {
+            (compute::SynchronizationKind::Acquire, 7)
+            | (compute::SynchronizationKind::Event, 1) => self.drain_commands(),
+            _ => Err(Failure::UnsupportedQueue),
+        }
     }
 
     fn drain_commands(&mut self) -> Result<(), Failure> {

@@ -1602,3 +1602,9 @@ mod np_callbacks;
 
 #[path = "image_probe/agc_reset_queue.rs"]
 mod agc_reset_queue;
+
+#[path = "image_probe/agc_memory_sync.rs"]
+mod agc_memory_sync;
+
+#[path = "image_probe/agc_markers.rs"]
+mod agc_markers;

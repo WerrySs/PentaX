@@ -42,6 +42,8 @@ mod error;
 pub mod graphics;
 mod inspect;
 mod limits;
+mod marker;
+mod memory_sync;
 mod packet;
 mod queue_reset;
 mod registers;

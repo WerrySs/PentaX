@@ -558,3 +558,27 @@ Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT gra
 continue to apply. Original PentaX changes2026 provide checked owner-bound
 memory, bounded actual grow continuation, append-only exact bindings and
 source-ordered failure prefixes. No packet emission implies GPU completion.
+
+The four AcquireMem/EventWrite encoders additionally adapt the same public
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de:
+  src/libs/agc.cpp: AgcAcb/AgcDcb AcquireMem and EventWrite
+  src/libs/libAgcDriver.cpp: exact Graphics5 identities and signatures
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/libs/agc.cpp#L2998
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 preserve checked grow/stack argument and
+source-ordered packet publication, with exact append-only observed bindings.
+The serialized synchronization receiver relies on actual prior GPU fences and
+owned writeback. It does not fabricate cache state, fence/event completion or
+query results. Original bounded fixtures and a separately ignored hardware
+consumer contain no commercial command stream or asset.
+
+The four AGC PushMarker/PopMarker encoders additionally adapt the same public
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de:
+  src/libs/agc.cpp: AgcAcb/AgcDcb PushMarker and PopMarker
+  src/libs/libAgcDriver.cpp: exact Graphics5 identities and signatures
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/libs/agc.cpp#L4127
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 provide bounded live-owner length capture,
+real grow continuations, source-ordered zero/copy publication, exact append-only
+bindings and original memory/context consumers. No annotation text is logged;
+source memory is never treated as an ambient host string.

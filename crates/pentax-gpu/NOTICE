@@ -188,3 +188,30 @@ precharged reset/replay work, conservative unknown raw defaults, selected
 processor state effects and original static/ordered/indirect fixtures. The
 pinned209dffe Reset retains independent index base and instance fields; this
 is distinct from a later public revision's additional assignments.
+
+The explicit synchronization packet profile additionally adapts the same public
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+    CpOpAcquireMem and CpOpEventWrite
+  src/graphics/guest_gpu/graphicsRun.cpp: ExecEventWrite and EmitGlobalBarrier
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L1338
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/graphics/guest_gpu/graphicsRun.cpp#L3614
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 add sealed payload-retaining ordered actions,
+strict producer grammar, immutable indirect capture and existing-budget admission.
+The pinned AcquireMem handler consumes its payload without implementing a cache
+model. Supported event barriers rely on the execution receiver's actual serialized
+fence/writeback invariant; ignored and query events remain unsupported. All new
+fixtures are original and make no commercial rendering or performance claim.
+
+The bounded marker packet profile additionally adapts the same public
+KytyPS5-Performance revision209dffe9032d72749257ce18680d506b891284de:
+  src/graphics/guest_gpu/pm4.h: R_PUSH_MARKER and R_POP_MARKER
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+    CpOpPushMarker and CpOpPopMarker
+https://github.com/WerrySs/KytyPS5-Performance/blob/209dffe9032d72749257ce18680d506b891284de/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L2293
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 replace unbounded diagnostic string reads
+with sealed extent-only ordered annotations under existing admission limits.
+There is no invented GPU mutation, marker stack, synchronization or completion.
+All annotation, capture and refusal fixtures are original.

@@ -365,6 +365,14 @@ fn packet_words(bytes: &[u8]) -> Result<usize, Error> {
         crate::queue_reset::decode(header.raw(), word(bytes, 4)).map_err(Error::Unsupported)?;
         return Ok(2);
     }
+    if let Some(words) = crate::memory_sync::packet_words(header.raw()) {
+        crate::memory_sync::decode(bytes).map_err(Error::Unsupported)?;
+        return Ok(words);
+    }
+    if let Some(words) = crate::marker::packet_words(header.raw()) {
+        crate::marker::decode(bytes).map_err(Error::Unsupported)?;
+        return Ok(words);
+    }
     if header.raw() == 0xc004_105c {
         return Ok(6);
     }

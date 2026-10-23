@@ -374,3 +374,29 @@ The separate single-flat-compute preparation API refuses a processor reset after
 its sole dispatch rather than applying later state retroactively. Stateful
 queue plans retain the dispatch-position snapshot and publish final reset state
 only after admitted execution succeeds.
+
+Exact pinned209 tagged AcquireMem and a bounded EventWrite subset are retained
+as sealed ordered synchronization actions, including their actual payload.
+AcquireMem reserved words must be zero. Partial-flush events 7/15/16 admit source
+producer indices0/4; cache-flush events16h/31h/2ah/2ch/2eh admit index0. Addressed
+queries, upstream ignored events, other indices and native58h AcquireMem are not
+newly accepted. No cache-coordinate read or synthetic completion is performed.
+
+Static and immutable indirect plans validate these actions before effects; live
+ordered replay preserves their source position and existing work/action limits.
+A pure barrier retains eligibility only from an already completed current draw;
+it cannot create or repair eligibility invalidated by a write or target change.
+The separate single-flat compute API refuses these ordered-only packets. The
+execution receiver relies on completed real GPU fences and owned writeback, not
+on invented labels, interrupts, presentation or cache contents.
+
+Exact tagged AGC PushMarker/PopMarker packets are admitted as sealed ordered
+annotations. Push consumes precisely its captured packet extent, including
+binary bytes or a callback-modified terminator; Pop requires the producer's
+fixed two words and zero payload. Truncated, unsupported or oversized-header
+forms remain explicit refusals. Existing action/work/host bounds cover static,
+immutable indirect capture and live replay. No text is exposed in diagnostics,
+no host string is read, and no GPU state, cache, fence or event is fabricated.
+Annotations preserve only existing draw eligibility; a prior write still
+invalidates it. The separate single-flat compute API remains explicitly outside
+this ordered annotation profile.

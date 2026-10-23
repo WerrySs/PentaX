@@ -590,3 +590,9 @@ fn late_patch_rmw_fault_keeps_actual_source_prefix_and_prevents_replay() {
 
 #[path = "tests/reset_tests.rs"]
 mod reset_tests;
+
+#[path = "tests/memory_sync_tests.rs"]
+mod memory_sync_tests;
+
+#[path = "tests/marker_tests.rs"]
+mod marker_tests;

@@ -92,10 +92,28 @@ pub(crate) const RESET_EXPORTS: [(&str, Function); 2] = [
     ("TRO721eVt4g", Function::AgcDcbResetQueue),
 ];
 
+// Four separately verified memory/synchronization roles append after resets.
+pub(crate) const SYNC_EXPORTS: [(&str, Function); 4] = [
+    ("KT-hTp-Ch14", Function::AgcAcbAcquireMem),
+    ("57labkp+rSQ", Function::AgcDcbAcquireMem),
+    ("cFazmnXpJOE", Function::AgcAcbEventWrite),
+    ("aJf+j5yntiU", Function::AgcDcbEventWrite),
+];
+
+// Append-only exact observed marker roles; SetMarker is intentionally separate.
+pub(crate) const MARKER_EXPORTS: [(&str, Function); 4] = [
+    ("cpCILPya5Zk", Function::AgcAcbPushMarker),
+    ("+kSrjIVxKFE", Function::AgcDcbPushMarker),
+    ("6mFxkVqdmbQ", Function::AgcAcbPopMarker),
+    ("H7uZqCoNuWk", Function::AgcDcbPopMarker),
+];
+
 pub(crate) fn supports(function: Function) -> bool {
     EXPORTS
         .iter()
         .chain(RESET_EXPORTS.iter())
+        .chain(SYNC_EXPORTS.iter())
+        .chain(MARKER_EXPORTS.iter())
         .any(|(_, found)| *found == function)
 }
 
@@ -125,6 +143,7 @@ struct Packet {
     words: [u32; 16],
     written: usize,
     payload: Option<(u64, usize)>,
+    zero_payload: usize,
 }
 impl Packet {
     fn fixed(words: &[u32]) -> Self {
@@ -133,6 +152,7 @@ impl Packet {
             words: [0; 16],
             written: words.len(),
             payload: None,
+            zero_payload: 0,
         };
         result.words[..words.len()].copy_from_slice(words);
         result
@@ -227,7 +247,14 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
         | AgcAcbWriteData
         | AgcCbReleaseMem
         | AgcDcbWaitRegMem
-        | AgcAcbWaitRegMem => Ok(0),
+        | AgcAcbWaitRegMem
+        | AgcAcbAcquireMem
+        | AgcDcbAcquireMem
+        | AgcAcbEventWrite
+        | AgcAcbPushMarker
+        | AgcDcbPushMarker
+        | AgcAcbPopMarker
+        | AgcDcbPopMarker => Ok(0),
         AgcCbSetShRegisterRangeDirect
         | AgcDcbSetShRegisterDirect
         | AgcDcbSetCxRegisterDirect
@@ -240,6 +267,7 @@ fn stack_count(function: Function) -> usize {
     use Function::*;
     match function {
         AgcCbReleaseMem => 6,
+        AgcDcbAcquireMem => 1,
         AgcDcbWaitRegMem => 3,
         AgcDcbWriteData | AgcAcbWriteData | AgcAcbWaitRegMem => 2,
         _ => 0,
@@ -250,6 +278,68 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcAcbAcquireMem | AgcDcbAcquireMem => {
+            // Pinned209dffe producer framing differs from the later public
+            // native-opcode encoder. Alignment/high-bit conditions only warn.
+            let (engine, cb_db, gcr, base, size, poll) = if function == AgcAcbAcquireMem {
+                (1u32, 0, a[1], args[2], args[3], a[4])
+            } else {
+                (
+                    u32::from(args[1] as u8) & 1,
+                    a[2],
+                    a[3],
+                    args[4],
+                    args[5],
+                    a[6],
+                )
+            };
+            Packet::fixed(&[
+                pm4(8, 0x10, 0x14),
+                (engine << 31) | cb_db,
+                if size == u64::MAX {
+                    0
+                } else {
+                    (size >> 8) as u32
+                },
+                0,
+                (base >> 8) as u32,
+                0,
+                poll / 40,
+                gcr,
+            ])
+        }
+        AgcAcbEventWrite | AgcDcbEventWrite => {
+            let event = args[1] as u8;
+            if function == AgcAcbEventWrite {
+                Packet::fixed(&[
+                    pm4(2, 0x46, 0),
+                    u32::from(event & 63) | if event == 7 { 0x400 } else { 0 },
+                ])
+            } else {
+                if event > 63 {
+                    return Err(Failure::UnsupportedQueue);
+                }
+                if event & 0xfe == 0x38 {
+                    Packet::fixed(&[
+                        pm4(4, 0x46, 0),
+                        0x100 | u32::from(event),
+                        a[2] & !7,
+                        (args[2] >> 32) as u32,
+                    ])
+                } else {
+                    Packet::fixed(&[
+                        pm4(2, 0x46, 0),
+                        u32::from(event)
+                            | if matches!(event, 7 | 15 | 16) {
+                                0x400
+                            } else {
+                                0
+                            },
+                    ])
+                }
+            }
+        }
+        AgcAcbPopMarker | AgcDcbPopMarker => Packet::fixed(&[pm4(2, 0x10, 12), 0]),
         AgcAcbResetQueue => {
             if a[1] & !0x1c2 != 0 {
                 return Err(Failure::UnsupportedQueue);
@@ -389,6 +479,7 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
                 words: [0; 16],
                 written: count as usize,
                 payload: None,
+                zero_payload: 0,
             };
             let w = &mut value.words;
             w[..4].copy_from_slice(&[
@@ -544,15 +635,65 @@ fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failur
         return None;
     }
     Some(match function {
-        AgcCbNop | AgcCbDispatch | AgcDcbSetNumInstances | AgcDcbWriteData | AgcAcbWriteData => {
-            Ok(0)
-        }
+        AgcCbNop
+        | AgcCbDispatch
+        | AgcDcbSetNumInstances
+        | AgcDcbWriteData
+        | AgcAcbWriteData
+        | AgcAcbEventWrite
+        | AgcAcbPushMarker
+        | AgcDcbPushMarker
+        | AgcAcbPopMarker
+        | AgcDcbPopMarker => Ok(0),
         AgcWaitRegMemPatchAddress | AgcWaitRegMemPatchReference => Ok(INVALID_PACKET),
         _ => Err(Failure::UnsupportedQueue),
     })
 }
 
 impl Driver {
+    fn marker_packet(
+        &mut self,
+        memory: &PausedNativeMemory<'_>,
+        source: u64,
+    ) -> Result<Packet, Failure> {
+        // strlen+1 is captured before AllocateDW and a possible real callback.
+        // Only length survives: payload bytes are read after header/zero stores.
+        let mut length = 1usize;
+        if source != 0 {
+            loop {
+                if length > MAX_PAYLOAD_BYTES {
+                    return Err(Failure::Limit);
+                }
+                self.usage.preparation_work = add(
+                    self.usage.preparation_work,
+                    4,
+                    self.limits.max_preparation_work,
+                )?;
+                let at = source
+                    .checked_add(length as u64 - 1)
+                    .ok_or(Failure::Memory)?;
+                let mut byte = [0];
+                memory.read(at, &mut byte).map_err(|_| Failure::Memory)?;
+                if byte[0] == 0 {
+                    break;
+                }
+                length = length.checked_add(1).ok_or(Failure::Limit)?;
+            }
+        }
+        let rounded = length.checked_add(3).ok_or(Failure::Limit)? & !3;
+        if rounded > MAX_PAYLOAD_BYTES {
+            return Err(Failure::Limit);
+        }
+        let words = u32::try_from(1 + rounded / 4).map_err(|_| Failure::Limit)?;
+        let mut packet = Packet::fixed(&[pm4(words, 0x10, 11)]);
+        packet.allocate = words;
+        packet.zero_payload = rounded;
+        if source != 0 {
+            packet.payload = Some((source, length));
+        }
+        Ok(packet)
+    }
+
     fn patch_command(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
@@ -725,8 +866,16 @@ impl Driver {
                     u64::from_le_bytes(bytes.try_into().map_err(|_| Failure::Memory)?);
             }
         }
-        let Some(packet) = packet(function, full)? else {
-            return Ok(CommandBuilderAction::Returned(0));
+        let packet = if matches!(
+            function,
+            Function::AgcAcbPushMarker | Function::AgcDcbPushMarker
+        ) {
+            self.marker_packet(memory, args[1])?
+        } else {
+            let Some(packet) = packet(function, full)? else {
+                return Ok(CommandBuilderAction::Returned(0));
+            };
+            packet
         };
         let allocation = u64::from(packet.allocate)
             .checked_mul(4)
@@ -735,9 +884,11 @@ impl Driver {
             return Err(Failure::Limit);
         }
         let payload_length = packet.payload.map_or(0, |(_, length)| length);
+        let staging_length = payload_length.max(packet.zero_payload);
         let output = (packet.written as u64)
             .checked_mul(4)
             .and_then(|n| n.checked_add(payload_length as u64))
+            .and_then(|n| n.checked_add(packet.zero_payload as u64))
             .and_then(|n| n.checked_add(8))
             .ok_or(Failure::Limit)?;
         // Fixed4096 covers the descriptor/argument reads and at most eighteen
@@ -765,7 +916,7 @@ impl Driver {
                 .ok_or(Failure::Limit)?;
         }
         if work > self.limits.commands.max_work
-            || payload_length > self.limits.commands.max_host_bytes
+            || staging_length > self.limits.commands.max_host_bytes
         {
             return Err(Failure::Limit);
         }
@@ -785,7 +936,7 @@ impl Driver {
         )?;
         let mut payload = Vec::new();
         payload
-            .try_reserve_exact(payload_length)
+            .try_reserve_exact(staging_length)
             .map_err(|_| Failure::Allocation)?;
         if payload.capacity() > self.limits.commands.max_host_bytes
             || function != Function::AgcCbSetShRegisterRangeDirect
@@ -794,7 +945,7 @@ impl Driver {
             return Err(Failure::Limit);
         }
         self.usage.memory_written_bytes = write_bytes;
-        payload.resize(payload_length, 0);
+        payload.resize(staging_length, 0);
         let (up, count) = available(memory, args[0])?;
         let mut pending = PendingCommandBuilder {
             owner: memory.owner_id(),
@@ -925,6 +1076,16 @@ impl Driver {
                 pending.preflight_work,
             )?;
         }
+        if pending.packet.zero_payload != 0 {
+            // The entire rounded payload is zeroed before reading the current
+            // source bytes, including source aliases changed by these stores.
+            self.command_write(
+                memory,
+                up.checked_add(4).ok_or(Failure::Memory)?,
+                &pending.payload[..pending.packet.zero_payload],
+                pending.preflight_work,
+            )?;
+        }
         if let Some((source, length)) = pending.packet.payload
             && length != 0
         {
@@ -949,12 +1110,12 @@ impl Driver {
                 )
                 .map_err(|_| Failure::Memory)?;
             memory
-                .read(source, &mut pending.payload)
+                .read(source, &mut pending.payload[..length])
                 .map_err(|_| Failure::Memory)?;
             self.command_write(
                 memory,
                 destination,
-                &pending.payload,
+                &pending.payload[..length],
                 pending.preflight_work,
             )?;
         }

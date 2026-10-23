@@ -392,3 +392,6 @@ fn actual_current_draw_refuses_surface_clock_and_capture_failures_without_leakin
 
 #[path = "drain_flip_tests.rs"]
 mod drain_flip_tests;
+
+#[path = "memory_sync_tests.rs"]
+mod memory_sync_tests;

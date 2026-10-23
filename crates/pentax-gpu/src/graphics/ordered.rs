@@ -248,7 +248,9 @@ impl OrderedCommands {
                 _ => {}
             }
             let draw = matches!(header.opcode(), 0x27 | 0x35 | 0x2d);
-            let memory = matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
+            let memory = crate::memory_sync::packet_words(header.raw()).is_some()
+                || crate::marker::packet_words(header.raw()).is_some()
+                || matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904);
             let flip = header.raw() == 0xc004_105c;
             if draw {
