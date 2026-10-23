@@ -293,7 +293,16 @@ fn execution_specializes_zero_and_four_live_resources_with_one_compiler_ledger()
     assert_eq!(prepared.buffer_address(), None);
     assert_eq!(source.snapshots.borrow().len(), 4);
     assert_eq!(source.preflights.get(), 1);
-    assert!(prepared.usage().work < limits.compiler_phase_work * 4);
+    // This original shader has ten instructions and one direct invocation.
+    // The unchanged bounded walker is separate from the three compiler phases;
+    // four descriptors cost sixteen words and four snapshots cost 256 bytes.
+    let shader_walk_work = 64 * (limits.max_shader_words as u64).pow(2);
+    let execution_work = prepared.usage().invocations * 10;
+    assert_eq!(prepared.usage().invocations, 1);
+    assert_eq!(
+        prepared.usage().work,
+        3 * limits.compiler_phase_work + shader_walk_work + execution_work + 16 + 256
+    );
     assert!(prepared.usage().host_bytes < limits.compiler_phase_bytes * 4);
 }
 
