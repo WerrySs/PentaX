@@ -29,7 +29,8 @@ Device/queue owners are neither Send nor Sync, and the only queue is private.
 No optional device feature is silently enabled or assumed. The profile requires
 Vulkan 1.2 and the actual float32 signed-zero/Inf/NaN preservation property
 declared by the compiler. A live subgroup requirement is admitted only for
-native subgroup32 and the exact supported shader stages/BASIC/BALLOT operations.
+the exact native subgroup size and supported shader stages/BASIC/BALLOT
+operations. Compute permits compiler-required32 or64; graphics retains32.
 Subgroup-size-control extensions, Int64 and draw-parameter shaders are currently
 typed unsupported. Fixed device/family enumeration caps are 32/64; excess or
 changing counts are refused without a driver-sized allocation/retry loop.
@@ -131,3 +132,12 @@ boundary. Logical intervals survive this backend's per-draw device lifetime by
 fenced snapshot/reupload; no persistent-device claim is made. Query-only and
 counter-disabled draws leave the prior logical snapshot unchanged. The backend
 never publishes a guest report-ready header. Existing nonimage APIs remain.
+
+Compute wave64 uses the opaque manifest's required subgroup width. Native
+subgroup32 cannot satisfy a live64 requirement, even if BASIC/BALLOT exists.
+No varying-size pipeline flag, optional subgroup-size-control extension or
+cross-subgroup emulation is introduced. All-active per-lane and compute64 logical lane/mask lookup products
+with no surviving cross-lane operation need no native64 property. Mask-only
+compute64 uses LocalInvocationIndex modulo64; surviving Ballot/AnyLane keeps
+native64 and native lane numbering. This source subset
+does not make general wave64 shaders executable on native32-only devices.

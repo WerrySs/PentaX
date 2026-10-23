@@ -152,7 +152,16 @@ pub(crate) fn check_policies(
                     }
                     UndefinedRegisterPolicy::Undefined => undefined += 1,
                 },
-                Op::Ballot | Op::AnyLane | Op::LaneId if profile.common().subgroup.is_none() => {
+                Op::Ballot | Op::AnyLane if profile.common().subgroup.is_none() => {
+                    return Err(CompileError::unsupported(
+                        inst.pc,
+                        None,
+                        UnsupportedReason::RequiresExactSubgroup,
+                    ));
+                }
+                Op::LaneId
+                    if profile.common().subgroup.is_none() && !profile.local_wave64_lane_id() =>
+                {
                     return Err(CompileError::unsupported(
                         inst.pc,
                         None,

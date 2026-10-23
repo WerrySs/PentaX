@@ -172,7 +172,7 @@ impl Budget<'_> {
 /// remain unknown. Fields are private and Debug never exposes register contents.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ComputeState {
-    values: [Option<u32>; 27],
+    values: [Option<u32>; 29],
     indirect_base: Option<u64>,
 }
 impl Default for ComputeState {
@@ -193,7 +193,7 @@ impl fmt::Debug for ComputeState {
 impl ComputeState {
     pub const fn empty() -> Self {
         Self {
-            values: [None; 27],
+            values: [None; 29],
             indirect_base: None,
         }
     }
@@ -215,6 +215,12 @@ impl ComputeState {
             0x212..=0x213 => 8 + (reg - 0x212) as usize,
             0x228 => 10,
             0x240..=0x24f => 11 + (reg - 0x240) as usize,
+            // Public HwShSetCsRegister treats these exact registers as scheduling
+            // hints. Retain their opaque values in queue/dispatch snapshots;
+            // serialized host execution does not adopt guest occupancy or pace
+            // as host quotas, memory authority or shader resource configuration.
+            0x215 => 27,
+            0x22a => 28,
             _ => return None,
         })
     }
@@ -374,6 +380,16 @@ pub fn prepare(
     prepare_state(regs, groups, mode, memory, budget)
 }
 
+// Exact public CS_W32_EN selects the guest wave width. Other initiator controls
+// retain the existing bounded profile; no subgroup width is inferred from host.
+fn dispatch_wave_size(mode: u32) -> Result<WaveSize, Error> {
+    match mode {
+        0x0001 | 0x0005 | 0x0041 => Ok(WaveSize::Wave64),
+        0x8001 | 0x8005 | 0x8041 => Ok(WaveSize::Wave32),
+        _ => Err(Error::Unsupported("compute dispatch initiator")),
+    }
+}
+
 /// Compile a private register snapshot derived by complete command admission.
 /// Resource reads happen now, so an earlier completed dispatch's output can be
 /// consumed by the next dispatch on the same exclusively paused owner.
@@ -386,9 +402,7 @@ pub fn prepare_dispatch(
         limits,
         usage: Usage::default(),
     };
-    if !matches!(dispatch.mode, 0x8001 | 0x8005 | 0x8041) {
-        return Err(Error::Unsupported("wave32 dispatch initiator"));
-    }
+    dispatch_wave_size(dispatch.mode)?;
     let mut groups = dispatch.groups;
     if let Some(address) = dispatch.indirect {
         budget.work(12)?;
@@ -431,9 +445,7 @@ fn prepare_state(
     mut budget: Budget<'_>,
 ) -> Result<PreparedCompute, Error> {
     let limits = budget.limits;
-    if !matches!(mode, 0x8001 | 0x8005 | 0x8041) {
-        return Err(Error::Unsupported("wave32 direct dispatch initiator"));
-    }
+    let wave_size = dispatch_wave_size(mode)?;
     if mode & 4 == 0 {
         for reg in 0x204..=0x206 {
             if regs.get(reg)? != 0 {
@@ -531,8 +543,10 @@ fn prepare_state(
             .checked_mul(program.instruction_count() as u64)
             .ok_or(Error::Limit("shader execution work"))?,
     )?;
-    let mut common = CommonDescription::new(WaveSize::Wave32);
-    common.subgroup = Some(SubgroupProfile { size: 32 });
+    let mut common = CommonDescription::new(wave_size);
+    common.subgroup = Some(SubgroupProfile {
+        size: wave_size.lanes(),
+    });
     common.user_sgpr_count = user_count;
     budget.host(std::mem::size_of::<BufferDescription>())?;
     common
@@ -627,3 +641,11 @@ mod marker_tests;
 #[cfg(test)]
 #[path = "compute/transfer_tests.rs"]
 mod transfer_tests;
+
+#[cfg(test)]
+#[path = "compute/hint_tests.rs"]
+mod hint_tests;
+
+#[cfg(test)]
+#[path = "compute/wave_tests.rs"]
+mod wave_tests;

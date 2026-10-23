@@ -1647,3 +1647,6 @@ mod video_presentation_aliases;
 
 #[path = "image_probe/agc_driver_submit_alias.rs"]
 mod agc_driver_submit_alias;
+
+#[path = "image_probe/compute_scheduling_hints.rs"]
+mod compute_scheduling_hints;

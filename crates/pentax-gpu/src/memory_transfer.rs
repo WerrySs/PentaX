@@ -8,6 +8,7 @@
 enum Source {
     Memory(u64),
     Fill(u32),
+    Gds(usize),
     Empty,
 }
 
@@ -15,6 +16,7 @@ enum Source {
 pub struct Transfer {
     source: Source,
     destination: u64,
+    destination_gds: bool,
     bytes: usize,
     words: [u32; 7],
     word_count: usize,
@@ -27,6 +29,7 @@ impl std::fmt::Debug for Transfer {
     }
 }
 impl Transfer {
+    pub const GDS_BYTES: usize = crate::memory_transfer::GDS_BYTES;
     pub fn byte_count(&self) -> usize {
         self.bytes
     }
@@ -46,6 +49,20 @@ impl Transfer {
         } else {
             None
         }
+    }
+    /// GDS offsets are a distinct device-local namespace, never guest addresses.
+    pub fn source_gds_offset(&self) -> Option<usize> {
+        if let Source::Gds(offset) = self.source {
+            Some(offset)
+        } else {
+            None
+        }
+    }
+    pub fn destination_gds_offset(&self) -> Option<usize> {
+        self.destination_gds.then_some(self.destination as usize)
+    }
+    pub fn uses_gds(&self) -> bool {
+        self.destination_gds || matches!(self.source, Source::Gds(_))
     }
     /// Exact captured control/address words for explicit auditing, not Debug/logs.
     pub fn packet(&self) -> &[u32] {
@@ -70,6 +87,18 @@ fn extent(address: u64, bytes: usize, alignment: usize) -> Result<(), &'static s
     }
     Ok(())
 }
+/// Public BufferCache owns one 64KiB GDS allocation; offsets are byte offsets.
+pub const GDS_BYTES: usize = 64 * 1024;
+fn gds_extent(offset: u64, bytes: usize) -> Result<usize, &'static str> {
+    if !offset.is_multiple_of(4)
+        || offset
+            .checked_add(bytes as u64)
+            .is_none_or(|end| end > GDS_BYTES as u64)
+    {
+        return Err("GDS extent/alignment profile");
+    }
+    usize::try_from(offset).map_err(|_| "GDS extent/alignment profile")
+}
 pub(crate) fn decode(input: &[u8]) -> Result<Transfer, &'static str> {
     let header = input.get(..4).ok_or("transfer header")?;
     let header = u32::from_le_bytes(header.try_into().unwrap());
@@ -87,6 +116,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<Transfer, &'static str> {
     let mut result = Transfer {
         source: Source::Empty,
         destination,
+        destination_gds: false,
         bytes: 0,
         words,
         word_count: count,
@@ -107,13 +137,19 @@ pub(crate) fn decode(input: &[u8]) -> Result<Transfer, &'static str> {
         }
         let src = (control >> 29 & 3) | (words[6] >> 24 & 4) | (words[6] >> 25 & 8);
         let dst = (control >> 20 & 3) | (words[6] >> 25 & 4) | (words[6] >> 26 & 8);
-        // Source's discard/query/register/nowhere/GDS domains are not modeled.
-        if destination as u32 == 0x3022c || !matches!(dst, 0 | 3) || !size.is_multiple_of(4) {
+        // Discard/query/register/nowhere remain outside the checked profile.
+        if destination as u32 == 0x3022c || !matches!(dst, 0 | 1 | 3) || !size.is_multiple_of(4) {
             return Err("DMA destination/count profile");
         }
-        extent(destination, size, 4)?;
+        if dst == 1 {
+            gds_extent(destination, size)?;
+            result.destination_gds = true;
+        } else {
+            extent(destination, size, 4)?;
+        }
         result.bytes = size;
         result.source = match src {
+            1 if dst != 1 => Source::Gds(gds_extent(source, size)?),
             0 | 3 => {
                 extent(source, size, 4)?;
                 Source::Memory(source)
@@ -145,3 +181,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<Transfer, &'static str> {
     }
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "memory_transfer/gds_tests.rs"]
+mod gds_tests;

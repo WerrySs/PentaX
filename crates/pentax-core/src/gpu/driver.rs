@@ -301,6 +301,7 @@ pub(crate) struct Driver {
     usage: Usage,
     function_profile: FunctionProfile,
     queues: [compute::ComputeState; 56],
+    gds: Option<memory_transfer::GdsState>,
     graphics: draw::GraphicsState,
     lod_stats: Option<lod_stats::LodStatsState>,
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
@@ -403,6 +404,7 @@ impl Driver {
             usage: Usage::default(),
             function_profile: FunctionProfile::default(),
             queues: [compute::ComputeState::empty(); 56],
+            gds: None,
             graphics: draw::GraphicsState::empty(),
             lod_stats: None,
             graphics_owner: None,
@@ -865,6 +867,21 @@ impl Driver {
                     .max_preparation_work
                     .saturating_sub(self.usage.preparation_work),
             );
+            // Retained GDS coexists with the plan before any plan allocation.
+            // Keep per-command and shared host ceilings distinct; queued
+            // graphics/video storage consumes the latter, not packet authority.
+            if self.gds_retained_bytes() != 0 {
+                let available = self
+                    .graphics_host_ceiling()?
+                    .min(self.limits.compute.max_host_bytes)
+                    .checked_sub(self.graphics_held_bytes()?)
+                    .ok_or(Failure::Limit)?;
+                command_limits.max_host_bytes = command_limits
+                    .max_host_bytes
+                    .checked_sub(self.gds_retained_bytes())
+                    .ok_or(Failure::Limit)?
+                    .min(available);
+            }
             let mut plan = register_execution::ComputeCommands::prepare(
                 memory,
                 compute::CommandRange {
@@ -940,11 +957,25 @@ impl Driver {
                         continue;
                     }
                     compute::Command::Transfer(transfer) => {
+                        let held = plan
+                            .usage()
+                            .host_bytes
+                            .checked_add(staging.capacity())
+                            .ok_or(Failure::Limit)?;
+                        let transfer_host_limit = command_limits.max_host_bytes.min(
+                            self.limits
+                                .commands
+                                .max_host_bytes
+                                .checked_sub(self.gds_retained_bytes())
+                                .ok_or(Failure::Limit)?,
+                        );
                         self.transfer_command(
                             memory,
                             transfer,
                             plan.command_ranges(),
                             &mut staging,
+                            held,
+                            transfer_host_limit,
                         )?;
                         continue;
                     }
@@ -969,6 +1000,13 @@ impl Driver {
                     .max_invocations
                     .saturating_sub(self.usage.invocations);
                 let mut limits = self.limits.compute;
+                if self.gds_retained_bytes() != 0 {
+                    limits.max_host_bytes = limits
+                        .max_host_bytes
+                        .min(self.graphics_host_ceiling()?)
+                        .checked_sub(self.graphics_held_bytes()?)
+                        .ok_or(Failure::Limit)?;
+                }
                 if self.shaders.lookup_work() > 1
                     && let Ok(address) = dispatch.shader_address()
                 {

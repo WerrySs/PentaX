@@ -128,7 +128,7 @@ fn transfer_whole_plan_rejects_late_invalid_domains_or_full_output_budgets_befor
         vec![0xc004_4000, 0x104, 0x8000, 0, 0x9000, 0], // unsupported register source8
         vec![0xc004_4000, 0x10105, 1, 0, 0x9000, 0],    // immediate64
         vec![0xc004_4000, 0x4000_0104, 1, 0, 0x9000, 0], // reference clock9
-        vec![0xc005_5000, 0x2000_0000, 0x8000, 0, 0x9000, 0, 16], // GDS
+        vec![0xc005_5000, 0x2010_0000, 0x8000, 0, 0x9000, 0, 16], // GDS-to-GDS
         vec![0xc005_5000, 0, 0x8000, 0, 0x9000, 0, 6],  // partial word
         vec![0xc005_5000, 0, 0x8000, 0, 0x9001, 0, 4],
         vec![0xc005_5000, 0, 0x8000, 0, 0x3022c, 0, 4], // source discard profile unavailable

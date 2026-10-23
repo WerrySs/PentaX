@@ -249,3 +249,25 @@ packing, actual GPU reset, command ordering, barriers, fence completion and
 provides no host counter model, invented ready state, report writes or claim
 of completed GPU work. Original compiler fixtures inspect real operations and
 control-flow domination; separate physical fixtures must validate execution.
+
+
+Compute logical Wave64 lane selection
+-------------------------------------
+
+For compute programs whose live cross-lane IR is limited to lane identity,
+PentaX obtains the guest lane from `LocalInvocationIndex & 63`. This preserves
+both EXEC halves and the lane-local MBCNT operation across X-major workgroups,
+including multiple logical waves per workgroup. The implicit scalar input is
+shared with TG_SIZE when that guest value is used. The emitted manifest does
+not require a native subgroup merely for this lane-local mapping.
+
+This is an original portable lowering, not a claim of a physical 64-lane
+subgroup. Programs with surviving Ballot or AnyLane operations retain the
+native lane input and an exact native subgroup requirement; they do not use
+this lowering. Wave32 and graphics paths retain their existing contracts.
+No workgroup barrier, ballot approximation, or host shader is introduced.
+Scalar guest state remains per-invocation IR; this change supplies no new
+cross-lane communication or shared-memory semantics. Original compiler tests
+consume decoded shaders and emitted scalar SPIR-V data flow, including lanes
+31/32/63, TG_SIZE input sharing and multidimensional workgroups. They are not
+physical GPU execution evidence; that belongs to separate checked fixtures.

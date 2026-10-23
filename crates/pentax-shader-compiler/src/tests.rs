@@ -5,6 +5,7 @@ mod capacities;
 mod fixtures;
 mod images;
 mod interpolation;
+mod logical_wave64;
 mod matrix;
 use super::*;
 use pentax_shader::ShaderStage;

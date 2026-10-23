@@ -5,7 +5,7 @@
 use super::{
     Budget, ComputeReadback, GpuLimits, VulkanError,
     commands::{Batch, buffer_host_barrier},
-    device::Device,
+    device::{Device, DeviceRequirements},
     pipeline::Pipeline,
     programs::check_contract,
     resources::Buffer,
@@ -42,7 +42,18 @@ pub(super) fn run(
     } else {
         vk::ShaderStageFlags::empty()
     };
-    let device = Device::open(subgroup, ballot, &mut budget)?;
+    // No varying-subgroup-size pipeline flag or size-control extension is used.
+    // Live wave operations require the exact native size from this manifest;
+    // a native32 device never impersonates a logical64 subgroup.
+    let device = Device::open_required(
+        DeviceRequirements {
+            subgroup_stages: subgroup,
+            ballot_stages: ballot,
+            required_subgroup_size: shader.manifest().required_subgroup_size(),
+            ..Default::default()
+        },
+        &mut budget,
+    )?;
     let local = shader
         .manifest()
         .workgroup_size()

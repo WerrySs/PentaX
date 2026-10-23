@@ -508,6 +508,12 @@ impl Profile {
         self.common().wave_size == WaveSize::Wave64
     }
 
+    // Compute wave positions follow X-major workgroup order, independently of
+    // the host subgroup width. This does not implement cross-lane operations.
+    pub(crate) fn local_wave64_lane_id(&self) -> bool {
+        self.compute().is_some() && self.wave64()
+    }
+
     pub(crate) fn pixel(&self) -> Option<&PixelDescription> {
         match &self.desc {
             StageDescription::Pixel(p) => Some(p),

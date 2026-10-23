@@ -132,6 +132,7 @@ fn finish(
         &layout,
         profile,
         module.uses_subgroup,
+        module.uses_logical_lane,
         module.required_features,
         &mut budget,
     )?;
@@ -147,6 +148,7 @@ fn manifest_of(
     layout: &passes::Layout,
     profile: &Profile,
     uses_subgroup: bool,
+    uses_logical_lane: bool,
     required_features: RequiredFeatures,
     budget: &mut budget::Budget,
 ) -> Result<Manifest, CompileError> {
@@ -264,6 +266,14 @@ fn manifest_of(
         budget.push(
             &mut inputs,
             InputInterface::HelperInvocation,
+            128,
+            LimitKind::SourceTable,
+        )?;
+    }
+    if uses_logical_lane && !inputs.contains(&InputInterface::LocalInvocationIndex) {
+        budget.push(
+            &mut inputs,
+            InputInterface::LocalInvocationIndex,
             128,
             LimitKind::SourceTable,
         )?;

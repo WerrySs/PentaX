@@ -212,11 +212,10 @@ fn check_contract_inner(
             "stage/resources/subgroup",
         ));
     }
-    if (required.subgroup_basic() || required.subgroup_ballot())
-        && manifest.required_subgroup_size() != Some(32)
-        || manifest
-            .required_subgroup_size()
-            .is_some_and(|size| size != 32)
+    let size = manifest.required_subgroup_size();
+    let supported_size = size == Some(32) || stage == ShaderStage::Compute && size == Some(64);
+    if (required.subgroup_basic() || required.subgroup_ballot()) && !supported_size
+        || size.is_some() && !supported_size
     {
         return Err(VulkanError::InvalidCompilerContract("subgroup size"));
     }
@@ -448,6 +447,111 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    #[test]
+    fn compiled_compute_exec_masks_keep_their_wave_width_in_the_backend_contract() {
+        for (wave, size, name) in [
+            (WaveSize::Wave32, 32, "compute-exec32-original"),
+            (WaveSize::Wave64, 64, "compute-exec64-original"),
+        ] {
+            let mut common = CommonDescription::new(wave);
+            common.subgroup = Some(SubgroupProfile { size });
+            common.user_sgpr_count = 6;
+            common.buffers.push(BufferDescription {
+                user_sgpr: 0,
+                stride: 0,
+                swizzle: false,
+                index_stride: 0,
+                access: BufferAccess::WriteOnly,
+            });
+            let words = [
+                binary(0x25, 1, 137, 0),
+                binary(0x1a, 2, 130, 0),
+                0xbefe_0404, // Dynamic low/high EXEC from user s[4:5].
+                0xe070_1000,
+                (128 << 24) | (1 << 8) | 2,
+                0xbf81_0000,
+            ];
+            let mut budget = Budget::new(super::super::GpuLimits::default());
+            let shader = one(
+                &words,
+                StageDescription::Compute(ComputeDescription {
+                    common,
+                    workgroup_size: [64, 1, 1],
+                    thread_ids: 1,
+                    group_id: [false; 3],
+                    workgroup_register: 6,
+                    tg_size: false,
+                    float_mode: 0xc0,
+                }),
+                ShaderStage::Compute,
+                &mut budget,
+            )
+            .unwrap();
+            if size == 64 {
+                assert_eq!(shader.manifest().required_subgroup_size(), None);
+                assert!(!shader.manifest().required_features().subgroup_basic());
+                assert!(!shader.manifest().required_features().subgroup_ballot());
+                assert_eq!(
+                    shader
+                        .manifest()
+                        .inputs()
+                        .iter()
+                        .filter(|input| **input
+                            == pentax_shader_compiler::InputInterface::LocalInvocationIndex)
+                        .count(),
+                    1
+                );
+            } else {
+                assert_eq!(shader.manifest().required_subgroup_size(), Some(32));
+                assert!(shader.manifest().required_features().subgroup_basic());
+            }
+            assert_eq!(shader.manifest().undefined_register_reads(), 0);
+            assert!(check_contract(&shader, ShaderStage::Vertex).is_err());
+            validate_optional(name, &shader);
+        }
+        // Genuine EXECZ/AnyLane communication keeps its actual64-lane native
+        // contract; portable mask-bit lookup does not waive that requirement.
+        let mut common = CommonDescription::new(WaveSize::Wave64);
+        common.subgroup = Some(SubgroupProfile { size: 64 });
+        common.user_sgpr_count = 6;
+        common.buffers.push(BufferDescription {
+            user_sgpr: 0,
+            stride: 0,
+            swizzle: false,
+            index_stride: 0,
+            access: BufferAccess::WriteOnly,
+        });
+        let words = [
+            unary(1, 1, 135),
+            binary(0x1a, 2, 130, 0),
+            0xbefe_0404,
+            0xbf88_0002, // EXEC pair, S_CBRANCH_EXECZ past store.
+            0xe070_1000,
+            (128 << 24) | (1 << 8) | 2,
+            0xbf81_0000,
+        ];
+        let mut budget = Budget::new(super::super::GpuLimits::default());
+        let shader = one(
+            &words,
+            StageDescription::Compute(ComputeDescription {
+                common,
+                workgroup_size: [64, 1, 1],
+                thread_ids: 1,
+                group_id: [false; 3],
+                workgroup_register: 6,
+                tg_size: false,
+                float_mode: 0xc0,
+            }),
+            ShaderStage::Compute,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(shader.manifest().required_subgroup_size(), Some(64));
+        assert!(shader.manifest().required_features().subgroup_basic());
+        assert!(shader.manifest().required_features().subgroup_ballot());
+        validate_optional("compute-anylane64-original", &shader);
+    }
+
     #[test]
     fn original_programs_compile_with_retained_binding_and_stage_metadata_without_ffi() {
         for fixture in [

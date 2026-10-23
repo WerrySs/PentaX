@@ -310,3 +310,30 @@ https://github.com/Jetsku/KytyPS5/tree/b719d67ce6bcfd21d402bd415f3e4f68e4793534/
 https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/chapters/textures.adoc
 Existing copyright and GPL-2.0-only notices are retained. No commercial payload,
 replacement sample result or precomputed statistics report is included.
+
+The closed compute scheduling-hint register admission references PUBLIC
+KytyPS5/KytyPS5 revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+    HwShSetCsRegister, COMPUTE_RESOURCE_LIMITS and COMPUTE_PACE_ID cases,
+    and HwShIgnoreComputeRegister (lines 968, 1048-1050).
+  src/graphics/guest_gpu/pm4.h: exact register offsets 0x215 and 0x22a.
+PentaX retains both opaque values in bounded queue/dispatch state instead of
+silently discarding their writes. Its serialized fenced execution uses host
+scheduling; these values grant no memory, resource, quota or completion
+permission. Reset leaves their values unknown without a proven default.
+Other offsets, including scratch-ring 0x218, remain typed unsupported.
+Original fixtures contain no title command bytes or observed payload values.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L986
+
+Compute wave-width admission additionally uses the same PUBLIC7b revision's
+src/graphics/guest_gpu/pm4.h: ComputeWaveSize and CS_W32_EN bit15, and
+src/graphics/guest_gpu/graphicsRun.cpp: CommandProcessor::DispatchDirect.
+The existing compiler Wave64/high-mask lowering is selected explicitly;
+original PentaX device-contract changes require exact native subgroup size
+only when the resulting compiler manifest requires live subgroup operations.
+This does not implement portable64-lane wave operations on a32-lane device.
+
+DMA GDS selector and offset-bound contracts follow public KytyPS5 revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, CpOpDmaData and CommandProcessor::DmaData, plus BufferCache::FillBuffer/CopyBuffer. Copyright (c) 2021 InoriRus; upstream GPL-2.0-only. Original bounded Rust implementation and synthetic consumers.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/cache/bufferCache.cpp

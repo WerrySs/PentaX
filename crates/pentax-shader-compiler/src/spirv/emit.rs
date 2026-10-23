@@ -76,6 +76,7 @@ struct Emit<'a, 'b> {
     outputs: Vec<(crate::passes::StageOutput, u32)>,
     interface: Vec<u32>,
     subgroup_lane_var: u32,
+    local_lane_var: u32,
     memory_offsets: Vec<u32>,
     position_slice: Vec<bool>,
 }
@@ -1526,12 +1527,17 @@ impl Emit<'_, '_> {
                 self.ext_f32(instruction, &[a])?
             }
             Op::LaneId => {
-                if self.subgroup_lane_var == 0 {
-                    return Err(CompileError::Internal(
-                        "subgroup lane input was not declared",
-                    ));
+                if self.local_lane_var != 0 {
+                    let index = self.u32op(OpLoad, &[self.local_lane_var])?;
+                    self.and_const(index, 63)?
+                } else {
+                    if self.subgroup_lane_var == 0 {
+                        return Err(CompileError::Internal(
+                            "subgroup lane input was not declared",
+                        ));
+                    }
+                    self.u32op(OpLoad, &[self.subgroup_lane_var])?
                 }
-                self.u32op(OpLoad, &[self.subgroup_lane_var])?
             }
             Op::Ballot => {
                 let a = self.arg(id, 0)?;
@@ -1688,7 +1694,7 @@ impl Emit<'_, '_> {
     }
 
     /// Source `DefineInputs`.
-    fn define_inputs(&mut self, uses_lane: bool) -> R<()> {
+    fn define_inputs(&mut self, uses_lane: bool, logical_lane: bool) -> R<()> {
         let pixel = self.profile.stage() == ShaderStage::Pixel;
         for index in 0..self.layout.inputs.len() {
             let input = self.layout.inputs[index];
@@ -1765,7 +1771,24 @@ impl Emit<'_, '_> {
                 LimitKind::SourceTable,
             )?;
         }
-        if uses_lane {
+        if logical_lane {
+            if let Some((_, variable)) = self
+                .inputs
+                .iter()
+                .find(|(input, _)| input.kind == InputKind::Builtin(Builtin::LocalInvocationIndex))
+            {
+                self.local_lane_var = *variable;
+            } else {
+                let u = self.ty_u32()?;
+                let variable =
+                    self.define_interface(u, StorageClassInput, "gl_LocalInvocationIndex")?;
+                self.b.annotate(
+                    OpDecorate,
+                    &[variable, DecorationBuiltIn, BuiltInLocalInvocationIndex],
+                )?;
+                self.local_lane_var = variable;
+            }
+        } else if uses_lane {
             let u = self.ty_u32()?;
             let variable =
                 self.define_interface(u, StorageClassInput, "gl_SubgroupInvocationID")?;
@@ -2225,6 +2248,7 @@ impl Emit<'_, '_> {
 pub(crate) struct EmittedModule {
     pub words: Vec<u32>,
     pub uses_subgroup: bool,
+    pub uses_logical_lane: bool,
     pub required_features: crate::manifest::RequiredFeatures,
 }
 
@@ -2240,6 +2264,10 @@ pub(crate) fn emit_program(
     let uses_lane = count_ops(ir, |op| op == Op::LaneId);
     budget.charge_usize(ir.insts.len())?;
     let uses_ballot = count_ops(ir, |op| matches!(op, Op::Ballot | Op::AnyLane));
+    // A module that communicates through native ballots keeps native lane
+    // numbering too. Only lane-local mask selection can use logical waves.
+    let logical_lane = uses_lane && profile.local_wave64_lane_id() && !uses_ballot;
+    let native_lane = uses_lane && !logical_lane;
     let insts = ir.insts.len();
     let blocks = ir.blocks.len();
     let ids = budget.table(insts, 0u32, usize::MAX, LimitKind::Bytes)?;
@@ -2269,18 +2297,19 @@ pub(crate) fn emit_program(
         outputs: Vec::new(),
         interface: Vec::new(),
         subgroup_lane_var: 0,
+        local_lane_var: 0,
         memory_offsets: Vec::new(),
         position_slice: Vec::new(),
     };
     // Source DefineModule.
-    e.define_inputs(uses_lane)?;
+    e.define_inputs(uses_lane, logical_lane)?;
     e.define_outputs()?;
     e.define_descriptors()?;
     e.main_func = e.b.alloc_id()?;
     let entry_label = e.b.alloc_id()?;
     e.b.require_capability(CapabilityShader)?;
     e.b.require_capability(CapabilitySignedZeroInfNanPreserve)?;
-    if uses_lane || uses_ballot {
+    if native_lane || uses_ballot {
         e.b.require_capability(CapabilityGroupNonUniform)?;
     }
     if uses_ballot {
@@ -2366,7 +2395,8 @@ pub(crate) fn emit_program(
     let words = e.b.build()?;
     Ok(EmittedModule {
         words,
-        uses_subgroup: uses_lane || uses_ballot,
+        uses_subgroup: native_lane || uses_ballot,
+        uses_logical_lane: logical_lane,
         required_features,
     })
 }

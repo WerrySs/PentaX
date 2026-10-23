@@ -199,8 +199,8 @@ resource read. Exact type-2 padding and opaque NOPs are allowed. Compute SET_SH_
 updates only the named compute program, local/start dimensions, resource controls
 and sixteen user SGPR slots. Every read register must have explicit known state;
 no reset values or previous queue state are invented. Exactly one five-dword
-DISPATCH_DIRECT is admitted with exact header lowbyte0 or2 and wave32 initiator
-0x8001,0x8005 or the source builder's0x8041. Modes without FORCE_START_AT_000
+DISPATCH_DIRECT is admitted with exact header lowbyte0 or2 and initiators
+0x1/0x5/0x41 for wave64 or0x8001/0x8005/0x8041 for wave32. Modes without FORCE_START_AT_000
 require explicitly zero start coordinates. Unknown packets, flags, registers,
 truncation, subsequent state writes or a second dispatch refuse the whole job.
 
@@ -208,7 +208,7 @@ The initial resource profile is one raw, unswizzled, stride-zero V# in s0..s3,
 four-byte aligned and sized, with an explicit bounded readable guest span.
 User SGPR count, local IDs and group IDs derive from observed compute controls.
 Only the supported float state, no scratch/LDS/shared VGPRs and explicit resource
-configuration are admitted. Wave64 and alternate descriptor/cache modes remain
+configuration are admitted. Alternate descriptor/cache modes remain
 typed unsupported. This is a PentaX profile, not a complete hardware validator.
 
 Program addresses follow the pinned LO/HI assembly. Bounded word reads continue
@@ -347,3 +347,40 @@ The exact seven-word selected flip wait is a sealed graphics action, with
 strict reserved words and bounded static/live action positions. It conveys no
 completion or presentation authority. The owned driver continuation and its
 exact native HLE transport are described in `src/graphics/continuation.md`.
+
+Compute scheduling hints
+------------------------
+
+The closed compute bank retains COMPUTE_RESOURCE_LIMITS (0x215) and
+COMPUTE_PACE_ID (0x22a) in each queue and dispatch snapshot, including current
+source-ordered SH arrays. The public pinned receiver treats these exact
+registers as scheduling hints. PentaX uses serialized fenced host execution;
+it does not emulate guest occupancy or pacing timing, and the opaque values
+do not change work quotas, memory authority, wave mode, scratch/LDS admission
+or shader resource validation. No masks from an older GPU generation are
+inferred. Processor reset makes these two values unknown; context reset
+preserves queue state. Unrelated and scratch-ring registers remain refused.
+This support does not imply acceptance of broader compute control flow or
+proof that a title submitted a dispatch or produced a frame.
+
+Compute wave width
+------------------
+
+The existing bounded initiator controls admit 0x1/0x5/0x41 as guest wave64
+and 0x8001/0x8005/0x8041 as guest wave32. CS_W32_EN selects the compiler's
+actual WaveSize and subgroup profile; guest high EXEC words are not discarded.
+Resource masks, unknown START values, raw-buffer descriptor requirements,
+invocation budgets and unsupported modifier bits retain their prior guards.
+
+A compiled all-active per-lane shader can need no subgroup operations. Its
+manifest then carries no subgroup-size requirement, including for wave64.
+Compute64 mask-only lane selection uses LocalInvocationIndex modulo64, so
+asymmetric dynamic EXEC halves do not require a native64 subgroup. Surviving
+Ballot/AnyLane communication retains the exact64-lane native contract and its
+native lane numbering; the backend admits that compute contract only when the
+device actually reports64. A native32 subgroup never stands in for logical64
+communication. Cross-native-subgroup Ballot/AnyLane emulation is not implemented
+by this change and remains an explicit device refusal. No title or frame result
+is claimed from packet or profile admission.
+
+DMA packets can describe the device-local GDS namespace separately from guest RAM. The checked DMA profile admits aligned immediate fills, RAM-to-GDS and GDS-to-RAM spans within the public 64 KiB bound; GDS-to-GDS, unknown address modes and unsupported selector domains remain typed refusals. Metadata decoding reads no payload and grants no memory authority.

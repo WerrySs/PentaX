@@ -15,6 +15,7 @@ use std::fmt;
 mod agc_defaults;
 pub mod driver;
 pub mod graphics;
+mod private_compute_shader_failure;
 pub mod shaders;
 pub mod video;
 
@@ -152,8 +153,13 @@ fn execute_dispatch_admitted(
     commands: &[compute::CommandRange],
     admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
 ) -> Result<Report, Error> {
-    let outcome =
-        compute::prepare_dispatch(dispatch, &Memory(paused), limits).map_err(Error::Prepare)?;
+    let outcome = match compute::prepare_dispatch(dispatch, &Memory(paused), limits) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            private_compute_shader_failure::capture_from_env(paused, dispatch, &error);
+            return Err(Error::Prepare(error));
+        }
+    };
     let (product, preparation) = outcome.into_parts();
     let prepared = match product {
         Some(prepared) => prepared,
@@ -246,3 +252,7 @@ fn run_prepared(
         preflight_work: work,
     })
 }
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "gpu/wave64_hardware_tests.rs"]
+mod wave64_hardware_tests;

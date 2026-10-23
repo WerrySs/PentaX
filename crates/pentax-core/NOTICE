@@ -705,3 +705,7 @@ Existing upstream copyright and license grants retained above continue to apply.
 The original Rust receiver binds snapshots to their paused owner, validates
 physical command exclusions and output quotas, and publishes only after actual
 GPU completion. Counter reset requires the real GPU reset readback.
+
+The same-owner DMA GDS storage model is adapted from public KytyPS5 revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, BufferCache constructor/FillBuffer/CopyBuffer and CommandProcessor::Reset/DmaData. Copyright (c) 2021 InoriRus; upstream GPL-2.0-only. Original Rust ownership, retained-host admission and checked live-memory transfer code.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp

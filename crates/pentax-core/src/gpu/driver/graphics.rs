@@ -472,9 +472,10 @@ impl Driver {
             execution.pending = None;
         }
         let retained = execution.retained;
-        let max_host_bytes = execution.max_host_bytes;
-        let presentation = execution.presentation;
+        let mut max_host_bytes = execution.max_host_bytes;
+        let mut presentation = execution.presentation;
         let deferred_flips = execution.deferred_flips;
+        let transfer_held = execution.retained;
         let plan = &mut execution.plan;
         let sources = &execution.sources;
         let staging = &mut execution.staging;
@@ -580,7 +581,19 @@ impl Driver {
                                 transfer,
                                 plan.command_ranges(sources),
                                 staging,
+                                transfer_held,
+                                max_host_bytes,
                             )?;
+                            // A first GDS transfer may allocate retained storage
+                            // during this very turn; later draw/frame admission
+                            // must see the tightened live ceilings immediately.
+                            max_host_bytes = max_host_bytes.min(self.graphics_host_limit()?);
+                            presentation.max_held_bytes = presentation.max_held_bytes.min(
+                                self.presentation_limits()?
+                                    .max_held_bytes
+                                    .checked_sub(retained)
+                                    .ok_or(Failure::Limit)?,
+                            );
                             cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Wait(wait) => {
@@ -959,6 +972,7 @@ impl Driver {
             .graphics_admissions
             .capacity()
             .checked_mul(size_of::<GraphicsAdmission>())
+            .and_then(|bytes| bytes.checked_add(self.gds_retained_bytes()))
             .ok_or(Failure::Limit)?;
         for item in &self.graphics_admissions {
             let range_bytes = match &item.ranges {
@@ -978,7 +992,7 @@ impl Driver {
             )
             .ok_or(Failure::Limit)
     }
-    fn graphics_held_bytes(&self) -> Result<usize, Failure> {
+    pub(super) fn graphics_held_bytes(&self) -> Result<usize, Failure> {
         self.graphics_retained_bytes()?
             .checked_add(self.video.retained_frame_bytes())
             .ok_or(Failure::Limit)

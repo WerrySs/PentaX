@@ -118,3 +118,21 @@ The helper-invocation exclusion follows the public Vulkan shader rules:
 https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-helper-invocations
 These references support the original bounded policy; no specification prose
 or third-party shader fixture has been copied into the implementation/tests.
+
+
+Original compute logical Wave64 lane lowering
+-------------------------------------------
+This original PentaX implementation uses AMD's documented X-fast work-item
+packing and Vulkan's linear local invocation index. AMD's OpenCL Programming
+Optimization Guide, section 2.6.3.3 (page 2-21), describes successive work-items
+in X-major order and packing them into 64-work-item waves:
+https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/programmer-references/AMD_OpenCL_Programming_Optimization_Guide2.pdf
+The AMD RDNA2 ISA reference, section 2.1, describes the two halves and the
+64-bit execution mask of Wave64:
+https://docs.amd.com/v/u/en-US/rdna2-shader-instruction-set-architecture
+Khronos specifies the exact X-major LocalInvocationIndex formula:
+https://docs.vulkan.org/refpages/latest/refpages/source/LocalInvocationIndex.html
+The mapping is limited to independent lane identity and EXEC-bit selection;
+native ballots and other cross-lane operations retain their existing exact
+subgroup contract. No specification prose or third-party shader/test data was
+copied into this implementation or its original tests.

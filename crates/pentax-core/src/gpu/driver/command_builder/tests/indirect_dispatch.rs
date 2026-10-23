@@ -285,8 +285,8 @@ fn emitted_dispatches_keep_live_dimension_permissions_and_distinct_receiver_prof
         matches!(&nonzero, Err(compute::Error::MissingRegister(0x204))),
         "{nonzero:?}"
     );
-    // Encoder masks are not compute-profile promotion: mode0x41 is refused
-    // before touching an otherwise invalid dimensions pointer.
+    // Wave64 mode0x41 is now admitted. Its indirect dimensions still require
+    // a current owned GPU read; the otherwise invalid pointer remains refused.
     let encoded = build(
         &mut driver,
         &mut memory,
@@ -298,8 +298,8 @@ fn emitted_dispatches_keep_live_dimension_permissions_and_distinct_receiver_prof
     );
     assert!(matches!(
         submit(&mut driver, &mut memory, base, &encoded),
-        Err(Failure::Preparation(compute::Error::Unsupported(
-            "wave32 dispatch initiator"
+        Err(Failure::Preparation(compute::Error::Memory(
+            compute::MemoryError::Unavailable
         )))
     ));
     let mut driver = Driver::new(Default::default());
