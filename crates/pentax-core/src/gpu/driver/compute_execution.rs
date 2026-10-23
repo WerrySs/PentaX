@@ -43,6 +43,9 @@ impl Default for ComputeQueues {
 }
 struct Submission {
     generation: u64,
+    batch: u64,
+    accepted: bool,
+    had_effects: bool,
     slots: usize,
     root: compute::CommandRange,
     diagnostic_root: compute::CommandRange,
@@ -207,16 +210,26 @@ impl Driver {
             )
             .unwrap_or(usize::MAX),
         );
-        limits.max_host_bytes = limits
+        let command_host = limits
             .max_host_bytes
-            .checked_sub(submission.retained)
-            .ok_or(Failure::Limit)?
-            .min(
-                self.graphics_host_ceiling()?
-                    .min(self.limits.compute.max_host_bytes)
-                    .checked_sub(self.graphics_held_bytes()?)
-                    .ok_or(Failure::Limit)?,
-            );
+            .min(self.limits.commands.max_host_bytes)
+            .checked_sub(self.gds_retained_bytes())
+            .and_then(|n| n.checked_sub(submission.retained))
+            .ok_or(Failure::Preparation(compute::Error::Limit(
+                "command host bytes",
+            )))?;
+        let owner_host = self
+            .graphics_host_ceiling()?
+            .min(self.limits.compute.max_host_bytes)
+            .checked_sub(self.graphics_held_bytes()?)
+            .ok_or(Failure::Limit)?;
+        let owner_work = self
+            .limits
+            .max_preparation_work
+            .saturating_sub(self.usage.preparation_work);
+        let owner_host_binds = owner_host < command_host;
+        let owner_work_binds = owner_work < submission.limits.max_work;
+        limits.max_host_bytes = command_host.min(owner_host);
         let initial = self.queues[index];
         submission.initial = Some(initial);
         let plan = register_execution::ComputeCommands::prepare_source(
@@ -224,7 +237,8 @@ impl Driver {
             submission.root,
             initial,
             &limits,
-        )?;
+        )
+        .map_err(|error| compute_plan_error(error, owner_host_binds, owner_work_binds))?;
         self.compute_charge(plan.usage().work)?;
         let staging = self.transfer_staging(
             plan.usage().staging_bytes,
@@ -309,24 +323,22 @@ impl Driver {
                 )
             })();
             self.compute_queues.ranges = ranges;
+            submission.had_effects |= self.poisoned;
+            if matches!(&result, Ok(Advance::Complete))
+                && submission
+                    .initial
+                    .is_some_and(|initial| initial != self.queues[index])
+            {
+                submission.had_effects = true;
+            }
             match result {
                 Ok(Advance::Complete) => {
                     // Never publish a static plan's future tail while waiting.
-                    self.compute_queues.retained = self
-                        .compute_queues
-                        .retained
-                        .checked_sub(submission.retained)
-                        .ok_or(Failure::Poisoned)?;
-                    self.compute_queues.pending -= 1;
-                    self.compute_queues.slots -= submission.slots;
-                    let mut at = 0;
-                    while at < self.compute_queues.owners.len() {
-                        if self.compute_queues.owners[at] == submission.generation {
-                            self.compute_queues.owners.swap_remove(at);
-                            self.compute_queues.ranges.swap_remove(at);
-                        } else {
-                            at += 1;
-                        }
+                    self.remove_compute_submission(&submission)?;
+                    if let Some(next) = self.compute_queues.queues[index].front_mut()
+                        && next.batch == submission.batch
+                    {
+                        next.had_effects |= submission.had_effects;
                     }
                     idle = 0;
                     self.poisoned = false;
@@ -348,8 +360,24 @@ impl Driver {
                         submission.initial.unwrap_or(self.queues[index]),
                         &error,
                     );
-                    self.compute_queues.queues[index].push_front(submission);
-                    self.poisoned = true;
+                    if submission.had_effects || submission.accepted {
+                        self.compute_queues.queues[index].push_front(submission);
+                        self.poisoned = true;
+                    } else {
+                        // No accepted return or committed prefix: reject this
+                        // batch, preserving independent accepted queue work.
+                        self.remove_compute_submission(&submission)?;
+                        while self.compute_queues.queues[index]
+                            .front()
+                            .is_some_and(|next| next.batch == submission.batch)
+                        {
+                            let next = self.compute_queues.queues[index]
+                                .pop_front()
+                                .ok_or(Failure::Poisoned)?;
+                            self.remove_compute_submission(&next)?;
+                        }
+                        self.poisoned = false;
+                    }
                     return Err(error);
                 }
             }
@@ -377,7 +405,53 @@ fn compute_capture_error(error: draw::Error) -> Failure {
     })
 }
 
+fn compute_plan_error(error: Failure, owner_host: bool, owner_work: bool) -> Failure {
+    match error {
+        Failure::Preparation(compute::Error::Limit(
+            "command host bytes" | "graphics capture host bytes",
+        )) if owner_host => Failure::Limit,
+        Failure::Preparation(compute::Error::Limit("command work" | "graphics capture work"))
+            if owner_work =>
+        {
+            Failure::Limit
+        }
+        error => error,
+    }
+}
+
 impl Driver {
+    fn remove_compute_submission(&mut self, submission: &Submission) -> Result<(), Failure> {
+        self.compute_queues.retained = self
+            .compute_queues
+            .retained
+            .checked_sub(submission.retained)
+            .ok_or(Failure::Poisoned)?;
+        self.compute_queues.pending = self
+            .compute_queues
+            .pending
+            .checked_sub(1)
+            .ok_or(Failure::Poisoned)?;
+        self.compute_queues.slots = self
+            .compute_queues
+            .slots
+            .checked_sub(submission.slots)
+            .ok_or(Failure::Poisoned)?;
+        let mut at = 0;
+        while at < self.compute_queues.owners.len() {
+            if self.compute_queues.owners[at] == submission.generation {
+                self.compute_queues.owners.swap_remove(at);
+                self.compute_queues.ranges.swap_remove(at);
+            } else {
+                at += 1;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn compute_owner_matches(&self, owner: NativeOwnerId) -> bool {
+        self.compute_queues.owner.is_none_or(|old| old == owner)
+    }
+
     pub(super) fn compute_retained_bytes(&self) -> Result<usize, Failure> {
         self.compute_queues
             .retained
@@ -447,6 +521,11 @@ impl Driver {
                 address: r.address,
                 size: r.size,
             });
+        let batch = self
+            .compute_queues
+            .generation
+            .checked_add(1)
+            .ok_or(Failure::Limit)?;
         for root in roots.into_iter().filter(|r| r.address != 0 && r.size != 0) {
             if let Err(error) = self.admit_compute(
                 memory,
@@ -456,16 +535,29 @@ impl Driver {
                     size: root.size,
                 },
                 diagnostic_root.ok_or(Failure::UnsupportedQueue)?,
+                batch,
             ) {
-                self.poisoned = true;
-                // An allocation may have grown a metadata pool before a later
-                // admission check failed. Terminal failure drops every compute
-                // allocation immediately, including first-admission scratch.
+                let terminal = self.poisoned
+                    || self
+                        .compute_queues
+                        .queues
+                        .iter()
+                        .flat_map(|queue| queue.iter())
+                        .any(|job| job.accepted || job.had_effects);
+                // Admission itself made no guest effect. An earlier accepted
+                // cancellation stays terminal; a wholly unpublished attempt
+                // releases all possibly grown pools and remains retryable.
                 self.revoke_compute_owner(memory.owner_id())?;
+                self.poisoned = terminal;
                 return Err(error);
             }
         }
         self.pump_compute_queues(memory, kernel)?;
+        for submission in &mut self.compute_queues.queues[index] {
+            if submission.batch == batch {
+                submission.accepted = true;
+            }
+        }
         Ok(0)
     }
 
@@ -484,6 +576,7 @@ impl Driver {
         index: usize,
         root: compute::CommandRange,
         diagnostic_root: compute::CommandRange,
+        batch: u64,
     ) -> Result<(), Failure> {
         self.usage.command_buffers = add(
             self.usage.command_buffers,
@@ -506,12 +599,29 @@ impl Driver {
                 .max_preparation_work
                 .saturating_sub(self.usage.preparation_work),
         );
-        limits.max_host_bytes = limits.max_host_bytes.min(
-            self.graphics_host_ceiling()?
-                .min(self.limits.compute.max_host_bytes)
-                .checked_sub(self.graphics_held_bytes()?)
-                .ok_or(Failure::Limit)?,
-        );
+        let command_ceiling = limits.max_host_bytes;
+        let command_host = command_ceiling
+            .checked_sub(self.gds_retained_bytes())
+            .ok_or(Failure::Preparation(compute::Error::Limit(
+                "command host bytes",
+            )))?;
+        let owner_host = self
+            .graphics_host_ceiling()?
+            .min(self.limits.compute.max_host_bytes)
+            .checked_sub(self.graphics_held_bytes()?)
+            .ok_or(Failure::Limit)?;
+        let owner_host_binds = owner_host < command_host;
+        let owner_work_binds = limits.max_work < self.limits.commands.max_work;
+        // Preserve the original driver's root walk/copy admission before the
+        // capture parser can turn a shared-work failure into a packet limit.
+        if root
+            .size
+            .checked_mul(3)
+            .is_none_or(|work| work > limits.max_work)
+        {
+            return Err(Failure::Limit);
+        }
+        limits.max_host_bytes = command_host.min(owner_host);
         let captured = draw::CapturedComputeCommands::capture_attempt(
             root,
             &super::super::Memory(memory),
@@ -521,7 +631,11 @@ impl Driver {
             Ok(sources) => sources,
             Err(failure) => {
                 self.compute_charge(failure.usage.work)?;
-                return Err(compute_capture_error(failure.error));
+                return Err(compute_plan_error(
+                    compute_capture_error(failure.error),
+                    owner_host_binds,
+                    owner_work_binds,
+                ));
             }
         };
         self.compute_charge(sources.usage().work)?;
@@ -618,8 +732,14 @@ impl Driver {
             self.compute_queues.ranges.push(*range);
             self.compute_queues.owners.push(generation);
         }
+        // Store the total command ceiling. Recompute its net GDS allowance
+        // at activation/transfer; never subtract the same retained GDS twice.
+        limits.max_host_bytes = command_ceiling;
         self.compute_queues.queues[index].push_back(Submission {
             generation,
+            batch,
+            accepted: false,
+            had_effects: false,
             slots,
             root,
             diagnostic_root,

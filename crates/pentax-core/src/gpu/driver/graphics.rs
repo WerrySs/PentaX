@@ -1008,6 +1008,9 @@ impl Driver {
     ) -> Result<(), Failure> {
         let owner = memory.owner_id();
         self.video.check_owner(owner)?;
+        if !self.compute_owner_matches(owner) {
+            return Err(Failure::Memory);
+        }
         if self.graphics_owner.is_some_and(|old| old != owner)
             || self
                 .graphics_execution
@@ -1381,8 +1384,15 @@ impl Driver {
             return Err(Failure::Memory);
         }
         self.video.check_owner(owner)?;
+        if !self.compute_owner_matches(owner) {
+            return Err(Failure::Memory);
+        }
         self.graphics_execution = None;
         self.graphics_admissions = Vec::new();
+        if self.pending_compute_queues() == 0 {
+            self.command_exclusions = Vec::new();
+            self.command_exclusion_bytes = 0;
+        }
         self.graphics_phase = GraphicsPhase::Failed;
         self.poisoned = true;
         Ok(())

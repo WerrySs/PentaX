@@ -199,40 +199,117 @@ fn gds_host_output_and_owner_refusals_allocate_or_publish_no_fake_ram() {
 fn retained_gds_tightens_next_plan_before_allocation_without_double_charging_staging() {
     let (mut owner, base) = owner();
     let mut memory = owner.pause().unwrap();
-    let mut driver = Driver::new(Default::default());
-    let mut fill = Vec::new();
-    dma(&mut fill, 2, 1, 0x55aa_33cc, 0x20, 4);
-    assert_eq!(submit(&mut driver, &mut memory, base, 0x20, &fill), Ok(0));
-    let drain = [0xc000_4200, 0];
-    memory.write(base + 0x1000, &bytes(&drain)).unwrap();
-    let range = compute::CommandRange {
-        address: base + 0x1000,
-        size: 8,
-    };
-    let plan = register_execution::ComputeCommands::prepare(
-        &memory,
-        range,
-        compute::ComputeState::empty(),
-        &driver.limits.commands,
-    )
-    .unwrap();
-    let required = plan.usage().host_bytes;
-    drop(plan);
-    let retained = driver.gds_retained_bytes();
-    let work = driver.usage().preparation_work;
-    driver.limits.commands.max_host_bytes = required + retained - 1;
-    let result = submit(&mut driver, &mut memory, base, 0x20, &drain);
-    assert!(
-        matches!(result, Err(Failure::Preparation(compute::Error::Limit(_)))),
-        "{result:?}"
-    );
-    assert_eq!(driver.usage().preparation_work, work);
-    assert_eq!(driver.gds_retained_bytes(), retained);
-    assert!(!driver.poisoned);
-    assert_eq!(
-        &driver.gds.as_ref().unwrap().bytes[0x20..0x24],
-        0x55aa_33ccu32.to_le_bytes().as_slice()
-    );
-    driver.limits.commands.max_host_bytes = required + retained;
-    assert_eq!(submit(&mut driver, &mut memory, base, 0x20, &drain), Ok(0));
+    for with_staging in [false, true] {
+        let mut expected_ceiling = None;
+        for below in [true, false] {
+            // Fresh equivalent driver states keep a rejected attempt's metadata
+            // and work from changing the successful boundary case.
+            let mut driver = Driver::new(Default::default());
+            let mut fill = Vec::new();
+            dma(&mut fill, 2, 1, 0x55aa_33cc, 0x20, 4);
+            assert_eq!(submit(&mut driver, &mut memory, base, 0x20, &fill), Ok(0));
+            let retained = driver.gds_retained_bytes();
+            let initial = driver.queues[0];
+            let output = base + 0x9004;
+            memory.write(output - 4, &[0xa5; 16]).unwrap();
+            let mut stream = Vec::new();
+            if with_staging {
+                dma(&mut stream, 1, 3, 0x20, output, 4);
+            } else {
+                stream.extend([0xc000_4200, 0]);
+            }
+            memory.write(base + 0x1000, &bytes(&stream)).unwrap();
+            let range = compute::CommandRange {
+                address: base + 0x1000,
+                size: (stream.len() * 4) as u64,
+            };
+            // These are the real immutable capture and command producers, not a
+            // guessed larger allowance or a second implementation of planning.
+            let captured = draw::CapturedComputeCommands::capture_attempt(
+                range,
+                &crate::gpu::Memory(&memory),
+                &driver.limits.commands,
+            )
+            .unwrap();
+            assert_eq!(captured.root(), range);
+            let plan = register_execution::ComputeCommands::prepare_source(
+                &captured,
+                range,
+                initial,
+                &driver.limits.commands,
+            )
+            .unwrap();
+            let usage = plan.usage();
+            assert_eq!(usage.staging_bytes, if with_staging { 4 } else { 0 });
+            assert_eq!(usage.write_bytes, if with_staging { 4 } else { 0 });
+            let required = retained
+                .checked_add(captured.usage().host_bytes)
+                .and_then(|n| n.checked_add(usage.host_bytes))
+                .and_then(|n| n.checked_add(usage.staging_bytes))
+                .unwrap();
+            // Queue/range/exclusion pools have their independent shared-host
+            // ceiling; the command-local bound is exactly GDS + C + P + S.
+            assert!(required <= driver.limits.commands.max_host_bytes);
+            if let Some(expected) = expected_ceiling {
+                assert_eq!(required, expected);
+            } else {
+                expected_ceiling = Some(required);
+            }
+            drop(plan);
+            drop(captured);
+            let before = driver.usage();
+            let work_limit = driver.limits.max_preparation_work;
+            driver.limits.commands.max_host_bytes = required - usize::from(below);
+            let result = submit(&mut driver, &mut memory, base, 0x20, &stream);
+            if below {
+                if with_staging {
+                    // The plan fits but its real four-byte staging does not.
+                    assert_eq!(result, Err(Failure::Limit));
+                } else {
+                    // Even a no-output Drain must admit its complete plan.
+                    assert!(
+                        matches!(result, Err(Failure::Preparation(compute::Error::Limit(_)))),
+                        "{result:?}"
+                    );
+                }
+            } else {
+                assert_eq!(result, Ok(0));
+            }
+            assert_eq!(driver.pending_compute_queues(), 0);
+            assert!(!driver.poisoned);
+            assert_eq!(driver.queues[0], initial);
+            assert_eq!(driver.gds_retained_bytes(), retained);
+            assert_eq!(
+                &driver.gds.as_ref().unwrap().bytes[0x20..0x24],
+                0x55aa_33ccu32.to_le_bytes().as_slice()
+            );
+            let mut expected = [0xa5; 16];
+            let committed = usize::from(with_staging && !below);
+            if committed != 0 {
+                expected[4..8].copy_from_slice(&0x55aa_33ccu32.to_le_bytes());
+            }
+            assert_eq!(read(&memory, output - 4, 16), expected);
+            let after = driver.usage();
+            assert_eq!(after.calls, before.calls + 1);
+            assert_eq!(after.command_buffers, before.command_buffers + 1);
+            assert_eq!(after.command_bytes, before.command_bytes + range.size);
+            assert_eq!(
+                after.written_bytes,
+                before.written_bytes + committed as u64 * 4
+            );
+            assert_eq!(
+                after.memory_written_bytes,
+                before.memory_written_bytes + committed as u64 * 4
+            );
+            assert_eq!(
+                after.memory_commands,
+                before.memory_commands + u64::from(!below)
+            );
+            // Captured bytes and admitted producer allocations cost real work,
+            // including a refused attempt. No additional quota is introduced.
+            assert!(after.preparation_work > before.preparation_work);
+            assert!(after.preparation_work <= work_limit);
+            assert_eq!(driver.limits.max_preparation_work, work_limit);
+        }
+    }
 }

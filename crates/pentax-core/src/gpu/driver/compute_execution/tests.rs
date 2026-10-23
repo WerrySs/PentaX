@@ -136,6 +136,69 @@ fn waits_retain_prefix_current_payload_fifo_capture_and_retired_queue_state() {
     assert_eq!(driver.usage.command_buffers, 3);
     assert_eq!(driver.usage.memory_written_bytes, 16);
     assert!(!driver.poisoned);
+
+    // A later root of the SAME submit cannot erase a retired state or memory
+    // prefix. Exercise eager failure and failure after accepted0 separately.
+    for memory_prefix in [false, true] {
+        let mut space = owner();
+        let base = space.reserved_ranges().next().unwrap().address;
+        let mut memory = space.pause().unwrap();
+        let label = base + 0x8000;
+        memory.write(label, &0u32.to_le_bytes()).unwrap();
+        let gate = label + 4;
+        memory.write(gate, &0u32.to_le_bytes()).unwrap();
+        let mut prefix_words = if memory_prefix {
+            write(label, 17)
+        } else {
+            vec![0xc001_7600, 0x215, 123]
+        };
+        if memory_prefix {
+            prefix_words.extend(wait(gate));
+        }
+        let prefix = encode(&mut memory, base + 0x1000, &prefix_words);
+        let refused = encode(&mut memory, base + 0x2000, &write(base + 0x30000, 19));
+        let mut driver = Driver::new(Default::default());
+        let expected_state = compute::plan_commands(
+            &driver.queues[0],
+            compute::CommandRange {
+                address: prefix.address,
+                size: prefix.size,
+            },
+            &crate::gpu::Memory(&memory),
+            &driver.limits.commands,
+        )
+        .unwrap()
+        .final_state();
+        let mut result =
+            driver.execute_compute_ranges(&mut memory, 0x20, vec![prefix, refused], None);
+        if memory_prefix {
+            assert_eq!(result, Ok(0));
+            assert_eq!(read(&memory, label), 17);
+            // A real CPU store releases the first root's retained false wait;
+            // the refused second root belongs to already accepted work.
+            memory.write(gate, &7u32.to_le_bytes()).unwrap();
+        } else {
+            assert_eq!(result, Err(Failure::Memory));
+        }
+        for _ in 0..64 {
+            if result.is_err() {
+                break;
+            }
+            result = driver.pump_compute_queues(&mut memory, None).map(|_| 0);
+        }
+        assert_eq!(result, Err(Failure::Memory));
+        assert!(driver.poisoned);
+        assert_eq!(driver.queues[0], expected_state);
+        assert_eq!(read(&memory, label), if memory_prefix { 17 } else { 0 });
+        let written = driver.usage.written_bytes;
+        memory.write(label, &99u32.to_le_bytes()).unwrap();
+        assert_eq!(
+            driver.execute_compute_ranges(&mut memory, 0x20, vec![prefix, refused], None,),
+            Err(Failure::Poisoned)
+        );
+        assert_eq!(read(&memory, label), 99);
+        assert_eq!(driver.usage.written_bytes, written);
+    }
 }
 
 #[test]
@@ -206,7 +269,15 @@ fn compute_and_graphics_writes_both_exclude_other_retained_command_backing() {
         assert_eq!(result, Err(Failure::Memory));
         assert_eq!(read(&memory, root.address), 0xc005_3c00);
         assert_eq!(driver.usage.memory_written_bytes, 0);
-        assert!(driver.poisoned);
+        // Neither rejected writer committed an effect or returned accepted0.
+        // Its refusal must preserve the other queue's already accepted wait.
+        assert!(!driver.poisoned);
+        assert_eq!(driver.pending_compute_queues(), 1);
+        memory.write(base + 0x8000, &7u32.to_le_bytes()).unwrap();
+        pump(&mut driver, &mut memory);
+        assert_eq!(driver.pending_compute_queues(), 0);
+        assert_eq!(read(&memory, root.address), 0xc005_3c00);
+        assert_eq!(driver.usage.memory_written_bytes, 0);
     }
     // A prepared actual graphics source is equally protected from compute.
     let mut space = owner();
