@@ -44,7 +44,7 @@ fn encode(
         let register = u32::from_le_bytes(pair[..4].try_into().unwrap());
         let value = u32::from_le_bytes(pair[4..].try_into().unwrap());
         assert!(
-            matches!(driver.begin_command_builder(memory,Function::AgcDcbSetCxRegisterDirect,[buffer,u64::from(register),u64::from(value),0,0,0],None).unwrap(),CommandBuilderAction::Returned(value) if value!=0)
+            matches!(driver.begin_command_builder(memory,Function::AgcDcbSetCxRegisterDirect,[buffer,u64::from(register)|(u64::from(value)<<32),0,0,0,0],None).unwrap(),CommandBuilderAction::Returned(value) if value!=0)
         );
     }
     assert!(
@@ -121,7 +121,9 @@ fn created_primitive_pairs_flow_through_real_register_encoders_into_owned_draw_p
         );
         if let Some(reason) = expected {
             assert!(
-                matches!(result,Err(pentax_gpu::graphics::Error::Unsupported(actual)) if actual==reason)
+                matches!(&result,Err(pentax_gpu::graphics::Error::Unsupported(actual)) if *actual==reason),
+                "primitive={primitive} group={group:#x} user={user:#x} stages={stages:#x}: expected {reason}, got {:?}",
+                result.as_ref().err()
             );
         } else {
             let prepared = result.unwrap();
