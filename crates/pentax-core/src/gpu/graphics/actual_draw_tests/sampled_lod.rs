@@ -2,7 +2,7 @@
 //! Original implicit MIMG samples and real clamped/unclamped LOD query results.
 //! Compact FragCoord inputs create derivatives; no host shader or queried-value substitute.
 use super::*;
-use pentax_shader_compiler::InputInterface;
+use pentax_gpu::graphics::InputInterface;
 
 const TEXTURE_BYTES: usize = 1536;
 

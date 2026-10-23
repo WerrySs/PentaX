@@ -533,7 +533,7 @@ fn capture(
         )
         .map_err(|_| io::Error::other("graphics diagnostic header bound"))?;
         if let Some(address) = candidate.address {
-            write!(&mut header, "{label}_candidate_address=0x{address:016x}\n")
+            writeln!(&mut header, "{label}_candidate_address=0x{address:016x}")
                 .map_err(|_| io::Error::other("graphics diagnostic header bound"))?;
         }
     }
