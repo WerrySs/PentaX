@@ -2,6 +2,7 @@
 //! Original owned write -> actual draw -> two exact SYNC packets -> presentation.
 //! No replacement shader, second draw, synthetic pixels or display receipt.
 use super::*;
+use crate::gpu::driver::CommandBuilderAction;
 use pentax_platform::presenter::{self, Presenter};
 use std::time::{Duration, Instant};
 
@@ -94,23 +95,24 @@ fn actual_encoded_draw_sync_flip_preserves_fenced_pixels_before_real_presentatio
         header[24..32].copy_from_slice(&(base + 0x7000).to_le_bytes());
         memory.write(base + 0x300, &header).unwrap();
         memory.write(base + 0x408, &40u64.to_le_bytes()).unwrap();
-        assert_eq!(
-            driver.submit_with_stack(
+        assert!(matches!(
+            driver.begin_command_builder(
                 &mut memory,
                 Function::AgcDcbAcquireMem,
                 [base + 0x300, 1, 0, 0x1234, target, 65536],
                 Some(base + 0x400)
-            ),
-            Ok(cursor)
-        );
-        assert_eq!(
-            driver.submit(
+            ).unwrap(),
+            CommandBuilderAction::Returned(at) if at == cursor
+        ));
+        assert!(matches!(
+            driver.begin_command_builder(
                 &mut memory,
                 Function::AgcDcbEventWrite,
-                [base + 0x300, 7, u64::MAX, 0, 0, 0]
-            ),
-            Ok(cursor + 32)
-        );
+                [base + 0x300, 7, u64::MAX, 0, 0, 0],
+                None
+            ).unwrap(),
+            CommandBuilderAction::Returned(at) if at == cursor + 32
+        ));
         assert_eq!(
             driver.submit(
                 &mut memory,
