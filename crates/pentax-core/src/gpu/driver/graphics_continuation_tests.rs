@@ -11,7 +11,7 @@ fn owner() -> (NativeAddressSpace, u64) {
         if owner
             .map_at(
                 base,
-                0x20000,
+                0x30000,
                 NativePermissions::READ_WRITE.with_gpu(true, true),
             )
             .is_ok()
@@ -38,7 +38,7 @@ fn setup(memory: &mut PausedNativeMemory<'_>, base: u64) -> Driver {
     memory.write(base + 0x80, &attribute).unwrap();
     let mut buffers = [0; 64];
     buffers[..8].copy_from_slice(&(base + 0x10000).to_le_bytes());
-    buffers[32..40].copy_from_slice(&(base + 0x14000).to_le_bytes());
+    buffers[32..40].copy_from_slice(&(base + 0x20000).to_le_bytes());
     memory.write(base + 0x200, &buffers).unwrap();
     memory.write(base + 8, &[0; 16]).unwrap();
     assert_eq!(
