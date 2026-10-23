@@ -337,3 +337,26 @@ DMA GDS selector and offset-bound contracts follow public KytyPS5 revision 7b7f9
 https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
 https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp
 https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+
+
+Compute START coordinates at queue creation and modeled processor reset
+---------------------------------------------------------------------
+The fresh queue factory establishes only START_X/Y/Z as zero. Detached
+ComputeState::empty()/Default remain unknown. Context clear preserves compute
+state; explicit nonzero starts retain their typed unsupported result. Other
+resource registers require commands or separately established reset defaults.
+
+Register correspondence: public KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3, pm4.h lines 889-891,
+COMPUTE_START_X/Y/Z selectors 0x204/0x205/0x206.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/pm4.h
+
+AMD's public gc_10_3_0_default.h defines all three register defaults as zero.
+The public v10 KFD MQD initializer zeroes the complete compute MQD; its layout
+explicitly contains the three start fields. These are hardware/queue lifecycle
+contracts, not a claim that every native context-clear packet resets all SH
+state. No upstream implementation is copied by the original Rust factory or
+its synthetic tests.
+https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/amd/include/asic_reg/gc/gc_10_3_0_default.h
+https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v10.c
+https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/amd/include/v10_structs.h

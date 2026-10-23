@@ -580,7 +580,8 @@ pub(super) fn run_prepared_with_consumer<'plan, 'image>(
         consumer.cancel();
     }
     // This is the terminal owner boundary, after guest execution and consumer
-    // cancellation. A parked/queued graphics call is abandoned, never returned.
+    // cancellation. Pending graphics calls and accepted but unfinished compute
+    // work are abandoned; neither is certified by a successful main return.
     // Owner-bound cleanup cannot consume an exhausted admission/sleep budget.
     let cleanup = session.revoke_graphics_continuations_on_teardown();
     if result.is_ok() && cleanup? {
@@ -1062,6 +1063,11 @@ fn execute_epoch<'plan, 'image>(
                         .map_err(NativeSessionError::Frame)?;
                 }
             }
+            // GPU waits belong to owned asynchronous queues, not to the CPU
+            // token that submitted them. Progress them at native safe points
+            // even when this CPU spins without imports or the thread quantum
+            // has not expired. Driver admission bounds every turn's work.
+            let compute_pending = session.pump_compute_queues()?;
             let runnable = state.scheduling.rotate(
                 session,
                 proof,
@@ -1069,6 +1075,7 @@ fn execute_epoch<'plan, 'image>(
                 &mut state.frames,
                 &mut progress.phase,
                 external,
+                compute_pending,
                 limits.interactive,
             )?;
             progress.dispatch = engine.usage();

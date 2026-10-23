@@ -9,7 +9,7 @@ use pentax_core::process::hle::{
 };
 use pentax_linker::{QualifiedNid, SymbolBinding, SymbolType, inspect_sce};
 use pentax_loader::open_executable;
-fn image() -> Vec<u8> {
+pub(super) fn image() -> Vec<u8> {
     let mut bytes = vec![0; 4096];
     bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     for (offset, value) in [(16, 3_u16), (18, 62), (52, 64), (54, 56), (56, 1)] {
@@ -111,7 +111,7 @@ fn marker(
     found.unwrap()
 }
 
-fn stopped<'view, 'plan, 'image>(
+pub(super) fn stopped<'view, 'plan, 'image>(
     owner: &mut PreparedNativeKernelStartup<'plan, 'image>,
     proof: &'view PreparedNativeSource<'plan, 'image>,
     request: NativeServiceRequest,
@@ -172,7 +172,7 @@ fn stopped<'view, 'plan, 'image>(
     (engine, token)
 }
 
-fn request(
+pub(super) fn request(
     owner: &mut PreparedNativeKernelStartup<'_, '_>,
     proof: &PreparedNativeSource<'_, '_>,
     nid: &[u8; 11],
@@ -194,7 +194,7 @@ fn request(
         },
     )
 }
-fn call(
+pub(super) fn call(
     owner: &mut PreparedNativeKernelStartup<'_, '_>,
     proof: &PreparedNativeSource<'_, '_>,
     nid: &[u8; 11],
@@ -205,10 +205,10 @@ fn call(
     let (_, request) = request(owner, proof, nid, scope, args, stack);
     owner.service_request(request).unwrap()
 }
-fn write(owner: &mut PreparedNativeKernelStartup<'_, '_>, at: u64, bytes: &[u8]) {
+pub(super) fn write(owner: &mut PreparedNativeKernelStartup<'_, '_>, at: u64, bytes: &[u8]) {
     owner.pause().unwrap().write(at, bytes).unwrap();
 }
-fn word(owner: &mut PreparedNativeKernelStartup<'_, '_>, at: u64) -> u64 {
+pub(super) fn word(owner: &mut PreparedNativeKernelStartup<'_, '_>, at: u64) -> u64 {
     let mut bytes = [0; 8];
     owner.pause().unwrap().read(at, &mut bytes).unwrap();
     u64::from_le_bytes(bytes)

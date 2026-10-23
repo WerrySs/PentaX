@@ -13,6 +13,9 @@ use pentax_platform::{
     vulkan::GpuLimits,
 };
 
+#[path = "driver/compute_execution.rs"]
+mod compute_execution;
+pub(crate) use compute_execution::ComputePump;
 #[path = "driver/command_builder.rs"]
 mod command_builder;
 #[path = "driver/flip_encoder.rs"]
@@ -301,6 +304,9 @@ pub(crate) struct Driver {
     usage: Usage,
     function_profile: FunctionProfile,
     queues: [compute::ComputeState; 56],
+    compute_queues: compute_execution::ComputeQueues,
+    command_exclusions: Vec<compute::CommandRange>,
+    command_exclusion_bytes: usize,
     gds: Option<memory_transfer::GdsState>,
     graphics: draw::GraphicsState,
     lod_stats: Option<lod_stats::LodStatsState>,
@@ -403,7 +409,10 @@ impl Driver {
             limits,
             usage: Usage::default(),
             function_profile: FunctionProfile::default(),
-            queues: [compute::ComputeState::empty(); 56],
+            queues: [compute::ComputeState::for_new_queue(); 56],
+            compute_queues: Default::default(),
+            command_exclusions: Vec::new(),
+            command_exclusion_bytes: 0,
             gds: None,
             graphics: draw::GraphicsState::empty(),
             lod_stats: None,
@@ -771,9 +780,8 @@ impl Driver {
             if self.graphics_execution.is_some() || !self.graphics_admissions.is_empty() {
                 return Err(Failure::Waiting);
             }
-            // Every admitted compute submission waits for its Vulkan fence and
-            // same-owner writeback before returning. There is no pending queue
-            // to drain here. Poisoned/partial submissions are rejected above.
+            // This graphics boundary does not drain unrelated asynchronous
+            // compute queues. Each actual dispatch still fences its own work.
             // Preserve Done's actual frame number and next-graphics reset flag;
             // compute register state is independent and must remain retained.
             let next = self.frame.boundaries.checked_add(1).ok_or(Failure::Limit)?;
@@ -827,266 +835,6 @@ impl Driver {
             private_compute_failure::capture_from_env(memory, root, initial, error);
         }
         result
-    }
-
-    fn execute_compute_ranges_inner(
-        &mut self,
-        memory: &mut PausedNativeMemory<'_>,
-        queue: u32,
-        ranges: Vec<NativeRange>,
-        mut kernel: Option<&mut pentax_kernel::Kernel>,
-    ) -> Result<u64, Failure> {
-        for range in ranges.into_iter().filter(|r| r.address != 0 && r.size != 0) {
-            let next_bytes = add(
-                self.usage.command_bytes,
-                range.size,
-                self.limits.max_command_bytes,
-            )?;
-            self.usage.command_buffers = add(
-                self.usage.command_buffers,
-                1,
-                self.limits.max_command_buffers,
-            )?;
-            self.usage.command_bytes = next_bytes;
-            let queue_index = (queue - 0x20) as usize;
-            let mut command_limits = self.limits.commands;
-            command_limits.max_command_bytes = command_limits.max_command_bytes.min(
-                usize::try_from(self.limits.max_command_bytes - next_bytes + range.size)
-                    .unwrap_or(usize::MAX),
-            );
-            command_limits.max_dispatches = command_limits.max_dispatches.min(
-                usize::try_from(
-                    self.limits
-                        .max_dispatches
-                        .saturating_sub(self.usage.dispatches),
-                )
-                .unwrap_or(usize::MAX),
-            );
-            command_limits.max_work = command_limits.max_work.min(
-                self.limits
-                    .max_preparation_work
-                    .saturating_sub(self.usage.preparation_work),
-            );
-            // Retained GDS coexists with the plan before any plan allocation.
-            // Keep per-command and shared host ceilings distinct; queued
-            // graphics/video storage consumes the latter, not packet authority.
-            if self.gds_retained_bytes() != 0 {
-                let available = self
-                    .graphics_host_ceiling()?
-                    .min(self.limits.compute.max_host_bytes)
-                    .checked_sub(self.graphics_held_bytes()?)
-                    .ok_or(Failure::Limit)?;
-                command_limits.max_host_bytes = command_limits
-                    .max_host_bytes
-                    .checked_sub(self.gds_retained_bytes())
-                    .ok_or(Failure::Limit)?
-                    .min(available);
-            }
-            let mut plan = register_execution::ComputeCommands::prepare(
-                memory,
-                compute::CommandRange {
-                    address: range.address,
-                    size: range.size,
-                },
-                self.queues[queue_index],
-                &command_limits,
-            )?;
-            self.usage.command_bytes = add(
-                self.usage.command_bytes,
-                (plan.usage().command_bytes as u64)
-                    .checked_sub(range.size)
-                    .ok_or(Failure::Limit)?,
-                self.limits.max_command_bytes,
-            )?;
-            self.usage.preparation_work = add(
-                self.usage.preparation_work,
-                plan.usage().work,
-                self.limits.max_preparation_work,
-            )?;
-            self.usage.indirect_buffers = self
-                .usage
-                .indirect_buffers
-                .saturating_add(plan.usage().indirect_buffers);
-            let mut staging = self.transfer_staging(
-                plan.usage().staging_bytes,
-                plan.usage().write_bytes,
-                plan.usage().host_bytes,
-                command_limits
-                    .max_host_bytes
-                    .min(self.limits.compute.max_host_bytes),
-            )?;
-            while let Some(step) = plan.next_step()? {
-                let owned_dispatch;
-                let command = match step {
-                    register_execution::ComputeStep::Array => {
-                        plan.resolve_array(memory)?;
-                        continue;
-                    }
-                    register_execution::ComputeStep::Command(index) => plan.command(index)?,
-                    register_execution::ComputeStep::Dispatch(dispatch) => {
-                        owned_dispatch = dispatch;
-                        compute::Command::Dispatch(&owned_dispatch)
-                    }
-                };
-                let dispatch = match command {
-                    compute::Command::Synchronize(sync) => {
-                        self.synchronize_commands(sync)?;
-                        continue;
-                    }
-                    compute::Command::Annotation(marker) => {
-                        self.annotation_command(marker)?;
-                        continue;
-                    }
-                    compute::Command::Drain => {
-                        self.drain_commands()?;
-                        continue;
-                    }
-                    compute::Command::Release(release) => {
-                        self.retire_release(
-                            memory,
-                            release,
-                            plan.command_ranges(),
-                            &mut kernel,
-                            queue,
-                        )?;
-                        continue;
-                    }
-                    compute::Command::Dispatch(dispatch) => dispatch,
-                    compute::Command::Write(write) => {
-                        self.memory_write(memory, write, plan.command_ranges())?;
-                        continue;
-                    }
-                    compute::Command::Transfer(transfer) => {
-                        let held = plan
-                            .usage()
-                            .host_bytes
-                            .checked_add(staging.capacity())
-                            .ok_or(Failure::Limit)?;
-                        let transfer_host_limit = command_limits.max_host_bytes.min(
-                            self.limits
-                                .commands
-                                .max_host_bytes
-                                .checked_sub(self.gds_retained_bytes())
-                                .ok_or(Failure::Limit)?,
-                        );
-                        self.transfer_command(
-                            memory,
-                            transfer,
-                            plan.command_ranges(),
-                            &mut staging,
-                            held,
-                            transfer_host_limit,
-                        )?;
-                        continue;
-                    }
-                    compute::Command::Wait(wait) => {
-                        self.usage.preparation_work = add(
-                            self.usage.preparation_work,
-                            wait.byte_count() as u64 + 1,
-                            self.limits.max_preparation_work,
-                        )?;
-                        self.usage.memory_commands = self.usage.memory_commands.saturating_add(1);
-                        if !wait
-                            .satisfied(&super::Memory(memory))
-                            .map_err(Failure::Preparation)?
-                        {
-                            return Err(Failure::Waiting);
-                        }
-                        continue;
-                    }
-                };
-                let remaining_invocations = self
-                    .limits
-                    .max_invocations
-                    .saturating_sub(self.usage.invocations);
-                let mut limits = self.limits.compute;
-                if self.gds_retained_bytes() != 0 {
-                    limits.max_host_bytes = limits
-                        .max_host_bytes
-                        .min(self.graphics_host_ceiling()?)
-                        .checked_sub(self.graphics_held_bytes()?)
-                        .ok_or(Failure::Limit)?;
-                }
-                if self.shaders.lookup_work() > 1
-                    && let Ok(address) = dispatch.shader_address()
-                {
-                    self.usage.preparation_work = add(
-                        self.usage.preparation_work,
-                        self.shaders.lookup_work(),
-                        self.limits.max_preparation_work,
-                    )?;
-                    if let Some(mapped) = self.shaders.mapping(memory.owner_id(), address) {
-                        if mapped.kind != 0 {
-                            return Err(Failure::Shader(super::shaders::ShaderFailure::Stage));
-                        }
-                        // Zero size follows the source's unspecified-size metadata
-                        // behavior. A nonzero declared extent bounds real decoding.
-                        if mapped.code_bytes != 0 {
-                            limits.max_shader_words =
-                                limits.max_shader_words.min(mapped.code_bytes as usize / 4);
-                        }
-                    }
-                }
-                limits.max_invocations = limits.max_invocations.min(remaining_invocations);
-                limits.max_work = limits.max_work.min(
-                    self.limits
-                        .max_preparation_work
-                        .saturating_sub(self.usage.preparation_work),
-                );
-                limits.max_host_bytes = limits
-                    .max_host_bytes
-                    .checked_sub(plan.usage().host_bytes)
-                    .and_then(|bytes| bytes.checked_sub(staging.capacity()))
-                    .ok_or(Failure::Limit)?;
-                self.usage.dispatches = add(self.usage.dispatches, 1, self.limits.max_dispatches)?;
-                let report = execute_dispatch_admitted(
-                    memory,
-                    dispatch,
-                    &limits,
-                    &self.limits.gpu,
-                    plan.command_ranges(),
-                    |prepared, preflight, may_execute| {
-                        let invocations = add(
-                            self.usage.invocations,
-                            prepared.invocations,
-                            self.limits.max_invocations,
-                        )
-                        .map_err(|_| Error::Limit)?;
-                        let work = prepared.work.checked_add(preflight).ok_or(Error::Limit)?;
-                        let work = add(
-                            self.usage.preparation_work,
-                            work,
-                            self.limits.max_preparation_work,
-                        )
-                        .map_err(|_| Error::Limit)?;
-                        self.usage.invocations = invocations;
-                        self.usage.preparation_work = work;
-                        // Once GPU work could have happened, a later failure is
-                        // terminal. Never replay a partially completed stream with
-                        // an earlier register snapshot.
-                        self.poisoned |= may_execute;
-                        Ok(())
-                    },
-                )
-                .map_err(|e| match e {
-                    Error::Prepare(e) => Failure::Preparation(e),
-                    Error::Memory(_) => Failure::Memory,
-                    Error::Vulkan(e) => Failure::Vulkan(e),
-                    Error::Allocation => Failure::Allocation,
-                    Error::Limit => Failure::Limit,
-                })?;
-                // max_dispatches * max_buffer_bytes can overflow for caller limits;
-                // accounting is saturated, never a post-effect fallible operation.
-                self.usage.written_bytes = self
-                    .usage
-                    .written_bytes
-                    .saturating_add(report.written_bytes as u64);
-            }
-            self.queues[queue_index] = plan.final_state()?;
-            self.poisoned = true;
-        }
-        self.poisoned = false;
-        Ok(0)
     }
 
     fn memory_write(
@@ -1486,7 +1234,7 @@ mod suspend_tests {
     }
 
     #[test]
-    fn suspend_records_actual_boundaries_and_refuses_limits_or_partial_submission_failure() {
+    fn suspend_records_actual_boundaries_refuses_limits_and_preserves_asynchronous_compute() {
         let mut space = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
         let base = space.reserved_ranges().next().unwrap().address;
         space
@@ -1552,7 +1300,7 @@ mod suspend_tests {
         memory.write(base + 0x100, &packet).unwrap();
         assert_eq!(
             driver.submit(&mut memory, Function::Acb, [0x20, base + 0x100, 0, 0, 0, 0]),
-            Err(Failure::Waiting)
+            Ok(0)
         );
         let mut actual = [0; 4];
         memory.read(label, &mut actual).unwrap();
@@ -1560,10 +1308,17 @@ mod suspend_tests {
         let usage = driver.usage();
         assert_eq!(
             driver.submit(&mut memory, Function::SuspendPoint, [0; 6]),
-            Err(Failure::Poisoned)
+            Ok(0)
         );
-        assert_eq!(driver.frame_state(), FrameState::default());
-        assert_eq!(driver.usage(), usage);
+        assert_eq!(
+            driver.frame_state(),
+            FrameState {
+                boundaries: 1,
+                reset_before_graphics: true
+            }
+        );
+        assert_eq!(driver.pending_compute_queues(), 1);
+        assert_eq!(driver.usage().written_bytes, usage.written_bytes);
     }
 }
 

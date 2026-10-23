@@ -197,10 +197,20 @@ impl ComputeState {
             indirect_base: None,
         }
     }
+    /// Fresh queue state with the hardware's zero start coordinates. Detached
+    /// command decoding continues to use `empty()` and requires explicit state.
+    /// Other registers stay unknown until established by an admitted command.
+    pub const fn for_new_queue() -> Self {
+        let mut state = Self::empty();
+        state.values[0] = Some(0);
+        state.values[1] = Some(0);
+        state.values[2] = Some(0);
+        state
+    }
     // Only defaults with an exact public field/register correspondence are
-    // restored. Packed raw resource controls and START registers remain unknown.
+    // restored. Packed raw resource controls remain unknown.
     fn reset(&mut self) {
-        *self = Self::empty();
+        *self = Self::for_new_queue();
         for index in [
             3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
         ] {

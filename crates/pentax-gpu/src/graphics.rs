@@ -19,7 +19,7 @@ mod commands;
 mod draw_indirect;
 pub use draw_indirect::{IndirectDraw, NativeIndirectOffsets};
 mod indirect;
-pub use indirect::{CaptureFailure, CaptureUsage, CapturedCommands};
+pub use indirect::{CaptureFailure, CaptureUsage, CapturedCommands, CapturedComputeCommands};
 mod ordered;
 pub use ordered::{OrderedCommands, OrderedStep};
 mod linkage;

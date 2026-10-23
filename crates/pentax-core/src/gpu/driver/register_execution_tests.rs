@@ -64,7 +64,7 @@ fn driver_write_then_array_publishes_actual_compute_and_graphics_banks() {
         }
     }
     let expected = compute::plan_commands(
-        &compute::ComputeState::empty(),
+        &compute::ComputeState::for_new_queue(),
         compute::CommandRange {
             address: 0x1000,
             size: direct.len() as u64,
@@ -159,7 +159,7 @@ fn captured_array_physical_alias_is_a_future_write_exclusion_and_partial_prefix_
     assert_eq!(actual.as_slice(), bytes(&[0x20c, 17]));
     assert_eq!(driver.usage.written_bytes, 8);
     assert!(driver.poisoned);
-    assert_eq!(driver.queues[0], compute::ComputeState::empty());
+    assert_eq!(driver.queues[0], compute::ComputeState::for_new_queue());
     assert_eq!(
         driver.submit(
             &mut memory,
@@ -208,5 +208,5 @@ fn complete_action_admission_precedes_writes_and_late_unknown_array_retains_only
     memory.read(array, &mut actual).unwrap();
     assert_eq!(actual.as_slice(), bytes(&[0x8000_020c, 17]));
     assert!(driver.poisoned);
-    assert_eq!(driver.queues[0], compute::ComputeState::empty());
+    assert_eq!(driver.queues[0], compute::ComputeState::for_new_queue());
 }

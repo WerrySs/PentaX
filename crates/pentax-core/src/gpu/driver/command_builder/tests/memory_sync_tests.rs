@@ -74,11 +74,11 @@ fn owner_write_sync_array_event_wait_retires_real_prefix_without_fake_signal() {
         read(&memory, array, 8),
         [0x20cu32.to_le_bytes(), 17u32.to_le_bytes()].concat()
     );
-    assert_ne!(driver.queues[0], compute::ComputeState::empty());
+    assert_ne!(driver.queues[0], compute::ComputeState::for_new_queue());
     assert!(
         driver.queues[1..]
             .iter()
-            .all(|state| *state == compute::ComputeState::empty())
+            .all(|state| *state == compute::ComputeState::for_new_queue())
     );
     assert_eq!(
         (driver.usage().memory_commands, driver.usage().written_bytes),

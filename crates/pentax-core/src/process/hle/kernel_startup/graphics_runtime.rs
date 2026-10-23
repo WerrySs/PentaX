@@ -381,21 +381,52 @@ fn display_clock(
 }
 
 impl PreparedNativeKernelStartup<'_, '_> {
-    /// Terminal native owner teardown only. Never completes an abandoned call.
-    /// This cleanup has no work/sleep/provider admission and cannot clear poison.
+    /// Run one finite turn of already-admitted asynchronous compute work.
+    /// False means no submissions remain, not that a sampled wait was satisfied.
+    /// The zero-pending path takes no pause, kernel call or new service token.
+    pub fn pump_compute_queues(&mut self) -> Result<bool, KernelStartupError> {
+        if self
+            .graphics
+            .as_ref()
+            .is_none_or(|driver| driver.pending_compute_queues() == 0)
+        {
+            return Ok(false);
+        }
+        let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let driver = self
+            .graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider("missing compute state"))?;
+        let progress = driver
+            .pump_compute_queues(&mut paused, Some(&mut self.kernel))
+            .map_err(KernelStartupError::Graphics)?;
+        Ok(progress.pending != 0)
+    }
+
+    /// Terminal native owner teardown only. Never completes an abandoned call
+    /// or certifies unfinished asynchronous work. Cleanup cannot clear poison.
     pub fn revoke_graphics_continuations_on_teardown(
         &mut self,
     ) -> Result<bool, KernelStartupError> {
         let owner = self.owner_id();
-        if let Some(driver) = self.graphics.as_mut()
-            && driver.has_pending_graphics_continuation()
-        {
-            driver
-                .revoke_graphics_owner(owner)
-                .map_err(KernelStartupError::Graphics)?;
-            return Ok(true);
+        let mut abandoned = false;
+        if let Some(driver) = self.graphics.as_mut() {
+            if driver.has_pending_graphics_continuation() {
+                driver
+                    .revoke_graphics_owner(owner)
+                    .map_err(KernelStartupError::Graphics)?;
+                abandoned = true;
+            }
+            // Compute teardown remains legal after a peer graphics failure has
+            // poisoned the owner. It releases retained work without replay.
+            if driver.pending_compute_queues() != 0 {
+                driver
+                    .revoke_compute_owner(owner)
+                    .map_err(KernelStartupError::Graphics)?;
+                abandoned = true;
+            }
         }
-        Ok(false)
+        Ok(abandoned)
     }
 
     /// Final diagnostics: open ports, committed buffer registrations and retained
@@ -1028,3 +1059,7 @@ mod tests {
         .unwrap();
     }
 }
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "graphics_runtime/compute_queue_tests.rs"]
+mod compute_queue_tests;

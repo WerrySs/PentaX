@@ -11,6 +11,8 @@ use pentax_kernel::ThreadPriorityClass;
 use pentax_platform::native_dispatch::NativeThreadContext;
 
 #[cfg(test)]
+mod compute_queue_tests;
+#[cfg(test)]
 mod graphics_wait_tests;
 mod observations;
 #[cfg(test)]
@@ -244,6 +246,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         frames: &mut Vec<(SuspendedInitializer, NativeNestedCall, NativeSessionPhase)>,
         phase: &mut NativeSessionPhase,
         external: Option<super::frame_bridge::ExternalWake>,
+        compute_pending: bool,
         interactive: bool,
     ) -> Result<bool, NativeSessionError> {
         let blocks = engine.usage().blocks;
@@ -295,6 +298,14 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                         }
                     }
                 }
+                if compute_pending {
+                    // A retained GPU queue can release an existing CPU wait.
+                    // Retry only after the ordinary bounded idle slice, charged
+                    // to the existing guest idle budget. This neither returns
+                    // a syscall nor invents predicate readiness or a deadline.
+                    let poll = std::time::Duration::from_millis(1);
+                    earliest = Some(earliest.map_or(poll, |old| old.min(poll)));
+                }
                 if let Some((sleep, external_maximum)) = idle_slice(earliest, external) {
                     // No live memory borrow or guest execution while all CPUs
                     // are parked. Accept full-width finite deadlines; only
@@ -310,7 +321,11 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                         charge(
                             &mut self.idle_nanoseconds,
                             sleep.as_nanos() as u64,
-                            if interactive {
+                            // New compute polling always has the existing
+                            // finite idle ceiling, including interactive runs.
+                            // Old interactive guest waits without queued compute
+                            // retain their existing policy.
+                            if interactive && !compute_pending {
                                 u64::MAX
                             } else {
                                 session.plan().limits().kernel.max_sleep_nanoseconds

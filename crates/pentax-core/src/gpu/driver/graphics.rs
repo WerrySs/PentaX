@@ -481,6 +481,13 @@ impl Driver {
         let staging = &mut execution.staging;
         let mut cursor = Cursor::Paused(memory);
         while let Some(action) = plan.next_step().map_err(Failure::GraphicsPreparation)? {
+            max_host_bytes = max_host_bytes.min(self.graphics_host_limit()?);
+            presentation.max_held_bytes = presentation.max_held_bytes.min(
+                self.presentation_limits()?
+                    .max_held_bytes
+                    .checked_sub(retained)
+                    .ok_or(Failure::Limit)?,
+            );
             let owned_draw;
             let command = match action {
                 GraphicsStep::WaitFlip(wait) => {
@@ -518,12 +525,19 @@ impl Driver {
                     let held = retained
                         .checked_add(self.video.retained_frame_bytes())
                         .ok_or(Failure::Limit)?;
-                    self.lod_report(
-                        memory,
-                        request,
+                    self.with_command_exclusions(
                         plan.command_ranges(sources),
-                        held,
-                        max_host_bytes,
+                        retained,
+                        |driver, protected| {
+                            driver.lod_report(
+                                memory,
+                                request,
+                                protected,
+                                held,
+                                max_host_bytes.min(driver.graphics_host_limit()?),
+                            )?;
+                            Ok(())
+                        },
                     )?;
                     cursor = Cursor::Paused(memory);
                     continue;
@@ -571,18 +585,29 @@ impl Driver {
                         }
                         draw::MemoryAction::Write(write) => {
                             let memory = cursor.into_pause();
-                            self.memory_write(memory, write, plan.command_ranges(sources))?;
+                            self.with_command_exclusions(
+                                plan.command_ranges(sources),
+                                retained,
+                                |driver, protected| driver.memory_write(memory, write, protected),
+                            )?;
                             cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Transfer(transfer) => {
                             let memory = cursor.into_pause();
-                            self.transfer_command(
-                                memory,
-                                transfer,
+                            self.with_command_exclusions(
                                 plan.command_ranges(sources),
-                                staging,
-                                transfer_held,
-                                max_host_bytes,
+                                retained,
+                                |driver, protected| {
+                                    driver.transfer_command(
+                                        memory,
+                                        transfer,
+                                        protected,
+                                        staging,
+                                        transfer_held,
+                                        max_host_bytes,
+                                    )?;
+                                    Ok(())
+                                },
                             )?;
                             // A first GDS transfer may allocate retained storage
                             // during this very turn; later draw/frame admission
@@ -615,12 +640,19 @@ impl Driver {
                         }
                         draw::MemoryAction::Release(release) => {
                             let memory = cursor.into_pause();
-                            self.retire_release(
-                                memory,
-                                release,
+                            self.with_command_exclusions(
                                 plan.command_ranges(sources),
-                                &mut kernel,
-                                0,
+                                retained,
+                                |driver, protected| {
+                                    driver.retire_release(
+                                        memory,
+                                        release,
+                                        protected,
+                                        &mut kernel,
+                                        0,
+                                    )?;
+                                    Ok(())
+                                },
                             )?;
                             cursor = Cursor::Paused(memory);
                         }
@@ -685,51 +717,71 @@ impl Driver {
             );
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
             let gpu_limits = self.limits.graphics_backend_limits();
-            let initial_lod = self
-                .lod_stats
-                .as_ref()
-                .map(|state| state.counters(owner))
-                .transpose()?;
-            let mut current = super::super::graphics::execute_draw_current_with_lod(
-                cursor.into_pause(),
-                command,
-                &limits,
-                &gpu_limits,
+            let mut current = self.with_command_exclusions(
                 plan.command_ranges(sources),
-                initial_lod,
-                |prepared, preflight, may_execute| {
-                    let vertices = add(
-                        self.usage.vertices,
-                        prepared.vertices,
-                        self.limits.max_vertices,
+                retained,
+                |driver, protected| {
+                    limits.max_host_bytes = limits.max_host_bytes.min(
+                        driver
+                            .graphics_host_limit()?
+                            .checked_sub(retained)
+                            .and_then(|n| n.checked_sub(driver.video.retained_frame_bytes()))
+                            .ok_or(Failure::Limit)?,
+                    );
+                    limits.max_work = limits.max_work.min(
+                        driver
+                            .limits
+                            .max_preparation_work
+                            .saturating_sub(driver.usage.preparation_work),
+                    );
+                    let initial_lod = driver
+                        .lod_stats
+                        .as_ref()
+                        .map(|state| state.counters(owner))
+                        .transpose()?;
+                    let current = super::super::graphics::execute_draw_current_with_lod(
+                        cursor.into_pause(),
+                        command,
+                        &limits,
+                        &gpu_limits,
+                        protected,
+                        initial_lod,
+                        |prepared, preflight, may_execute| {
+                            let vertices = add(
+                                driver.usage.vertices,
+                                prepared.vertices,
+                                driver.limits.max_vertices,
+                            )
+                            .map_err(|_| super::super::graphics::Error::Limit)?;
+                            let work = prepared
+                                .work
+                                .checked_add(preflight)
+                                .ok_or(super::super::graphics::Error::Limit)?;
+                            let work = add(
+                                driver.usage.preparation_work,
+                                work,
+                                driver.limits.max_preparation_work,
+                            )
+                            .map_err(|_| super::super::graphics::Error::Limit)?;
+                            driver.usage.vertices = vertices;
+                            driver.usage.preparation_work = work;
+                            // A possible GPU effect makes every subsequent error
+                            // terminal. Only complete submission success clears this.
+                            driver.poisoned |= may_execute;
+                            Ok(())
+                        },
                     )
-                    .map_err(|_| super::super::graphics::Error::Limit)?;
-                    let work = prepared
-                        .work
-                        .checked_add(preflight)
-                        .ok_or(super::super::graphics::Error::Limit)?;
-                    let work = add(
-                        self.usage.preparation_work,
-                        work,
-                        self.limits.max_preparation_work,
-                    )
-                    .map_err(|_| super::super::graphics::Error::Limit)?;
-                    self.usage.vertices = vertices;
-                    self.usage.preparation_work = work;
-                    // A possible GPU effect makes every subsequent error
-                    // terminal. Only complete submission success clears this.
-                    self.poisoned |= may_execute;
-                    Ok(())
+                    .map_err(|error| match error {
+                        super::super::graphics::Error::Prepare(error) => {
+                            Failure::GraphicsPreparation(error)
+                        }
+                        super::super::graphics::Error::Memory(_) => Failure::Memory,
+                        super::super::graphics::Error::Vulkan(error) => Failure::Vulkan(error),
+                        super::super::graphics::Error::Limit => Failure::Limit,
+                    })?;
+                    Ok(current)
                 },
-            )
-            .map_err(|error| match error {
-                super::super::graphics::Error::Prepare(error) => {
-                    Failure::GraphicsPreparation(error)
-                }
-                super::super::graphics::Error::Memory(_) => Failure::Memory,
-                super::super::graphics::Error::Vulkan(error) => Failure::Vulkan(error),
-                super::super::graphics::Error::Limit => Failure::Limit,
-            })?;
+            )?;
             if let Some(counters) = current.take_lod_counters() {
                 self.lod_stats
                     .as_mut()
@@ -950,7 +1002,10 @@ pub(super) struct GraphicsAdmission {
 }
 
 impl Driver {
-    fn graphics_check_owner(&self, memory: &PausedNativeMemory<'_>) -> Result<(), Failure> {
+    pub(super) fn graphics_check_owner(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+    ) -> Result<(), Failure> {
         let owner = memory.owner_id();
         self.video.check_owner(owner)?;
         if self.graphics_owner.is_some_and(|old| old != owner)
@@ -968,11 +1023,13 @@ impl Driver {
         Ok(())
     }
     pub(super) fn graphics_retained_bytes(&self) -> Result<usize, Failure> {
+        let compute = self.compute_retained_bytes()?;
         let mut bytes = self
             .graphics_admissions
             .capacity()
             .checked_mul(size_of::<GraphicsAdmission>())
             .and_then(|bytes| bytes.checked_add(self.gds_retained_bytes()))
+            .and_then(|bytes| bytes.checked_add(compute))
             .ok_or(Failure::Limit)?;
         for item in &self.graphics_admissions {
             let range_bytes = match &item.ranges {
@@ -1329,5 +1386,35 @@ impl Driver {
         self.graphics_phase = GraphicsPhase::Failed;
         self.poisoned = true;
         Ok(())
+    }
+}
+
+impl Driver {
+    pub(super) fn graphics_exclusion_count(&self) -> Option<usize> {
+        let mut count = self.graphics_execution.as_ref().map_or(0, |execution| {
+            execution.plan.command_ranges(&execution.sources).len()
+        });
+        for admission in &self.graphics_admissions {
+            count = count.checked_add(admission.ranges.as_ref().map_or(0, Vec::len))?;
+        }
+        Some(count)
+    }
+    pub(super) fn copy_graphics_exclusions(&self, output: &mut Vec<compute::CommandRange>) {
+        if let Some(execution) = &self.graphics_execution {
+            output.extend_from_slice(execution.plan.command_ranges(&execution.sources));
+        }
+        for admission in &self.graphics_admissions {
+            if let Some(ranges) = &admission.ranges {
+                output.extend(
+                    ranges
+                        .iter()
+                        .filter(|range| range.address != 0 && range.size != 0)
+                        .map(|range| compute::CommandRange {
+                            address: range.address,
+                            size: range.size,
+                        }),
+                );
+            }
+        }
     }
 }

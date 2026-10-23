@@ -901,8 +901,8 @@ outputs preserve the pinned behavior through checked guest transactions.
 | `pentax-kernel` and `pentax-core/src/process/hle/kernel_*` | `src/libs/libKernel.cpp`, `src/libs/libAmpr.cpp`, qualified registration metadata and the kernel/system service sources listed in the crate's [NOTICE](../crates/pentax-kernel/NOTICE) | Exact scoped provider identities, bounded stateful service subsets, AMPR header/binding lifecycle, explicit unsupported branches, read-only file capabilities and transactional outputs over the prepared native owner; the kernel crate has no independent execution entry point or firmware ABI claim |
 | `pentax-platform/src/native_memory/windows/transaction.rs` and `windows/physical/release.rs` | `src/kernel/memory.cpp`, mapping publication, shared physical backing, GetAllocatedSpan/FindMappings/ReleaseDirectMemoryInternal and rollback paths | Prospective output/alias checks, private/physical backing, virtual and physical subrange release, retained placeholders and section offsets, staged rollback metadata, no-allocation output copies and poisoning after failed restoration or irreversible partial closure; pools and host cache modes remain unsupported |
 | `pentax-shader-compiler` | Shader CFG, frontend, IR passes and SPIR-V backend listed in the crate's [NOTICE](../crates/pentax-shader-compiler/NOTICE) | Safe bounded Rust subset with typed stage/resource profiles, iterative graph/SSA walks, fallible arenas, actual output feature manifest and explicit unsupported forms; original programs independently validated with the pinned official SPIR-V Tools |
-| `pentax-gpu/src/compute*` and `pentax-core/src/gpu.rs` | Pinned `pm4.h`, `pm4Handlers.cpp` compute register/dispatch paths and `shader.cpp` initial compute ABI | Explicit known state, bounded acyclic single-buffer wave32 compilation, owned input/push data, same-owner pause through GPU completion/writeback, bounded stateful multi-dispatch/indirect call-chain plans, ordered memory writes/waits, live indirect arguments and alias/permission admission; asynchronous scheduling and presentation remain unfinished |
-| `pentax-core/src/gpu/driver.rs` and HLE graphics provider/runtime | `src/libs/libAgcDriver.cpp`, `src/libs/agc.{h,cpp}` and `src/graphics/guest_gpu/graphicsRun.{h,cpp}` | Exact Graphics5Driver and paired Graphics5/libSceAgc 1 / module 1.1 exports, four checked single/batch compute-submit ABIs and AgcSuspendPoint frame-boundary/reset state after synchronous completion; source null/zero-count ordering, bounded metadata capture and cumulative same-owner GPU admission; independent compute state per observed ACB queue, terminal partial-execution failure policy and original native x64 consumers; no draw/async/presentation claim; see the [core NOTICE](../crates/pentax-core/NOTICE) |
+| `pentax-gpu/src/compute*` and `pentax-core/src/gpu.rs` | Pinned `pm4.h`, `pm4Handlers.cpp` compute register/dispatch paths and `shader.cpp` initial compute ABI | Explicit known state, bounded acyclic single-buffer wave32 compilation, owned input/push data, same-owner pause through GPU completion/writeback, bounded stateful multi-dispatch/indirect call-chain plans, ordered memory writes/waits, live indirect arguments, owner-bound cooperative compute continuations and alias/permission admission; general GPU scheduling and commercial presentation remain unfinished |
+| `pentax-core/src/gpu/driver.rs` and HLE graphics provider/runtime | `src/libs/libAgcDriver.cpp`, `src/libs/agc.{h,cpp}` and `src/graphics/guest_gpu/graphicsRun.{h,cpp}` | Exact Graphics5Driver and paired Graphics5/libSceAgc 1 / module 1.1 exports, four checked single/batch compute-submit ABIs and AgcSuspendPoint graphics-queue frame-boundary/reset state distinct from pending compute work; source null/zero-count ordering, bounded metadata capture and cumulative same-owner GPU admission; independent compute state per observed ACB queue, terminal partial-execution failure policy, retained asynchronous compute waits and original native x64 consumers; no commercial rendering claim; see the [core NOTICE](../crates/pentax-core/NOTICE) |
 | `pentax-platform/src/vulkan` | Host Vulkan device, resource, descriptor, pipeline, command and readback paths listed in the module's [NOTICE](../crates/pentax-platform/src/vulkan/NOTICE) | Owned Rust RAII resources, closed factories and opaque prepared compute products, bounded dynamic dispatch/resource contracts, explicit synchronization and fenced readback; no caller-supplied raw SPIR-V or complete guest renderer |
 
 The compiler also transcribes selected official SPIR-V enumerants from Khronos
@@ -1881,3 +1881,26 @@ it does not set the distinct NT fence flag. All encodings, bit patterns,
 canaries, guest programs and finite comparison inputs are original PentaX work.
 The counter corrections preserve literal outcomes and meaningful modeled
 boundaries; increased native counts alone establish no commercial progress.
+
+
+### Retained compute waits and CPU submission
+
+The public KytyPS5 implementation at revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 separates ACB submission from
+GPU completion. `SubmitAcb` enqueues work and returns to its CPU caller.
+`graphicsRun.cpp` retains a submission's PM4 stack and offset, leaves a false
+memory-wait predicate at the queue front, and selects other unblocked queues.
+A later retry reads the current predicate; it does not replay earlier packets
+or manufacture completion after a timed wake. `AgcSuspendPoint` operates on
+the graphics queue and is not an implicit drain of all pending compute queues.
+
+PentaX uses these contracts in an original bounded Rust queue/continuation and
+native scheduling bridge. Immutable command admission, live owner permissions,
+FIFO activation, cumulative memory/work limits, cancellation and precise CPU
+continuation remain separate checks. Individual Vulkan dispatches still use
+fenced execution; cooperative queue progress is not a claim of arbitrary
+concurrent hardware execution or a rendered commercial frame.
+
+Primary sources: [ACB submit](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp),
+[queue execution, cursor and wait predicates](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp),
+and [retained PM4 execution state](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/commandProcessor.h).

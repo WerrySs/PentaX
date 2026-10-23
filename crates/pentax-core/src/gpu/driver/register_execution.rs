@@ -28,8 +28,17 @@ pub(super) enum ComputeStep {
     Dispatch(compute::Dispatch),
 }
 impl ComputeCommands {
+    #[cfg(test)]
     pub(super) fn prepare(
         memory: &PausedNativeMemory<'_>,
+        root: compute::CommandRange,
+        initial: compute::ComputeState,
+        limits: &compute::CommandLimits,
+    ) -> Result<Self, Failure> {
+        Self::prepare_source(&super::super::Memory(memory), root, initial, limits)
+    }
+    pub(super) fn prepare_source<M: compute::Memory>(
+        memory: &M,
         root: compute::CommandRange,
         initial: compute::ComputeState,
         limits: &compute::CommandLimits,
@@ -64,7 +73,7 @@ impl ComputeCommands {
         limits.max_work = limits.max_work.checked_sub(work).ok_or(Failure::Limit)?;
         bytes.resize(size, 0);
         memory
-            .read_gpu(root.address, &mut bytes)
+            .read(root.address, &mut bytes)
             .map_err(|_| Failure::Memory)?;
         if pentax_gpu::contains_indirect_registers(&[&bytes]).map_err(Failure::Preparation)? {
             let plan = compute::OrderedCommands::prepare(&bytes, root, initial, &limits)
@@ -73,12 +82,12 @@ impl ComputeCommands {
             // and copy/walk work remain charged through the complete product.
             Ok(Self::Ordered { plan, held, work })
         } else {
-            struct Snapshot<'a, 'owner> {
+            struct Snapshot<'a, M> {
                 root: compute::CommandRange,
                 bytes: &'a [u8],
-                memory: &'a PausedNativeMemory<'owner>,
+                memory: &'a M,
             }
-            impl compute::Memory for Snapshot<'_, '_> {
+            impl<M: compute::Memory> compute::Memory for Snapshot<'_, M> {
                 fn read(
                     &self,
                     address: u64,
@@ -88,7 +97,7 @@ impl ComputeCommands {
                         output.copy_from_slice(self.bytes);
                         Ok(())
                     } else {
-                        compute::Memory::read(&super::super::Memory(self.memory), address, output)
+                        compute::Memory::read(self.memory, address, output)
                     }
                 }
             }

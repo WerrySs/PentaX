@@ -60,10 +60,12 @@ fn queue_reset_replaces_only_selected_history_and_restores_proven_compute_defaul
     let reset = plan.final_state();
     assert!(plan.commands().next().is_none());
     assert_eq!(input.reads.get(), 1);
-    for register in [0x207, 0x208, 0x209, 0x20c, 0x20d, 0x240] {
+    for register in [
+        0x204, 0x205, 0x206, 0x207, 0x208, 0x209, 0x20c, 0x20d, 0x240,
+    ] {
         assert_eq!(reset.get(register).unwrap(), 0);
     }
-    for register in [0x204, 0x212, 0x213, 0x228] {
+    for register in [0x212, 0x213, 0x228] {
         assert!(reset.get(register).is_err());
     }
     assert_eq!(reset.indirect_base, Some(0));
@@ -217,4 +219,68 @@ fn reset_packets_have_exact_grammar_truncation_and_precharged_work_limits() {
     ));
     assert_eq!(seeded().get(0x240).unwrap(), 0x1234);
     assert!(!crate::contains_indirect_registers(&[&input.bytes]).unwrap());
+}
+
+#[test]
+fn fresh_queue_start_defaults_preserve_detached_unknown_and_explicit_nonzero_refusals() {
+    let empty = ComputeState::empty();
+    let fresh = ComputeState::for_new_queue();
+    assert_eq!(ComputeState::default(), empty);
+    for register in 0x204..=0x206 {
+        assert_eq!(empty.get(register), Err(Error::MissingRegister(register)));
+        assert_eq!(fresh.get(register).unwrap(), 0);
+    }
+    assert_eq!(
+        fresh.values.iter().filter(|value| value.is_some()).count(),
+        3
+    );
+    assert_eq!(fresh.indirect_base, None);
+    let input = source(&[]);
+    let limits = Limits::default();
+    let make_budget = || Budget {
+        limits: &limits,
+        usage: Usage::default(),
+    };
+    assert!(matches!(
+        prepare_state(empty, [1; 3], 0x41, &input, make_budget()),
+        Err(Error::MissingRegister(0x204))
+    ));
+    assert!(matches!(
+        prepare_state(fresh, [1; 3], 0x41, &input, make_budget()),
+        Err(Error::MissingRegister(0x207))
+    ));
+    for register in 0x204..=0x206 {
+        let mut explicit = fresh;
+        explicit.write(register, 1).unwrap();
+        assert!(matches!(
+            prepare_state(explicit, [1; 3], 0x41, &input, make_budget()),
+            Err(Error::Unsupported("compute start coordinates"))
+        ));
+    }
+    assert_eq!(input.reads.get(), 0);
+}
+
+#[test]
+fn queue_start_defaults_survive_context_clear_and_processor_reset_replaces_them() {
+    let mut initial = ComputeState::for_new_queue();
+    initial.write(0x204, 7).unwrap();
+    initial.write(0x205, 9).unwrap();
+    initial.write(0x206, 11).unwrap();
+    for (words, expected) in [
+        (vec![0xc000_1200, 15], [7, 9, 11]),
+        (vec![0xc000_1024, 0], [0, 0, 0]),
+    ] {
+        let input = source(&words);
+        let static_plan =
+            plan_commands(&initial, range(&input), &input, &Default::default()).unwrap();
+        let mut ordered =
+            OrderedCommands::prepare(&input.bytes, range(&input), initial, &Default::default())
+                .unwrap();
+        assert!(ordered.next_step().unwrap().is_none());
+        let ordered_final = ordered.final_state().unwrap();
+        assert_eq!(static_plan.final_state(), ordered_final);
+        for (index, value) in expected.into_iter().enumerate() {
+            assert_eq!(ordered_final.get(0x204 + index as u32).unwrap(), value);
+        }
+    }
 }

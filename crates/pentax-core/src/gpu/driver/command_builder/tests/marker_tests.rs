@@ -224,11 +224,11 @@ fn submitted_annotations_preserve_actual_write_array_wait_order_without_fake_mem
         read(&memory, array, 8),
         [0x20cu32.to_le_bytes(), 17u32.to_le_bytes()].concat()
     );
-    assert_ne!(driver.queues[0], compute::ComputeState::empty());
+    assert_ne!(driver.queues[0], compute::ComputeState::for_new_queue());
     assert!(
         driver.queues[1..]
             .iter()
-            .all(|q| *q == compute::ComputeState::empty())
+            .all(|q| *q == compute::ComputeState::for_new_queue())
     );
     assert_eq!(
         (driver.usage().memory_commands, driver.usage().written_bytes),

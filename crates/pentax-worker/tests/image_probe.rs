@@ -1650,3 +1650,6 @@ mod agc_driver_submit_alias;
 
 #[path = "image_probe/compute_scheduling_hints.rs"]
 mod compute_scheduling_hints;
+
+#[path = "image_probe/compute_queue_wait.rs"]
+mod compute_queue_wait;

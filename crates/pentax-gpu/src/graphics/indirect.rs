@@ -62,6 +62,105 @@ pub struct CapturedCommands {
     usage: CaptureUsage,
 }
 
+/// Immutable original compute root/IB ranges captured before CPU submission
+/// returns. This is source data only; execution must retain the actual owner and
+/// admit current memory permissions separately. There is no live-memory fallback.
+pub struct CapturedComputeCommands {
+    captured: CapturedCommands,
+    snapshots: Vec<Option<Vec<u8>>>,
+}
+struct ComputeCapture<'a> {
+    snapshots: &'a mut Vec<Option<Vec<u8>>>,
+    max_depth: usize,
+}
+impl CapturedComputeCommands {
+    pub fn capture_attempt(
+        root: CommandRange,
+        memory: &impl Memory,
+        limits: &crate::compute::CommandLimits,
+    ) -> Result<Self, CaptureFailure> {
+        let mut usage = CaptureUsage::default();
+        let attempt = (|| {
+            if limits.max_depth == 0 {
+                return Err(Error::Limit("compute capture depth"));
+            }
+            let max_buffers = usize::try_from(limits.max_indirect_buffers)
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .ok_or(Error::Limit("compute capture buffers"))?;
+            let bounds = CommandLimits {
+                max_buffers,
+                max_command_bytes: limits.max_command_bytes,
+                max_packets: limits.max_packets,
+                max_host_bytes: limits.max_host_bytes,
+                max_work: limits.max_work,
+                ..CommandLimits::default()
+            };
+            let mut budget = Budget {
+                limits: &bounds,
+                usage,
+            };
+            let result = (|| {
+                budget.host(size_of::<Vec<Option<Vec<u8>>>>())?;
+                budget.work(size_of::<Vec<Option<Vec<u8>>>>() as u64)?;
+                let mut snapshots = Vec::new();
+                let captured = CapturedCommands::capture_inner(
+                    &[root],
+                    memory,
+                    &mut budget,
+                    Some(ComputeCapture {
+                        snapshots: &mut snapshots,
+                        max_depth: limits.max_depth,
+                    }),
+                )?;
+                if snapshots.len() != captured.sources.len()
+                    || snapshots.iter().any(Option::is_none)
+                {
+                    return Err(Error::Unsupported("incomplete compute command capture"));
+                }
+                Ok(Self {
+                    captured,
+                    snapshots,
+                })
+            })();
+            usage = budget.usage;
+            // Include the wrapper's retained vector in the same authoritative
+            // ledger as capture frames and original payload capacities.
+            result.map(|mut captured| {
+                captured.captured.usage = usage;
+                captured
+            })
+        })();
+        attempt.map_err(|error| CaptureFailure { error, usage })
+    }
+    pub fn root(&self) -> CommandRange {
+        self.captured.sources[0]
+    }
+    pub fn usage(&self) -> CaptureUsage {
+        self.captured.usage()
+    }
+    pub fn command_ranges(&self) -> &[CommandRange] {
+        self.captured.command_ranges()
+    }
+}
+impl Memory for CapturedComputeCommands {
+    fn read(&self, address: u64, output: &mut [u8]) -> Result<(), crate::compute::MemoryError> {
+        let source = self
+            .captured
+            .sources
+            .iter()
+            .position(|range| {
+                range.address == address && usize::try_from(range.size).ok() == Some(output.len())
+            })
+            .ok_or(crate::compute::MemoryError::Unavailable)?;
+        let bytes = self.snapshots[source]
+            .as_ref()
+            .ok_or(crate::compute::MemoryError::Unavailable)?;
+        output.copy_from_slice(bytes);
+        Ok(())
+    }
+}
+
 struct Budget<'a> {
     limits: &'a CommandLimits,
     usage: CaptureUsage,
@@ -179,7 +278,7 @@ impl CapturedCommands {
             limits,
             usage: CaptureUsage::default(),
         };
-        Self::capture_inner(roots, memory, &mut budget).map_err(|error| CaptureFailure {
+        Self::capture_inner(roots, memory, &mut budget, None).map_err(|error| CaptureFailure {
             error,
             usage: budget.usage,
         })
@@ -189,6 +288,7 @@ impl CapturedCommands {
         roots: &[CommandRange],
         memory: &impl Memory,
         budget: &mut Budget<'_>,
+        mut compute: Option<ComputeCapture<'_>>,
     ) -> Result<Self, Error> {
         let limits = budget.limits;
         if roots.len() > limits.max_buffers {
@@ -211,6 +311,10 @@ impl CapturedCommands {
                 .map_err(|error| root_error(error, root_index))?;
             budget.reserve(&mut frames, 1)?;
             budget.reserve(&mut lineage, 1)?;
+            if let Some(compute) = compute.as_mut() {
+                budget.reserve(compute.snapshots, 1)?;
+                compute.snapshots.push(None);
+            }
             frames.push(Frame {
                 bytes: snapshot,
                 at: 0,
@@ -222,7 +326,10 @@ impl CapturedCommands {
                 let index = frames.len() - 1;
                 if frames[index].at == frames[index].bytes.len() {
                     let start = frames[index].lineage_start;
-                    frames.pop();
+                    let finished = frames.pop().unwrap();
+                    if let Some(compute) = compute.as_mut() {
+                        compute.snapshots[finished.source] = Some(finished.bytes);
+                    }
                     lineage.truncate(start);
                     continue;
                 }
@@ -283,7 +390,7 @@ impl CapturedCommands {
                     if words != 4 {
                         return Err(fail("graphics indirect packet length"));
                     }
-                    if header.low_byte() != 0 {
+                    if header.low_byte() != 0 && !(compute.is_some() && header.low_byte() == 2) {
                         return Err(fail("graphics indirect header profile"));
                     }
                     let control = word(tail, 3);
@@ -305,7 +412,10 @@ impl CapturedCommands {
                         return Err(fail("graphics indirect buffer cycle"));
                     }
                     let chain = control & (1 << 20) != 0;
-                    if !chain && frames.len() >= limits.max_buffers {
+                    let max_depth = compute
+                        .as_ref()
+                        .map_or(limits.max_buffers, |capture| capture.max_depth);
+                    if !chain && frames.len() >= max_depth {
                         return Err(Error::Limit("graphics indirect call depth"));
                     }
                     let start = if chain {
@@ -322,6 +432,10 @@ impl CapturedCommands {
                     budget.reserve(&mut sources, 1)?;
                     let next_source = sources.len();
                     sources.push(target);
+                    if let Some(compute) = compute.as_mut() {
+                        budget.reserve(compute.snapshots, 1)?;
+                        compute.snapshots.push(None);
+                    }
                     budget.reserve(&mut lineage, 1)?;
                     lineage.push(target);
                     let next = Frame {
@@ -331,7 +445,10 @@ impl CapturedCommands {
                         lineage_start: start,
                     };
                     if chain {
-                        frames[index] = next;
+                        let finished = std::mem::replace(&mut frames[index], next);
+                        if let Some(compute) = compute.as_mut() {
+                            compute.snapshots[finished.source] = Some(finished.bytes);
+                        }
                     } else {
                         frames[index].at += length;
                         budget.reserve(&mut frames, 1)?;
@@ -956,5 +1073,168 @@ mod tests {
             );
         }
         assert_eq!(plan.command_location(words.len()), None);
+    }
+
+    #[test]
+    fn compute_capture_retains_original_call_chain_sources_without_rereads_or_live_fallback() {
+        let memory = Backing::default();
+        let child_b_words = [0x8000_0000];
+        let child_b = memory.put(0x3000, &child_b_words);
+        let mut chain = ib(child_b.address, 1, true);
+        chain[0] |= 2;
+        // The complete original range, including a skipped chain tail, must be
+        // retained. Flattened executable bytes cannot answer this source read.
+        let child_a_words = [chain.as_slice(), &[0xdead_beef]].concat();
+        let child_a = memory.put(0x2000, &child_a_words);
+        let mut call = ib(child_a.address, child_a_words.len() as u32, false);
+        call[0] |= 2;
+        let root_words = [call.as_slice(), &[0x8000_0000]].concat();
+        let root = memory.put(0x1000, &root_words);
+        let limits = crate::compute::CommandLimits {
+            max_depth: 2,
+            max_indirect_buffers: 2,
+            ..Default::default()
+        };
+        let captured = CapturedComputeCommands::capture_attempt(root, &memory, &limits).unwrap();
+        assert_eq!(captured.root(), root);
+        assert_eq!(captured.command_ranges(), [root, child_a, child_b]);
+        assert_eq!(captured.usage().indirect_buffers, 2);
+        assert_eq!(captured.usage().captured_buffers, 3);
+        assert_eq!(*memory.reads.borrow(), [0x1000, 0x2000, 0x3000]);
+        let reads = memory.reads.borrow().len();
+        memory
+            .regions
+            .borrow_mut()
+            .values_mut()
+            .for_each(|bytes| bytes.fill(0xa5));
+        memory.denied.set(Some(root.address));
+        for (range, words) in [
+            (root, root_words),
+            (child_a, child_a_words),
+            (child_b, child_b_words.to_vec()),
+        ] {
+            let mut output = vec![0; range.size as usize];
+            captured.read(range.address, &mut output).unwrap();
+            assert_eq!(
+                output,
+                words
+                    .iter()
+                    .flat_map(|word| word.to_le_bytes())
+                    .collect::<Vec<_>>()
+            );
+        }
+        let mut short = [0; 4];
+        assert_eq!(
+            captured.read(root.address, &mut short),
+            Err(MemoryError::Unavailable)
+        );
+        assert_eq!(
+            captured.read(root.address + 4, &mut short),
+            Err(MemoryError::Unavailable)
+        );
+        assert_eq!(
+            captured.read(0x4000, &mut short),
+            Err(MemoryError::Unavailable)
+        );
+        assert_eq!(memory.reads.borrow().len(), reads);
+    }
+
+    #[test]
+    fn compute_capture_keeps_graphics_profile_closed_and_bounds_depth_cycles_bytes_and_attempts() {
+        for tag in [0, 2] {
+            let memory = Backing::default();
+            let child = memory.put(0x2000, &[0x8000_0000]);
+            let mut call = ib(child.address, 1, false);
+            call[0] |= tag;
+            let root = memory.put(0x1000, &call);
+            let limits = crate::compute::CommandLimits::default();
+            let captured =
+                CapturedComputeCommands::capture_attempt(root, &memory, &limits).unwrap();
+            assert_eq!(captured.usage().indirect_buffers, 1);
+            if tag == 2 {
+                assert!(
+                    CapturedCommands::capture_attempt(&[root], &memory, &CommandLimits::default())
+                        .is_err()
+                );
+            }
+            memory.reads.borrow_mut().clear();
+            let shallow = crate::compute::CommandLimits {
+                max_depth: 1,
+                ..limits
+            };
+            let failure = CapturedComputeCommands::capture_attempt(root, &memory, &shallow)
+                .err()
+                .unwrap();
+            assert!(matches!(failure.error, Error::Limit(_)));
+            assert_eq!(failure.usage.command_bytes, root.size as usize);
+            assert_eq!(*memory.reads.borrow(), [root.address]);
+            let mut chain = call;
+            chain[3] |= 1 << 20;
+            memory.put(root.address, &chain);
+            assert!(CapturedComputeCommands::capture_attempt(root, &memory, &shallow).is_ok());
+            let none = crate::compute::CommandLimits {
+                max_indirect_buffers: 0,
+                ..limits
+            };
+            assert!(CapturedComputeCommands::capture_attempt(root, &memory, &none).is_err());
+            let no_host = crate::compute::CommandLimits {
+                max_host_bytes: 0,
+                ..limits
+            };
+            let no_work = crate::compute::CommandLimits {
+                max_work: 0,
+                ..limits
+            };
+            let no_depth = crate::compute::CommandLimits {
+                max_depth: 0,
+                ..limits
+            };
+            let no_bytes = crate::compute::CommandLimits {
+                max_command_bytes: 0,
+                ..limits
+            };
+            for refused in [no_host, no_work, no_depth, no_bytes] {
+                memory.reads.borrow_mut().clear();
+                assert!(CapturedComputeCommands::capture_attempt(root, &memory, &refused).is_err());
+                assert!(memory.reads.borrow().is_empty());
+            }
+            memory.put(
+                root.address,
+                &[call[0], root.address as u32, 0, 0x0f20_0004],
+            );
+            memory.reads.borrow_mut().clear();
+            let cycle = CapturedComputeCommands::capture_attempt(root, &memory, &limits)
+                .err()
+                .unwrap();
+            assert!(matches!(
+                cycle.error,
+                Error::Packet {
+                    reason: "graphics indirect buffer cycle",
+                    ..
+                }
+            ));
+            assert_eq!(*memory.reads.borrow(), [root.address]);
+            assert_eq!(cycle.usage.packets, 1);
+            assert!(cycle.usage.host_bytes > 0 && cycle.usage.work > 0);
+            memory.put(root.address, &call);
+            memory.denied.set(Some(child.address));
+            let denied = CapturedComputeCommands::capture_attempt(root, &memory, &limits)
+                .err()
+                .unwrap();
+            assert_eq!(
+                denied.error,
+                Error::SourceMemory {
+                    address: child.address,
+                    error: MemoryError::ReadDenied
+                }
+            );
+            assert_eq!(denied.usage.indirect_buffers, 1);
+            memory.denied.set(None);
+            memory.put(root.address, &[call[0], u32::MAX, u32::MAX, 0xffe0_0000]);
+            memory.reads.borrow_mut().clear();
+            let zero = CapturedComputeCommands::capture_attempt(root, &memory, &limits).unwrap();
+            assert_eq!(zero.command_ranges(), [root]);
+            assert_eq!(*memory.reads.borrow(), [root.address]);
+        }
     }
 }

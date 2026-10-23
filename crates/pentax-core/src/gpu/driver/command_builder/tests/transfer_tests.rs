@@ -189,7 +189,7 @@ fn transfers_read_actual_prior_writes_feed_live_arrays_and_repeat_whole_immediat
                 let state_words = [0xc001_7600, register, 17];
                 memory.write(base + 0xc000, &bytes(&state_words)).unwrap();
                 let expected = compute::plan_commands(
-                    &compute::ComputeState::empty(),
+                    &compute::ComputeState::for_new_queue(),
                     compute::CommandRange {
                         address: base + 0xc000,
                         size: 12,
@@ -203,7 +203,7 @@ fn transfers_read_actual_prior_writes_feed_live_arrays_and_repeat_whole_immediat
                 assert!(
                     driver.queues[1..]
                         .iter()
-                        .all(|state| *state == compute::ComputeState::empty())
+                        .all(|state| *state == compute::ComputeState::for_new_queue())
                 );
             }
             assert!(!driver.poisoned);
