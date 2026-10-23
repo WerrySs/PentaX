@@ -1641,3 +1641,6 @@ mod agc_wait_safe;
 
 #[path = "image_probe/agc_lod_stats.rs"]
 mod agc_lod_stats;
+
+#[path = "image_probe/video_presentation_aliases.rs"]
+mod video_presentation_aliases;

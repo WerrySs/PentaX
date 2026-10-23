@@ -1056,3 +1056,5 @@ Its null-buffer and allocation-failure paths retain the source returns.
 Encoding does not publish statistics: submitted LOD packets explicitly refuse
 before an executable plan is exposed. Shader mip feedback, report collection,
 reset and completion publication require a separate execution implementation.
+
+Five explicit paired `libSceVideoOut` presentation/state aliases reuse the existing checked VideoOut implementations. Canonical exports retain their marker identities; other scopes and versions remain unavailable. Pending flips reflect the owned queue and require actual presentation acknowledgement to complete.
