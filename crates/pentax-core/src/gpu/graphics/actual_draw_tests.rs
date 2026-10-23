@@ -699,3 +699,6 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
         SENTINEL.repeat(WIDTH * HEIGHT)
     );
 }
+
+#[path = "actual_draw_tests/primitive.rs"]
+mod primitive;

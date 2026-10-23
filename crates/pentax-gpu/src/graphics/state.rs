@@ -16,6 +16,8 @@ pub struct GraphicsState {
     primitive: Option<u32>,
     index_offset: Option<u32>,
     primitive_restart: Option<u32>,
+    ge_control: Option<u32>,
+    ge_user_vgpr: Option<u32>,
     pub(super) instances: Option<u32>,
     pub(super) index_type: Option<IndexType>,
     pub(super) index_base: Option<u64>,
@@ -52,6 +54,8 @@ impl GraphicsState {
             primitive: None,
             index_offset: None,
             primitive_restart: None,
+            ge_control: None,
+            ge_user_vgpr: None,
             instances: None,
             index_type: None,
             index_base: None,
@@ -60,7 +64,11 @@ impl GraphicsState {
     }
     pub(super) fn reset(&mut self, reset: crate::queue_reset::Reset) {
         match reset {
-            crate::queue_reset::Reset::Context => self.context = [None; 0x400],
+            crate::queue_reset::Reset::Context => {
+                self.context = [None; 0x400];
+                // Public Context::Reset -> ShaderRegisters default.
+                self.context[0x29b] = Some(0);
+            }
             crate::queue_reset::Reset::Processor => {
                 // Pinned209dffe Reset does not assign these independent fields.
                 let index_base = self.index_base;
@@ -70,6 +78,9 @@ impl GraphicsState {
                 self.primitive = Some(0);
                 self.index_offset = Some(0);
                 self.primitive_restart = Some(0);
+                self.ge_control = Some(0);
+                self.ge_user_vgpr = Some(0);
+                self.context[0x29b] = Some(0);
                 self.instances = instances;
                 self.index_type = Some(IndexType::U16);
                 self.index_base = index_base;
@@ -83,7 +94,7 @@ impl GraphicsState {
     ) -> Result<(), Error> {
         use crate::context_state::Operation;
         match operation {
-            Operation::Clear => self.context = [None; 0x400],
+            Operation::Clear => self.reset(crate::queue_reset::Reset::Context),
             Operation::Push | Operation::PushClear => {
                 if self.context_pushed {
                     return Err(Error::Unsupported("context already pushed"));
@@ -91,7 +102,7 @@ impl GraphicsState {
                 self.saved_context = self.context;
                 self.context_pushed = true;
                 if operation == Operation::PushClear {
-                    self.context = [None; 0x400];
+                    self.reset(crate::queue_reset::Reset::Context);
                 }
             }
             Operation::Pop => {
@@ -105,6 +116,22 @@ impl GraphicsState {
         }
         Ok(())
     }
+    pub(super) fn primitive_profile(&self) -> Result<(), Error> {
+        // Called only after the existing no-GS/no-amplification stage guard.
+        // Absent legacy fields grant no new geometry authority. Known reset0
+        // is inactive GS output, and2 is the admitted triangle output.
+        if self.context[0x29b].is_some_and(|value| !matches!(value, 0 | 2)) {
+            return Err(Error::Unsupported("graphics output primitive profile"));
+        }
+        // Source decodes only these named fields, ignoring reserved bits.
+        if self.ge_control.is_some_and(|value| value & 0x3ffff != 0) {
+            return Err(Error::Unsupported("graphics primitive grouping profile"));
+        }
+        if self.ge_user_vgpr.is_some_and(|value| value & 7 != 0) {
+            return Err(Error::Unsupported("graphics extra user VGPR profile"));
+        }
+        Ok(())
+    }
     pub(super) fn get(&self, space: RegisterSpace, register: u32) -> Result<u32, Error> {
         let value = match space {
             RegisterSpace::Context => self.context.get(register as usize).copied().flatten(),
@@ -113,6 +140,8 @@ impl GraphicsState {
                 0x242 => self.primitive,
                 0x24a => self.index_offset,
                 0x24b => self.primitive_restart,
+                0x25b => self.ge_control,
+                0x262 => self.ge_user_vgpr,
                 _ => None,
             },
         };
@@ -129,7 +158,7 @@ impl GraphicsState {
                 if matches!(register,
                     0x0c..=0x0d | 0x80..=0x82 | 0x8e..=0x91 | 0x94..=0x95 |
                     0x10f..=0x114 | 0x191..=0x1b1 | 0x1b3..=0x1b4 | 0x1b6 | 0x1b8 |
-                    0x1c3..=0x1c5 | 0x1e0 | 0x200 | 0x202..=0x207 | 0x292..=0x293 |
+                    0x1c3..=0x1c5 | 0x1e0 | 0x200 | 0x202..=0x207 | 0x292..=0x293 | 0x29b |
                     0x2d5 | 0x2f8 | 0x318 | 0x31b..=0x31f | 0x321 | 0x325 |
                     0x390 | 0x398 | 0x3a0 | 0x3a8 | 0x3b0 | 0x3b8
                 ) =>
@@ -142,6 +171,8 @@ impl GraphicsState {
             RegisterSpace::Uconfig if register == 0x242 => self.primitive = Some(value),
             RegisterSpace::Uconfig if register == 0x24a => self.index_offset = Some(value),
             RegisterSpace::Uconfig if register == 0x24b => self.primitive_restart = Some(value),
+            RegisterSpace::Uconfig if register == 0x25b => self.ge_control = Some(value),
+            RegisterSpace::Uconfig if register == 0x262 => self.ge_user_vgpr = Some(value),
             _ => return Err(Error::Unsupported("graphics register")),
         }
         Ok(())

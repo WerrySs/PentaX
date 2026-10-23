@@ -170,6 +170,7 @@ fn configuration(draw: &Draw, budget: &mut Budget<'_>) -> Result<Configuration, 
             "merged/NGG/geometry/tessellation stages",
         ));
     }
+    state.primitive_profile()?;
     if sh(state, 0x8a)? & !0x3f != 0x602c_0000 || sh(state, 0x0a)? & !0x3f != 0x002c_0000 {
         return Err(Error::Unsupported("graphics shader resources1"));
     }

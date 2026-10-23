@@ -963,3 +963,18 @@ with earlier prefixes retained; late memory failure makes the driver
 nonreplayable. Encoding alone does not change the owned graphics context.
 Submitted context history saves only the current CONTEXT bank and uses existing
 owner, packet, host/work and target preparation checks.
+
+CreatePrimState computes two optional CONTEXT pairs and three optional UCONFIG
+pairs from current owned shader metadata. It preserves the source's optional
+hull shader, original geometry-stage output choice before the hull-stage merge,
+full primitive argument and default primitive mapping. Both-null outputs perform
+the defined empty operation before shader access. The helper adds no shader-map,
+header/version, resource or primitive-domain restriction absent from the source.
+
+Field access follows source order through the existing bounded shader Editor,
+including fresh specials-pointer reads after same-address output aliases. This
+checked profile publishes outputs atomically, so late memory, tag or work refusal
+leaves staged prefixes unpublished. Distinct virtual physical aliases are refused
+explicitly. Successful output arrays remain CPU data until actual register
+encoding/submission; original consumers carry them through real register builders
+and original shader/target preparation without claiming hardware execution.

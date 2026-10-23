@@ -1614,3 +1614,6 @@ mod f16c_conversions;
 
 #[path = "image_probe/agc_context_state_op.rs"]
 mod agc_context_state_op;
+
+#[path = "image_probe/agc_prim_state.rs"]
+mod agc_prim_state;

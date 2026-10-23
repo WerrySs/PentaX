@@ -129,6 +129,7 @@ catalogue!(
     AgcAcbPopMarker,
     AgcDcbPopMarker,
     AgcDcbContextStateOp,
+    AgcCreatePrimState,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

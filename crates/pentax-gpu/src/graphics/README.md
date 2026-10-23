@@ -417,3 +417,20 @@ and copies remain charged through the actual state/draw sizes and replay work.
 Original consumers exercise owned cross-submission history, real shader/target
 preparation, live array updates, precise failures and closed packet grammar;
 they are distinct from physical GPU presentation evidence.
+
+Primitive metadata retains raw VGT_GS_OUT_PRIM_TYPE(0x29b), GE_CNTL(0x25b)
+and GE_USER_VGPR_EN(0x262) values. The first belongs to the saved context bank;
+the two UCONFIG values remain independent. Context Clear resets GS output to its
+proven zero default while preserving user configuration. Full processor reset
+also restores zero active groups and user-VGPR enables. Push/Pop never restores
+the UCONFIG fields, and the larger actual state size remains budgeted.
+
+The existing flat renderer still excludes amplification, geometry and
+tessellation stages. Within that profile, known GS output zero is the inactive
+reset value and2 is triangle output; other known output modes refuse. Known GE
+grouping fields(low18 bits) and extra user VGPR enables(low3 bits) must be zero;
+reserved bits are ignored according to the primary decoder. Legacy absent fields
+grant no new geometry authority. The CPU primitive helper faithfully computes
+all source values even when a later draw profile refuses them. Original cases
+cover raw values, active masks, save/reset separation and failure before payload
+reads. No new hardware test or commercial compatibility is claimed.

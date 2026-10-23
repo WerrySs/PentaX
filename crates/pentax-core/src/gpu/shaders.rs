@@ -15,6 +15,7 @@ const MAX_MAPS: usize = 16384;
 
 pub(super) mod fusion;
 pub(super) mod interpolants;
+pub(super) mod primitive;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShaderFailure {

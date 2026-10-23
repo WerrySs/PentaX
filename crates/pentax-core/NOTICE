@@ -593,3 +593,18 @@ actual grow continuations, current-owner cursor/zero/header publication and
 partial-prefix failures. Only the exact observed paired alias is appended;
 GetSize and an unestablished ACB counterpart are not introduced. All new
 command, ownership and refusal fixtures are original.
+
+The checked primitive register helper additionally adapts public KytyPS5/KytyPS5
+revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: GraphicsPrimitiveTypeToGsOut and AgcCreatePrimState
+  src/libs/libAgcDriver.cpp: exact canonical identity and signature
+  src/graphics/shader/shader.h: Shader, ShaderRegister and ShaderSpecialRegs
+  src/graphics/guest_gpu/gpu_defs.h: primitive, output and shader type enums
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L1014
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 add current-owner field access, bounded
+source-ordered shadow reads/writes, atomic checked output and explicit physical
+alias refusal using the existing shader Editor. All literal, pointer-alias,
+refusal and real register/shader preparation fixtures are original. The helper
+computes caller-owned register pairs without mapping a shader or executing GPU
+work. The unobserved UpdatePrimState export remains unavailable.

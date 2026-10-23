@@ -154,6 +154,7 @@ pub enum Function {
     AgcAcbPopMarker,
     AgcDcbPopMarker,
     AgcDcbContextStateOp,
+    AgcCreatePrimState,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -517,6 +518,15 @@ impl Driver {
                 memory,
                 args,
                 function == Function::AgcCreateInterpolantMapping2,
+                &mut self.usage.preparation_work,
+                maximum,
+            );
+        }
+        if function == Function::AgcCreatePrimState {
+            let maximum = self.shader_call_maximum()?;
+            return super::shaders::primitive::create(
+                memory,
+                args,
                 &mut self.usage.preparation_work,
                 maximum,
             );
