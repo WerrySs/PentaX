@@ -278,7 +278,7 @@ const fn align_metadata(value: usize, alignment: usize) -> usize {
 // never relocates existing marker IDs/RVAs or bypasses the image-size bound.
 const DYNAMIC_AT: usize = align_metadata(0x100 + ENTRIES.len() * 16, 64);
 const STRINGS_AT: usize = align_metadata(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16, 64);
-const SYMBOLS_AT: usize = align_metadata(STRINGS_AT + NAME_BYTES + ENTRIES.len() * 16, 256);
+const SYMBOLS_AT: usize = align_metadata(STRINGS_AT + NAME_BYTES + ENTRIES.len() * 16, 64);
 const _: () = {
     assert!(0x100 + ENTRIES.len() * 16 <= DYNAMIC_AT);
     assert!(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16 <= STRINGS_AT);
