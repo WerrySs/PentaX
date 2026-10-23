@@ -56,18 +56,6 @@ impl Code {
         self.stack(0x8b, 0, offset);
         self.expect(0, value);
     }
-    fn path(&mut self, register: u8, target: i32) {
-        rip(
-            &mut self.bytes,
-            self.base,
-            &[
-                0x48 | if register >= 8 { 4 } else { 0 },
-                0x8d,
-                ((register & 7) << 3) | 5,
-            ],
-            target,
-        );
-    }
     fn vector(&mut self, load: bool, register: u8) {
         self.bytes.extend([
             0xc5,

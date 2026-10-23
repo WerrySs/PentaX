@@ -12,6 +12,7 @@ use crate::compute::CommandRange;
 pub use crate::compute::MemoryAction;
 use crate::compute::{Memory, MemoryError};
 use pentax_shader_compiler::CompiledShader;
+pub use pentax_shader_compiler::{InputInterface, VertexInstanceContract};
 use std::fmt;
 
 mod commands;

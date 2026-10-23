@@ -387,7 +387,7 @@ fn actual_indirect_native_shader_consumes_signed_base_first_instance_and_live_fi
 #[test]
 #[ignore = "requires a local Vulkan device and an outer owning timeout gate"]
 fn actual_indirect_native_v8_instances_consume_relative_ids_and_logical_first_instance_once() {
-    use pentax_shader_compiler::{InputInterface, VertexInstanceContract};
+    use pentax_gpu::graphics::{InputInterface, VertexInstanceContract};
 
     let (mut owner, base) = owner();
     let mut memory = owner.pause().unwrap();
