@@ -10,6 +10,8 @@ use pentax_platform::native_memory::NativeOwnerId;
 mod context_builder;
 #[path = "command_builder/register_builder.rs"]
 mod register_builder;
+#[path = "command_builder/transfer_builder.rs"]
+mod transfer_builder;
 
 pub(crate) const EXPORTS: [(&str, Function); 52] = [
     ("LtTouSCZjHM", Function::AgcCbNop),
@@ -113,6 +115,13 @@ pub(crate) const MARKER_EXPORTS: [(&str, Function); 4] = [
 pub(crate) const CONTEXT_EXPORTS: [(&str, Function); 1] =
     [("qj7QZpgr9Uw", Function::AgcDcbContextStateOp)];
 
+pub(crate) const TRANSFER_EXPORTS: [(&str, Function); 4] = [
+    ("qzMN2XKGA4k", Function::AgcAcbCopyData),
+    ("1rZSWUv1IRc", Function::AgcDcbCopyData),
+    ("-RnpfpxIhec", Function::AgcAcbDmaData),
+    ("WmAc2MEj6Io", Function::AgcDcbDmaData),
+];
+
 pub(crate) fn supports(function: Function) -> bool {
     function == Function::AgcDcbSetIndexSize0600
         || EXPORTS
@@ -121,6 +130,7 @@ pub(crate) fn supports(function: Function) -> bool {
             .chain(SYNC_EXPORTS.iter())
             .chain(MARKER_EXPORTS.iter())
             .chain(CONTEXT_EXPORTS.iter())
+            .chain(TRANSFER_EXPORTS.iter())
             .any(|(_, found)| *found == function)
 }
 
@@ -263,7 +273,11 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
         | AgcAcbPushMarker
         | AgcDcbPushMarker
         | AgcAcbPopMarker
-        | AgcDcbPopMarker => Ok(0),
+        | AgcDcbPopMarker
+        | AgcAcbCopyData
+        | AgcDcbCopyData
+        | AgcAcbDmaData
+        | AgcDcbDmaData => Ok(0),
         AgcCbSetShRegisterRangeDirect
         | AgcDcbSetShRegisterDirect
         | AgcDcbSetCxRegisterDirect
@@ -276,6 +290,9 @@ fn stack_count(function: Function) -> usize {
     use Function::*;
     match function {
         AgcCbReleaseMem => 6,
+        AgcDcbDmaData => 6,
+        AgcAcbDmaData => 4,
+        AgcAcbCopyData | AgcDcbCopyData => 3,
         AgcDcbAcquireMem => 1,
         AgcDcbWaitRegMem => 3,
         AgcDcbWriteData | AgcAcbWriteData | AgcAcbWaitRegMem => 2,
@@ -284,6 +301,9 @@ fn stack_count(function: Function) -> usize {
 }
 
 fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure> {
+    if let Some(packet) = transfer_builder::packet(function, args) {
+        return Ok(Some(packet));
+    }
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
@@ -659,7 +679,11 @@ fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failur
         | AgcAcbPushMarker
         | AgcDcbPushMarker
         | AgcAcbPopMarker
-        | AgcDcbPopMarker => Ok(0),
+        | AgcDcbPopMarker
+        | AgcAcbCopyData
+        | AgcDcbCopyData
+        | AgcAcbDmaData
+        | AgcDcbDmaData => Ok(0),
         AgcWaitRegMemPatchAddress | AgcWaitRegMemPatchReference => Ok(INVALID_PACKET),
         _ => Err(Failure::UnsupportedQueue),
     })

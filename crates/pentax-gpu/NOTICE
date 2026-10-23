@@ -252,3 +252,16 @@ emitted by the reviewed _0600 producer. The receiver uses only low2 type bits;
 ignored producer fields imply no invented cache or resource effect. Exact
 header/selector/mandatory bit and supported U16/U32 boundaries remain checked.
 Static and ordered-state consumers are original.
+
+The sealed CopyData/DmaData packet profile additionally adapts public
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp:
+    CpOpCopyData, CpOpDmaData, CopyDataSrcToDma, CopyDataDstToDma
+  src/graphics/guest_gpu/graphicsRun.cpp: CommandProcessor::DmaData
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L1505
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX modifications2026 add strict metadata-only admission,
+closed normalized memory/immediate domains, checked aggregate output versus
+maximum scratch storage, static/live/captured action alignment and original
+whole-stream refusal fixtures. No payload is captured early and no unsupported
+clock, GDS, register or discard behavior is replaced by invented success.

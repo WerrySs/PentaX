@@ -22,6 +22,7 @@ pub(crate) use command_builder::EXPORTS as COMMAND_BUILDER_EXPORTS;
 pub(crate) use command_builder::MARKER_EXPORTS;
 pub(crate) use command_builder::RESET_EXPORTS as RESET_QUEUE_EXPORTS;
 pub(crate) use command_builder::SYNC_EXPORTS as MEMORY_SYNC_EXPORTS;
+pub(crate) use command_builder::TRANSFER_EXPORTS;
 pub(crate) use command_builder::supports as is_command_builder;
 pub(crate) use command_builder::{CommandBuilderAction, PendingCommandBuilder};
 #[path = "driver/function_profile.rs"]
@@ -31,6 +32,8 @@ pub use function_profile::FunctionProfile;
 mod graphics;
 #[path = "driver/interrupts.rs"]
 mod interrupts;
+#[path = "driver/memory_transfer.rs"]
+mod memory_transfer;
 #[path = "driver/packet_metadata.rs"]
 mod packet_metadata;
 #[path = "driver/presentation.rs"]
@@ -159,6 +162,10 @@ pub enum Function {
     AgcCreatePrimState,
     AgcGetDataPacketPayloadAddress,
     AgcDcbSetIndexSize0600,
+    AgcAcbCopyData,
+    AgcDcbCopyData,
+    AgcAcbDmaData,
+    AgcDcbDmaData,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -724,6 +731,14 @@ impl Driver {
                 .usage
                 .indirect_buffers
                 .saturating_add(plan.usage().indirect_buffers);
+            let mut staging = self.transfer_staging(
+                plan.usage().staging_bytes,
+                plan.usage().write_bytes,
+                plan.usage().host_bytes,
+                command_limits
+                    .max_host_bytes
+                    .min(self.limits.compute.max_host_bytes),
+            )?;
             while let Some(step) = plan.next_step()? {
                 let owned_dispatch;
                 let command = match step {
@@ -763,6 +778,15 @@ impl Driver {
                     compute::Command::Dispatch(dispatch) => dispatch,
                     compute::Command::Write(write) => {
                         self.memory_write(memory, write, plan.command_ranges())?;
+                        continue;
+                    }
+                    compute::Command::Transfer(transfer) => {
+                        self.transfer_command(
+                            memory,
+                            transfer,
+                            plan.command_ranges(),
+                            &mut staging,
+                        )?;
                         continue;
                     }
                     compute::Command::Wait(wait) => {
@@ -815,6 +839,7 @@ impl Driver {
                 limits.max_host_bytes = limits
                     .max_host_bytes
                     .checked_sub(plan.usage().host_bytes)
+                    .and_then(|bytes| bytes.checked_sub(staging.capacity()))
                     .ok_or(Failure::Limit)?;
                 self.usage.dispatches = add(self.usage.dispatches, 1, self.limits.max_dispatches)?;
                 let report = execute_dispatch_admitted(

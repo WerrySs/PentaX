@@ -45,6 +45,7 @@ mod inspect;
 mod limits;
 mod marker;
 mod memory_sync;
+mod memory_transfer;
 mod packet;
 mod queue_reset;
 mod registers;

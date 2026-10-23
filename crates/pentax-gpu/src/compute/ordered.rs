@@ -128,6 +128,7 @@ impl OrderedCommands {
                 super::commands::Action::Drain => Command::Drain,
                 super::commands::Action::Synchronize(value) => Command::Synchronize(value),
                 super::commands::Action::Annotation(value) => Command::Annotation(value),
+                super::commands::Action::Transfer(value) => Command::Transfer(value),
                 _ => return Err(Error::Unsupported("ordered compute memory action")),
             },
         )
@@ -204,7 +205,10 @@ impl OrderedCommands {
             let dispatch = matches!(header.opcode(), 0x15 | 0x16);
             let memory = crate::memory_sync::packet_words(header.raw()).is_some()
                 || crate::marker::packet_words(header.raw()).is_some()
-                || matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
+                || matches!(
+                    header.opcode(),
+                    0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
+                )
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904);
             if dispatch || memory {
                 let index = self.action;
@@ -252,6 +256,7 @@ impl OrderedCommands {
                     | super::commands::Action::Wait(_)
                     | super::commands::Action::Release(_)
                     | super::commands::Action::Annotation(_)
+                    | super::commands::Action::Transfer(_)
                     | super::commands::Action::Drain
                     | super::commands::Action::Synchronize(_)
                         if memory =>

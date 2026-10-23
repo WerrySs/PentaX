@@ -1623,3 +1623,6 @@ mod agc_packet_payload;
 
 #[path = "image_probe/agc_index_size_0600.rs"]
 mod agc_index_size_0600;
+
+#[path = "image_probe/agc_memory_transfer.rs"]
+mod agc_memory_transfer;

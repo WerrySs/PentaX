@@ -132,6 +132,10 @@ catalogue!(
     AgcCreatePrimState,
     AgcGetDataPacketPayloadAddress,
     AgcDcbSetIndexSize0600,
+    AgcAcbCopyData,
+    AgcDcbCopyData,
+    AgcAcbDmaData,
+    AgcDcbDmaData,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

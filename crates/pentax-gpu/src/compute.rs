@@ -8,6 +8,7 @@ pub use crate::marker::{Marker, MarkerKind};
 
 use crate::Header;
 pub use crate::memory_sync::{Synchronization, SynchronizationKind};
+pub use crate::memory_transfer::Transfer;
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
     BufferAccess, BufferDescription, CommonDescription, CompiledShader, ComputeDescription,
@@ -623,3 +624,6 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "compute/marker_tests.rs"]
 mod marker_tests;
+#[cfg(test)]
+#[path = "compute/transfer_tests.rs"]
+mod transfer_tests;

@@ -434,3 +434,20 @@ grant no new geometry authority. The CPU primitive helper faithfully computes
 all source values even when a later draw profile refuses them. Original cases
 cover raw values, active masks, save/reset separation and failure before payload
 reads. No new hardware test or commercial compatibility is claimed.
+
+The bounded COPY_DATA/DMA_DATA subset is represented by sealed ordered transfer
+metadata. Only exact six/seven-DWORD headers and the supported normalized memory
+or low32 immediate selectors are admitted. COPY width is4/8 bytes with matching
+alignment; its immediate form is4 bytes only. Nonzero DMA requires4-byte aligned
+addresses and a count divisible by4. Range checks do not dereference payloads.
+The source engine domain precedes DMA's zero-count return; all remaining controls
+and addresses stay opaque and untouched on that zero path. Nonzero unsupported
+clock/GDS/register/nowhere/query/special-discard effects remain typed refusals.
+
+Static, captured nested and live-array paths retain source action order. The
+runtime reads current GPU-owned bytes after prior actual writeback and publishes
+one admitted whole output; packet preparation contains no speculative source
+snapshot. Total output bytes and maximum reusable staging are distinct checked
+quantities under existing host/work/write limits. All transfers invalidate old
+draw eligibility. Original packet, capture, live-memory, permission and alias
+consumers are separate from the ignored physical-GPU coherency check.

@@ -39,6 +39,8 @@ pub struct CommandUsage {
     pub vertices: u64,
     pub host_bytes: usize,
     pub work: u64,
+    pub write_bytes: usize,
+    pub staging_bytes: usize,
 }
 
 /// Exact source R_FLIP payload, decoded only from tagged0xc004105c.
@@ -376,7 +378,7 @@ pub fn plan_commands(
                 || crate::marker::packet_words(header.raw()).is_some()
                 || matches!(
                     header.opcode(),
-                    0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42
+                    0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
                 )
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
                 && actions.len() >= action_count
@@ -385,7 +387,10 @@ pub fn plan_commands(
             }
             if crate::memory_sync::packet_words(header.raw()).is_some()
                 || crate::marker::packet_words(header.raw()).is_some()
-                || matches!(header.opcode(), 0x37 | 0x3c | 0x93 | 0x49 | 0x42)
+                || matches!(
+                    header.opcode(),
+                    0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
+                )
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904)
             {
                 if memory.capacity() == 0 {
@@ -425,6 +430,11 @@ pub fn plan_commands(
                 )
                 .map_err(memory_error)?;
                 work(&mut usage, limits, charged.work)?;
+                usage.write_bytes = usage
+                    .write_bytes
+                    .checked_add(charged.write_bytes)
+                    .ok_or(Error::Limit("command write bytes"))?;
+                usage.staging_bytes = usage.staging_bytes.max(charged.staging_bytes);
                 usage.host_bytes = usage
                     .host_bytes
                     .checked_add(charged.host_bytes)
@@ -621,6 +631,11 @@ pub fn plan_commands(
             at = end;
         }
     }
+    usage
+        .host_bytes
+        .checked_add(usage.staging_bytes)
+        .filter(|n| *n <= limits.max_host_bytes)
+        .ok_or(Error::Limit("transfer staging bytes"))?;
     Ok(CommandPlan {
         draws,
         actions,

@@ -49,6 +49,8 @@ pub struct CommandUsage {
     pub indirect_buffers: u64,
     pub work: u64,
     pub write_bytes: usize,
+    /// Maximum reusable live-transfer staging; not aggregate output bytes.
+    pub staging_bytes: usize,
 }
 /// Immutable state at one actual DISPATCH_DIRECT packet. No public constructor
 /// accepts arbitrary register snapshots, shader bytes or SPIR-V.
@@ -93,6 +95,7 @@ pub(super) enum Action {
     Drain,
     Synchronize(super::Synchronization),
     Annotation(super::Marker),
+    Transfer(super::Transfer),
 }
 /// Immutable ordered views. Only this planner can construct the write/wait
 /// payloads, and the runtime never accepts detached command actions as input.
@@ -107,6 +110,7 @@ pub enum Command<'a> {
     /// A source-ordered barrier over the runtime's completed fenced work.
     Synchronize(&'a super::Synchronization),
     Annotation(&'a super::Marker),
+    Transfer(&'a super::Transfer),
 }
 
 /// Ordered graphics memory operation derived from a complete captured packet.
@@ -118,6 +122,7 @@ pub enum MemoryAction {
     Drain,
     Synchronize(super::Synchronization),
     Annotation(super::Marker),
+    Transfer(super::Transfer),
 }
 /// Immutable release admitted from actual packet bytes. Interrupts are emitted
 /// only after prior work and the optional label write complete successfully.
@@ -209,6 +214,7 @@ impl CommandPlan {
             Action::Drain => Command::Drain,
             Action::Synchronize(value) => Command::Synchronize(value),
             Action::Annotation(value) => Command::Annotation(value),
+            Action::Transfer(value) => Command::Transfer(value),
         })
     }
     pub fn commands(&self) -> impl Iterator<Item = Command<'_>> {
@@ -220,6 +226,7 @@ impl CommandPlan {
             Action::Drain => Command::Drain,
             Action::Synchronize(value) => Command::Synchronize(value),
             Action::Annotation(value) => Command::Annotation(value),
+            Action::Transfer(value) => Command::Transfer(value),
         })
     }
     pub fn usage(&self) -> CommandUsage {
@@ -430,6 +437,29 @@ fn plan_commands_for_queue(
             budget.work((length * 4 + size_of::<super::Marker>()) as u64)?;
             let marker = crate::marker::decode(&frame.bytes[at * 4..end * 4]).map_err(fail)?;
             actions.push(Action::Annotation(marker));
+            continue;
+        }
+        if crate::memory_transfer::packet_words(header.raw()).is_some() {
+            if actions.len() >= limits.max_actions {
+                return Err(Error::Limit("command actions"));
+            }
+            let transfer =
+                crate::memory_transfer::decode(&frame.bytes[at * 4..end * 4]).map_err(fail)?;
+            let bytes = transfer.byte_count();
+            budget.work(
+                (bytes as u64)
+                    .checked_mul(2)
+                    .and_then(|n| n.checked_add((length * 4 + size_of::<super::Transfer>()) as u64))
+                    .ok_or(Error::Limit("transfer work"))?,
+            )?;
+            budget.usage.write_bytes = budget
+                .usage
+                .write_bytes
+                .checked_add(bytes)
+                .filter(|n| *n <= limits.max_write_bytes)
+                .ok_or(Error::Limit("command write bytes"))?;
+            budget.usage.staging_bytes = budget.usage.staging_bytes.max(bytes);
+            actions.push(Action::Transfer(transfer));
             continue;
         }
         if length == 1 || (header.opcode() == 0x10 && header.raw() != 0xc006_1060) {
@@ -655,6 +685,12 @@ fn plan_commands_for_queue(
             _ => return Err(fail("command outside compute queue profile")),
         }
     }
+    budget
+        .usage
+        .host_bytes
+        .checked_add(budget.usage.staging_bytes)
+        .filter(|n| *n <= limits.max_host_bytes)
+        .ok_or(Error::Limit("transfer staging bytes"))?;
     Ok(CommandPlan {
         dispatches,
         final_state: state,
@@ -790,7 +826,9 @@ pub(crate) fn memory_packet(
         max_depth: 1,
         max_dispatches: 0,
         max_actions: 1,
-        max_write_bytes: bytes.len(),
+        // Dynamic transfer output is not bounded by its small packet extent.
+        // Actual byte work and staging still share the original envelopes.
+        max_write_bytes: host.min(usize::try_from(work).unwrap_or(usize::MAX)),
         max_work: work,
     };
     let mut plan = plan_commands_for_queue(
@@ -813,6 +851,7 @@ pub(crate) fn memory_packet(
         Action::Drain => MemoryAction::Drain,
         Action::Synchronize(value) => MemoryAction::Synchronize(value),
         Action::Annotation(value) => MemoryAction::Annotation(value),
+        Action::Transfer(value) => MemoryAction::Transfer(value),
         Action::Dispatch(_) => return Err(Error::Unsupported("single memory packet profile")),
     };
     Ok((action, plan.usage))

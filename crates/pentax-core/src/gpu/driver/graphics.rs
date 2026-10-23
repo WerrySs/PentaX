@@ -226,7 +226,7 @@ impl Driver {
         // execution keeps them for write exclusions; ordered execution owns
         // its independent ranges, including dynamically resolved arrays.
         let sources = captured.into_command_ranges();
-        let retained = plan
+        let mut retained = plan
             .usage()
             .host_bytes
             .checked_add(
@@ -241,6 +241,27 @@ impl Driver {
                     .and_then(|ranges| bytes.checked_add(ranges))
             })
             .ok_or(Failure::Limit)?;
+        let mut staging = if plan.usage().staging_bytes == 0 {
+            Vec::new()
+        } else {
+            let staging_limit = retained
+                .checked_add(
+                    commands
+                        .max_host_bytes
+                        .checked_sub(plan.usage().host_bytes)
+                        .ok_or(Failure::Limit)?,
+                )
+                .ok_or(Failure::Limit)?
+                .min(command_host_bytes);
+            let staging = self.transfer_staging(
+                plan.usage().staging_bytes,
+                plan.usage().write_bytes,
+                retained,
+                staging_limit,
+            )?;
+            retained = host_add(retained, staging.capacity(), command_host_bytes)?;
+            staging
+        };
         if plan.usage().flips != 0 && (kernel.is_none() || clock.is_none()) {
             return Err(Failure::Kernel(pentax_kernel::Failure::Unsupported(
                 "bound GPU flip process clock",
@@ -328,6 +349,16 @@ impl Driver {
                         draw::MemoryAction::Write(write) => {
                             let memory = cursor.into_pause();
                             self.memory_write(memory, write, plan.command_ranges(&sources))?;
+                            cursor = Cursor::Paused(memory);
+                        }
+                        draw::MemoryAction::Transfer(transfer) => {
+                            let memory = cursor.into_pause();
+                            self.transfer_command(
+                                memory,
+                                transfer,
+                                plan.command_ranges(&sources),
+                                &mut staging,
+                            )?;
                             cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Wait(wait) => {

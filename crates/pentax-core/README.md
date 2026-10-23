@@ -999,3 +999,22 @@ memory failures retain the existing ordered failure boundary. Earlier export
 rows and the original index-size builder remain unchanged. Original consumers
 take the actual packet through owned indexed shader/resource preparation;
 no physical GPU result or commercial image is claimed by this helper.
+
+CopyData/DmaData builders preserve exact four-role argument narrowing, packet
+words, actual grow calls and captured outgoing stack arguments. Null buffers and
+source-defined allocation failures return null before transfer memory access.
+The submitted subset supports aligned disjoint owned-memory copies, four-byte
+COPY immediates and whole-word DMA fills. Unsupported nonzero selectors, partial
+words, clock, GDS, register, query and discard paths refuse explicitly.
+
+Execution uses one preadmitted staging vector sized to the largest transfer;
+aggregate write bytes remain separately bounded. Every action rechecks current
+GPU-read/write permissions, full destination backing uniqueness, source/output
+physical disjointness and every captured command-source exclusion. Source bytes
+are read at their ordered turn after earlier actual fenced writeback. One
+checked whole-output transaction follows; a late failure retains earlier effects
+and cannot replay them. Zero-byte DMA validates the encoded engine then touches
+no address and creates no bytes, fence, event or completion. Transfer actions
+consume prior graphics draw eligibility, including this conservative zero case.
+Original ordinary consumers and one separately ignored Vulkan consumer are
+provided; their presence alone establishes no physical execution or game image.

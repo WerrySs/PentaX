@@ -631,3 +631,17 @@ allocator and authenticated grow continuation, preserve exact argument masks
 and source null/allocation results, and append only the observed paired alias.
 All packet, continuation, refusal and owned indexed-preparation fixtures are
 original; encoding alone implies no GPU work or presentation.
+
+The four CopyData/DmaData encoders and bounded memory receiver additionally
+adapt public KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: AgcAcb/AgcDcb CopyData and DmaData
+  src/libs/libAgcDriver.cpp: exact canonical identities/signatures
+  src/graphics/guest_gpu/graphicsRun.cpp: CommandProcessor::DmaData
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L3171
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 add exact owner-bound grow and
+stack capture, append-only verified aliases, ordered current GPU-readable data,
+whole-output GPU-write and physical-alias checks, preadmitted reusable staging
+and original bounded consumers. Source clock/GDS/register/query/discard domains
+remain unavailable. Command emission does not imply transfer execution, GPU
+completion, presenter acknowledgement or commercial rendering.

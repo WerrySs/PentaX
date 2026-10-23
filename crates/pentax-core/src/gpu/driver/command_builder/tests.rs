@@ -602,3 +602,6 @@ mod context_tests;
 
 #[path = "tests/index_size_0600.rs"]
 mod index_size_0600;
+
+#[path = "tests/transfer_tests.rs"]
+mod transfer_tests;
