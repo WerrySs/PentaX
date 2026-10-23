@@ -704,6 +704,12 @@ mod tests {
     fn graphics_imports_keep_exact_namespaces_and_version_conflicts() {
         for (module, library, version, nid, missing) in [
             ("Graphics5Driver", "Graphics5Driver", 1, "b4fpgH5ZXxQ", 0),
+            ("Graphics5Driver", "Graphics5Driver", 1, "gSRnr79F8tQ", 0),
+            ("libSceAgcDriver", "libSceAgcDriver", 1, "gSRnr79F8tQ", 0),
+            ("libSceAgcDriver", "libSceAgcDriver", 2, "gSRnr79F8tQ", 0),
+            ("AgcDriver", "AgcDriver", 1, "gSRnr79F8tQ", 1),
+            ("Graphics5Driver", "libSceAgcDriver", 1, "gSRnr79F8tQ", 1),
+            ("libSceAgcDriver", "Graphics5Driver", 1, "gSRnr79F8tQ", 1),
             ("libkernel", "libkernel", 1, "b4fpgH5ZXxQ", 1),
             ("Graphics5Driver", "Graphics5Driver", 2, "b4fpgH5ZXxQ", 0),
             ("Graphics5", "Graphics5", 1, "h9z6+0hEydk", 0),
@@ -786,7 +792,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 278);
+            assert_eq!(binding.factory.function_count(), 279);
             let open = binding
                 .factory
                 .markers()

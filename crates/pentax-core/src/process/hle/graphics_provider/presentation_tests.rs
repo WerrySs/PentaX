@@ -16,8 +16,8 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"VideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 278);
-    assert_eq!(metadata.link().symbols().len(), 279);
+    assert_eq!(provider.function_count(), 279);
+    assert_eq!(metadata.link().symbols().len(), 280);
     for (index, nid) in [
         "HXzjK9yI30k",
         "-Ozn0F1AFRg",
@@ -107,8 +107,8 @@ fn paired_video_aliases_preserve_old_markers_and_exact_versioned_descriptors() {
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"libSceVideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 278);
-    assert_eq!(metadata.link().symbols().len(), 279);
+    assert_eq!(provider.function_count(), 279);
+    assert_eq!(metadata.link().symbols().len(), 280);
     for (index, (old, nid, function)) in [
         (117, "zgXifHT9ErY", Function::VideoIsFlipPending),
         (108, "HXzjK9yI30k", Function::VideoAddFlipEvent),
@@ -145,6 +145,60 @@ fn paired_video_aliases_preserve_old_markers_and_exact_versioned_descriptors() {
     let previous = provider.markers().nth(272).unwrap();
     assert_eq!(previous.function, Function::AgcDcbGetLodStats);
     assert_eq!((previous.rva(), previous.id()), (0x1200, 0x5058_4811));
+    assert_eq!(provider.image().len(), PAGE_SIZE as usize);
+    assert!(matches!(
+        build_graphics_provider(PAGE_SIZE - 1),
+        Err(KernelProviderError::Budget)
+    ));
+}
+
+#[test]
+fn submit_acb_alias_keeps_prior_markers_and_fits_the_exact_provider_bound() {
+    use pentax_linker::{Limits, SceLimits, SymbolBinding, SymbolType, inspect_sce};
+    let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+    let view = pentax_loader::open_executable(provider.image()).unwrap();
+    let metadata = inspect_sce(&view, &Limits::DEFAULT, &SceLimits::DEFAULT)
+        .unwrap()
+        .into_metadata()
+        .unwrap();
+    let descriptors = metadata.descriptors().decoded().unwrap();
+    let module = &descriptors.module_info()[6];
+    let library = &descriptors.export_libraries()[6];
+    assert_eq!(module.name().as_bytes(), b"libSceAgcDriver");
+    assert_eq!((module.version_major(), module.version_minor()), (1, 1));
+    assert_eq!(library.name().as_bytes(), b"libSceAgcDriver");
+    assert_eq!(library.version(), 1);
+    assert_eq!(provider.function_count(), 279);
+    assert_eq!(metadata.link().symbols().len(), 280);
+    assert_eq!(ENTRIES[2], ("gSRnr79F8tQ", Function::Acb, 0, 0));
+    assert_eq!(ENTRIES[278], ("gSRnr79F8tQ", Function::Acb, 6, 6));
+    assert_eq!(
+        ENTRIES.iter().filter(|row| row.0 == "gSRnr79F8tQ").count(),
+        2
+    );
+    let symbol = &metadata.link().symbols()[279];
+    assert_eq!(symbol.name.as_ref().unwrap().as_bytes(), b"gSRnr79F8tQ#H#H");
+    assert_eq!(symbol.binding(), SymbolBinding::GLOBAL);
+    assert_eq!(symbol.symbol_type(), SymbolType::FUNC);
+    for ordinal in [2, 277, 278] {
+        let marker = provider.markers().nth(ordinal).unwrap();
+        assert_eq!(marker.id(), 0x5058_4701 + ordinal as u32);
+        assert_eq!(marker.rva(), 0x100 + ordinal as u64 * 16);
+        assert_eq!(
+            &provider.image()[marker.rva() as usize..marker.rva() as usize + 8],
+            &marker.bytes()
+        );
+    }
+    assert_eq!(symbol.value, provider.markers().nth(278).unwrap().rva());
+    // This actual catalogue exactly fills the admitted one-page metadata span.
+    assert_eq!(
+        (NAME_BYTES, DYNAMIC_AT, STRINGS_AT, SYMBOLS_AT),
+        (87, 4736, 5056, 9664)
+    );
+    assert_eq!(
+        SYMBOLS_AT + metadata.link().symbols().len() * 24,
+        PAGE_SIZE as usize
+    );
     assert_eq!(provider.image().len(), PAGE_SIZE as usize);
     assert!(matches!(
         build_graphics_provider(PAGE_SIZE - 1),

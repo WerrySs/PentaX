@@ -1058,3 +1058,5 @@ before an executable plan is exposed. Shader mip feedback, report collection,
 reset and completion publication require a separate execution implementation.
 
 Five explicit paired `libSceVideoOut` presentation/state aliases reuse the existing checked VideoOut implementations. Canonical exports retain their marker identities; other scopes and versions remain unavailable. Pending flips reflect the owned queue and require actual presentation acknowledgement to complete.
+
+The exact paired `libSceAgcDriver` ACB-submit alias uses the existing owner-checked compute submission path. It retains canonical marker identities, command-memory permissions and actual ordered writes; no other driver namespace or submission role is inferred. The bounded provider metadata now exactly occupies its existing one-page capacity.
