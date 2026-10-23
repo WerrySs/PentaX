@@ -395,3 +395,6 @@ mod drain_flip_tests;
 
 #[path = "memory_sync_tests.rs"]
 mod memory_sync_tests;
+
+#[path = "wait_flip_tests.rs"]
+mod wait_flip_tests;

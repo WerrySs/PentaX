@@ -6,6 +6,11 @@
 
 use super::{Driver, Failure, NativeRange, PausedNativeMemory, add, compute, draw};
 use std::mem::size_of;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Process-unique admission identities prevent cross-Driver and slot-reuse ABA.
+// Like existing flip/submission identities, exhaustion refuses before effects.
+static NEXT_GRAPHICS_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 impl super::Limits {
     fn graphics_backend_limits(self) -> pentax_platform::vulkan::GpuLimits {
@@ -15,6 +20,31 @@ impl super::Limits {
         }
         limits
     }
+}
+
+pub(super) struct GraphicsExecution {
+    pub(super) owner: pentax_platform::native_memory::NativeOwnerId,
+    plan: GraphicsCommands,
+    sources: Vec<compute::CommandRange>,
+    staging: Vec<u8>,
+    pub(super) retained: usize,
+    max_host_bytes: usize,
+    presentation: crate::gpu::video::PresentationLimits,
+    deferred_flips: bool,
+    pending: Option<SelectedWait>,
+    pub(super) effect_started: bool,
+    pub(super) generation: u64,
+    pub(super) wait_generation: u64,
+}
+#[derive(Clone, Copy)]
+struct SelectedWait {
+    handle: i32,
+    buffer: i32,
+    port_generation: u64,
+}
+enum GraphicsAdvance {
+    Complete(u64),
+    Waiting,
 }
 
 impl Driver {
@@ -33,9 +63,41 @@ impl Driver {
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
         ranges: &[NativeRange],
-        mut kernel: Option<&mut pentax_kernel::Kernel>,
+        kernel: Option<&mut pentax_kernel::Kernel>,
         clock: Option<super::GraphicsClock>,
     ) -> Result<u64, Failure> {
+        self.graphics_check_owner(memory)?;
+        if self.graphics_execution.is_some() || !self.graphics_admissions.is_empty() {
+            return Err(Failure::Waiting);
+        }
+        let mut kernel = kernel;
+        let Some(mut execution) =
+            self.prepare_graphics_execution(memory, ranges, kernel.as_deref_mut(), clock)?
+        else {
+            return Ok(0);
+        };
+        // This legacy scalar-only route cannot publish a continuation ticket.
+        // Refuse a wait stream before effects; native actions use the owned route.
+        if execution.deferred_flips {
+            return Err(Failure::UnsupportedQueue);
+        }
+        // Preserve the synchronous route for every existing no-wait stream.
+        match self.advance_graphics_execution(memory, &mut execution, kernel, clock)? {
+            GraphicsAdvance::Complete(value) => Ok(value),
+            GraphicsAdvance::Waiting => {
+                self.poisoned |= execution.effect_started;
+                Err(Failure::Waiting)
+            }
+        }
+    }
+
+    pub(super) fn prepare_graphics_execution(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        ranges: &[NativeRange],
+        kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
+    ) -> Result<Option<GraphicsExecution>, Failure> {
         if self
             .graphics_owner
             .is_some_and(|owner| owner != memory.owner_id())
@@ -43,20 +105,16 @@ impl Driver {
             return Err(Failure::Memory);
         }
         let max_host_bytes = self.graphics_host_limit()?;
-        let command_host_bytes = if self.consumer.is_some() {
-            max_host_bytes
-                .checked_sub(self.video.retained_frame_bytes())
-                .ok_or(Failure::Limit)?
-        } else {
-            max_host_bytes
-        };
-        let presentation = self.presentation_limits()?;
+        let command_host_bytes = max_host_bytes
+            .checked_sub(self.video.retained_frame_bytes())
+            .ok_or(Failure::Limit)?;
+        let mut presentation = self.presentation_limits()?;
         let count = ranges
             .iter()
             .filter(|range| range.address != 0 && range.size != 0)
             .count();
         if count == 0 {
-            return Ok(0);
+            return Ok(None);
         }
         let mut commands = self.limits.graphics_commands;
         commands.max_buffers = commands
@@ -203,7 +261,7 @@ impl Driver {
         } else {
             self.graphics
         };
-        let mut plan = if captured.contains_arrays() || captured.contains_draw_arguments() {
+        let plan = if captured.contains_arrays() || captured.contains_draw_arguments() {
             GraphicsCommands::Ordered(
                 captured
                     .prepare_ordered(initial, &commands)
@@ -241,7 +299,7 @@ impl Driver {
                     .and_then(|ranges| bytes.checked_add(ranges))
             })
             .ok_or(Failure::Limit)?;
-        let mut staging = if plan.usage().staging_bytes == 0 {
+        let staging = if plan.usage().staging_bytes == 0 {
             Vec::new()
         } else {
             let staging_limit = retained
@@ -268,58 +326,190 @@ impl Driver {
             )));
         }
         self.video.check_owner(memory.owner_id())?;
-        // Pre-admit every pending slot and old+staged capture peak before any
-        // draw can retire. Full queues stop explicitly; no consumer is invented.
-        let mut planned = [0usize; 3];
-        let mut frame_bytes = self.video.retained_frame_bytes();
-        let mut capture_work = 0u64;
-        for flip in plan.flips() {
-            let surface = self.video.gpu_capture_surface(flip)?;
-            let slot = usize::try_from(flip.handle() - 1)
-                .ok()
-                .filter(|i| *i < 3)
-                .ok_or(Failure::UnsupportedVideo)?;
-            planned[slot] += 1;
-            if self
-                .video
-                .gpu_pending(flip.handle())?
-                .checked_add(planned[slot])
-                .is_none_or(|n| n > 16)
-            {
-                return Err(Failure::Waiting);
+        retained = host_add(retained, size_of::<GraphicsExecution>(), command_host_bytes)?;
+        presentation.max_held_bytes = presentation
+            .max_held_bytes
+            .checked_sub(retained)
+            .ok_or(Failure::Limit)?;
+        let deferred_flips = plan.has_wait_flip();
+        if !deferred_flips {
+            // Pre-admit every pending slot and old+staged capture peak before any
+            // draw can retire. Full queues stop explicitly; no consumer is invented.
+            let mut planned = [0usize; 3];
+            let mut frame_bytes = self.video.retained_frame_bytes();
+            let mut capture_work = 0u64;
+            for flip in plan.flips() {
+                let surface = self.video.gpu_capture_surface(flip)?;
+                let slot = usize::try_from(flip.handle() - 1)
+                    .ok()
+                    .filter(|i| *i < 3)
+                    .ok_or(Failure::UnsupportedVideo)?;
+                planned[slot] += 1;
+                if self
+                    .video
+                    .gpu_pending(flip.handle())?
+                    .checked_add(planned[slot])
+                    .is_none_or(|n| n > 16)
+                {
+                    return Err(Failure::Waiting);
+                }
+                let tight =
+                    usize::try_from(u64::from(surface.width) * u64::from(surface.height) * 4)
+                        .map_err(|_| Failure::Limit)?;
+                let source = usize::try_from(surface.data.size).map_err(|_| Failure::Limit)?;
+                if source > presentation.max_frame_bytes || tight > presentation.max_frame_bytes {
+                    return Err(Failure::Limit);
+                }
+                let peak = frame_bytes
+                    .checked_add(source)
+                    .and_then(|n| n.checked_add(tight))
+                    .ok_or(Failure::Limit)?;
+                if peak > presentation.max_held_bytes {
+                    return Err(Failure::Limit);
+                }
+                host_add(retained, peak, max_host_bytes)?;
+                frame_bytes = frame_bytes.checked_add(tight).ok_or(Failure::Limit)?;
+                capture_work = capture_work
+                    .checked_add(surface.data.size)
+                    .and_then(|n| n.checked_add(tight as u64 * 5 + 256))
+                    .ok_or(Failure::Limit)?;
             }
-            let tight = usize::try_from(u64::from(surface.width) * u64::from(surface.height) * 4)
-                .map_err(|_| Failure::Limit)?;
-            let source = usize::try_from(surface.data.size).map_err(|_| Failure::Limit)?;
-            if source > presentation.max_frame_bytes || tight > presentation.max_frame_bytes {
-                return Err(Failure::Limit);
-            }
-            let peak = frame_bytes
-                .checked_add(source)
-                .and_then(|n| n.checked_add(tight))
-                .ok_or(Failure::Limit)?;
-            if peak > presentation.max_held_bytes {
-                return Err(Failure::Limit);
-            }
-            host_add(retained, peak, max_host_bytes)?;
-            frame_bytes = frame_bytes.checked_add(tight).ok_or(Failure::Limit)?;
-            capture_work = capture_work
-                .checked_add(surface.data.size)
-                .and_then(|n| n.checked_add(tight as u64 * 5 + 256))
-                .ok_or(Failure::Limit)?;
+            self.video
+                .admit_gpu_capture_budget(capture_work, &presentation)?;
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                capture_work,
+                self.limits.max_preparation_work,
+            )?;
         }
-        self.video
-            .admit_gpu_capture_budget(capture_work, &presentation)?;
+        Ok(Some(GraphicsExecution {
+            owner: memory.owner_id(),
+            plan,
+            sources,
+            staging,
+            retained,
+            max_host_bytes,
+            presentation,
+            deferred_flips,
+            pending: None,
+            effect_started: false,
+            generation: 0,
+            wait_generation: 0,
+        }))
+    }
+    fn graphics_selected_wait(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+        wait: SelectedWait,
+    ) -> Result<bool, Failure> {
+        self.video.check_owner(memory.owner_id())?;
+        if self
+            .video
+            .port(wait.handle)
+            .is_none_or(|port| port.generation != wait.port_generation)
+        {
+            return Err(Failure::UnsupportedVideo);
+        }
+        Ok(self.video.buffer_pending(wait.handle, wait.buffer))
+    }
+    fn admit_graphics_flip_turn(
+        &mut self,
+        flip: draw::Flip,
+        retained: usize,
+        maximum: usize,
+        limits: &crate::gpu::video::PresentationLimits,
+    ) -> Result<(), Failure> {
+        // Wait streams admit CURRENT queue occupancy at the actual flip turn.
+        // This neither reserves a future slot nor claims a consumer completed.
+        let surface = self.video.gpu_capture_surface(flip)?;
+        if self.video.gpu_pending(flip.handle())? >= 16 {
+            return Err(Failure::Waiting);
+        }
+        let tight = usize::try_from(u64::from(surface.width) * u64::from(surface.height) * 4)
+            .map_err(|_| Failure::Limit)?;
+        let source = usize::try_from(surface.data.size).map_err(|_| Failure::Limit)?;
+        if source > limits.max_frame_bytes || tight > limits.max_frame_bytes {
+            return Err(Failure::Limit);
+        }
+        let peak = self
+            .video
+            .retained_frame_bytes()
+            .checked_add(source)
+            .and_then(|n| n.checked_add(tight))
+            .ok_or(Failure::Limit)?;
+        if peak > limits.max_held_bytes {
+            return Err(Failure::Limit);
+        }
+        host_add(retained, peak, maximum)?;
+        let work = surface
+            .data
+            .size
+            .checked_add(tight as u64 * 5 + 256)
+            .ok_or(Failure::Limit)?;
+        self.video.admit_gpu_capture_budget(work, limits)?;
         self.usage.preparation_work = add(
             self.usage.preparation_work,
-            capture_work,
+            work,
             self.limits.max_preparation_work,
         )?;
-        let owner = memory.owner_id();
+        Ok(())
+    }
+    fn advance_graphics_execution(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        execution: &mut GraphicsExecution,
+        mut kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
+    ) -> Result<GraphicsAdvance, Failure> {
+        let owner = execution.owner;
+        if owner != memory.owner_id() {
+            return Err(Failure::Memory);
+        }
+        if let Some(wait) = execution.pending {
+            if self.graphics_selected_wait(memory, wait)? {
+                return Ok(GraphicsAdvance::Waiting);
+            }
+            execution.pending = None;
+        }
+        let retained = execution.retained;
+        let max_host_bytes = execution.max_host_bytes;
+        let presentation = execution.presentation;
+        let deferred_flips = execution.deferred_flips;
+        let plan = &mut execution.plan;
+        let sources = &execution.sources;
+        let staging = &mut execution.staging;
         let mut cursor = Cursor::Paused(memory);
         while let Some(action) = plan.next_step().map_err(Failure::GraphicsPreparation)? {
             let owned_draw;
             let command = match action {
+                GraphicsStep::WaitFlip(wait) => {
+                    let memory = cursor.into_pause();
+                    self.drain_commands()?;
+                    self.video.check_owner(memory.owner_id())?;
+                    if !(-2..16).contains(&wait.buffer()) {
+                        return Err(Failure::UnsupportedVideo);
+                    }
+                    let port = self
+                        .video
+                        .port(wait.handle())
+                        .ok_or(Failure::UnsupportedVideo)?;
+                    let selected = SelectedWait {
+                        handle: wait.handle(),
+                        buffer: wait.buffer(),
+                        port_generation: port.generation,
+                    };
+                    if self.graphics_selected_wait(memory, selected)? {
+                        execution.wait_generation = execution
+                            .wait_generation
+                            .checked_add(1)
+                            .ok_or(Failure::Limit)?;
+                        execution.pending = Some(selected);
+                        execution.effect_started |= self.poisoned;
+                        return Ok(GraphicsAdvance::Waiting);
+                    }
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
                 GraphicsStep::Array => {
                     plan.resolve_array(&super::super::Memory(cursor.paused_memory()))
                         .map_err(Failure::GraphicsPreparation)?;
@@ -363,7 +553,7 @@ impl Driver {
                         }
                         draw::MemoryAction::Write(write) => {
                             let memory = cursor.into_pause();
-                            self.memory_write(memory, write, plan.command_ranges(&sources))?;
+                            self.memory_write(memory, write, plan.command_ranges(sources))?;
                             cursor = Cursor::Paused(memory);
                         }
                         draw::MemoryAction::Transfer(transfer) => {
@@ -371,8 +561,8 @@ impl Driver {
                             self.transfer_command(
                                 memory,
                                 transfer,
-                                plan.command_ranges(&sources),
-                                &mut staging,
+                                plan.command_ranges(sources),
+                                staging,
                             )?;
                             cursor = Cursor::Paused(memory);
                         }
@@ -398,7 +588,7 @@ impl Driver {
                             self.retire_release(
                                 memory,
                                 release,
-                                plan.command_ranges(&sources),
+                                plan.command_ranges(sources),
                                 &mut kernel,
                                 0,
                             )?;
@@ -411,6 +601,14 @@ impl Driver {
                     continue;
                 }
                 GraphicsStep::Flip(flip) => {
+                    if deferred_flips {
+                        self.admit_graphics_flip_turn(
+                            flip,
+                            retained,
+                            max_host_bytes,
+                            &presentation,
+                        )?;
+                    }
                     let Cursor::Draw(current) = cursor else {
                         return Err(Failure::UnsupportedVideo);
                     };
@@ -462,7 +660,7 @@ impl Driver {
                 command,
                 &limits,
                 &gpu_limits,
-                plan.command_ranges(&sources),
+                plan.command_ranges(sources),
                 |prepared, preflight, may_execute| {
                     let vertices = add(
                         self.usage.vertices,
@@ -506,7 +704,7 @@ impl Driver {
         self.graphics_owner = Some(owner);
         self.frame.reset_before_graphics = false;
         self.poisoned = false;
-        Ok(0)
+        Ok(GraphicsAdvance::Complete(0))
     }
 }
 
@@ -542,6 +740,10 @@ mod indirect_tests;
 #[path = "graphics_tests.rs"]
 mod tests;
 
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "graphics_continuation_tests.rs"]
+mod continuation_tests;
+
 // The static variant preserves the existing no-array planner and its complete
 // immutable draw snapshots. Only array streams use source-ordered replay.
 // Inline sealed state avoids a fallible allocation after an earlier effect.
@@ -557,6 +759,7 @@ enum GraphicsCommands {
 #[allow(clippy::large_enum_variant)]
 enum GraphicsStep {
     Array,
+    WaitFlip(pentax_gpu::WaitFlip),
     IndirectDraw,
     StaticDraw(usize),
     OrderedDraw(draw::Draw),
@@ -579,6 +782,15 @@ impl GraphicsCommands {
             draw::Action::Flip(flip) => Some(*flip),
             _ => None,
         })
+    }
+    fn has_wait_flip(&self) -> bool {
+        let actions = match self {
+            Self::Static { plan, .. } => plan.actions(),
+            Self::Ordered(plan) => plan.static_actions(),
+        };
+        actions
+            .iter()
+            .any(|action| matches!(action, draw::Action::WaitFlip(_)))
     }
     fn command_ranges<'a>(
         &'a self,
@@ -634,17 +846,439 @@ impl GraphicsCommands {
                     draw::Action::IndirectDraw(_) | draw::Action::LiveDraw => {
                         return Err(draw::Error::Unsupported("static live draw action"));
                     }
+                    draw::Action::WaitFlip(wait) => GraphicsStep::WaitFlip(wait),
                     draw::Action::Memory(index) => GraphicsStep::Memory(index),
                     draw::Action::Flip(flip) => GraphicsStep::Flip(flip),
                 })
             }
             Self::Ordered(plan) => plan.next_step()?.map(|next| match next {
                 draw::OrderedStep::Array => GraphicsStep::Array,
+                draw::OrderedStep::WaitFlip(wait) => GraphicsStep::WaitFlip(wait),
                 draw::OrderedStep::IndirectDraw => GraphicsStep::IndirectDraw,
                 draw::OrderedStep::Draw(draw) => GraphicsStep::OrderedDraw(draw),
                 draw::OrderedStep::Memory(index) => GraphicsStep::Memory(index),
                 draw::OrderedStep::Flip(flip) => GraphicsStep::Flip(flip),
             }),
         })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GraphicsTicketKind {
+    Admission,
+    Selected,
+}
+/// Driver-only continuation proof. The native thread-wait wrapper binds its
+/// exact original syscall/source/TLS token; these fields grant no memory authority.
+#[derive(Clone, Copy)]
+pub(crate) struct GraphicsTicket {
+    owner: pentax_platform::native_memory::NativeOwnerId,
+    generation: u64,
+    wait_generation: u64,
+    kind: GraphicsTicketKind,
+}
+impl std::fmt::Debug for GraphicsTicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphicsTicket").finish_non_exhaustive()
+    }
+}
+// Native HLE publishes a retained wait until the complete submission retires.
+pub(crate) enum GraphicsProgress {
+    Complete(u64),
+    Waiting(GraphicsTicket),
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum GraphicsPhase {
+    Idle,
+    Running,
+    Parked,
+    Failed,
+}
+pub(super) struct GraphicsAdmission {
+    owner: pentax_platform::native_memory::NativeOwnerId,
+    generation: u64,
+    // None denotes only the closed SuspendPoint boundary, never a guest opcode.
+    ranges: Option<Vec<NativeRange>>,
+}
+
+impl Driver {
+    fn graphics_check_owner(&self, memory: &PausedNativeMemory<'_>) -> Result<(), Failure> {
+        let owner = memory.owner_id();
+        self.video.check_owner(owner)?;
+        if self.graphics_owner.is_some_and(|old| old != owner)
+            || self
+                .graphics_execution
+                .as_ref()
+                .is_some_and(|run| run.owner != owner)
+            || self
+                .graphics_admissions
+                .first()
+                .is_some_and(|item| item.owner != owner)
+        {
+            return Err(Failure::Memory);
+        }
+        Ok(())
+    }
+    pub(super) fn graphics_retained_bytes(&self) -> Result<usize, Failure> {
+        let mut bytes = self
+            .graphics_admissions
+            .capacity()
+            .checked_mul(size_of::<GraphicsAdmission>())
+            .ok_or(Failure::Limit)?;
+        for item in &self.graphics_admissions {
+            let range_bytes = match &item.ranges {
+                Some(ranges) => ranges
+                    .capacity()
+                    .checked_mul(size_of::<NativeRange>())
+                    .ok_or(Failure::Limit)?,
+                None => 0,
+            };
+            bytes = bytes.checked_add(range_bytes).ok_or(Failure::Limit)?;
+        }
+        bytes
+            .checked_add(
+                self.graphics_execution
+                    .as_ref()
+                    .map_or(0, |run| run.retained),
+            )
+            .ok_or(Failure::Limit)
+    }
+    fn graphics_held_bytes(&self) -> Result<usize, Failure> {
+        self.graphics_retained_bytes()?
+            .checked_add(self.video.retained_frame_bytes())
+            .ok_or(Failure::Limit)
+    }
+    fn graphics_admission_storage(&mut self) -> Result<(), Failure> {
+        if self.graphics_admissions.capacity() != 0 {
+            return Ok(());
+        }
+        let count = (self.limits.max_batch_buffers as usize)
+            .min(usize::try_from(self.limits.max_calls).map_err(|_| Failure::Limit)?);
+        if count == 0 {
+            return Err(Failure::Limit);
+        }
+        let bytes = count
+            .checked_mul(size_of::<GraphicsAdmission>())
+            .ok_or(Failure::Limit)?;
+        let ceiling = self.graphics_host_ceiling()?;
+        host_add(self.graphics_held_bytes()?, bytes, ceiling)?;
+        let mut storage = Vec::new();
+        storage
+            .try_reserve_exact(count)
+            .map_err(|_| Failure::Allocation)?;
+        let actual = storage
+            .capacity()
+            .checked_mul(size_of::<GraphicsAdmission>())
+            .ok_or(Failure::Limit)?;
+        host_add(self.graphics_held_bytes()?, actual, ceiling)?;
+        self.usage.preparation_work = add(
+            self.usage.preparation_work,
+            actual as u64,
+            self.limits.max_preparation_work,
+        )?;
+        self.graphics_admissions = storage;
+        Ok(())
+    }
+    fn graphics_enqueue(
+        &mut self,
+        memory: &PausedNativeMemory<'_>,
+        ranges: Option<&[NativeRange]>,
+    ) -> Result<super::GraphicsTicket, Failure> {
+        if self.poisoned || self.graphics_phase == GraphicsPhase::Failed {
+            return Err(Failure::Poisoned);
+        }
+        self.graphics_check_owner(memory)?;
+        self.graphics_admission_storage()?;
+        if self.graphics_admissions.len() >= self.limits.max_batch_buffers as usize
+            || self.graphics_admissions.len() == self.graphics_admissions.capacity()
+        {
+            return Err(Failure::Limit);
+        }
+        let generation = NEXT_GRAPHICS_REQUEST
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| Failure::Limit)?;
+        let ranges = if let Some(input) = ranges {
+            if input.len() > self.limits.max_batch_buffers as usize {
+                return Err(Failure::Limit);
+            }
+            let bytes = input
+                .len()
+                .checked_mul(size_of::<NativeRange>())
+                .ok_or(Failure::Limit)?;
+            host_add(
+                self.graphics_held_bytes()?,
+                bytes,
+                self.graphics_host_ceiling()?,
+            )?;
+            let mut values = Vec::new();
+            values
+                .try_reserve_exact(input.len())
+                .map_err(|_| Failure::Allocation)?;
+            let actual = values
+                .capacity()
+                .checked_mul(size_of::<NativeRange>())
+                .ok_or(Failure::Limit)?;
+            host_add(
+                self.graphics_held_bytes()?,
+                actual,
+                self.graphics_host_ceiling()?,
+            )?;
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                actual as u64,
+                self.limits.max_preparation_work,
+            )?;
+            values.extend_from_slice(input);
+            Some(values)
+        } else {
+            None
+        };
+        self.graphics_admissions.push(GraphicsAdmission {
+            owner: memory.owner_id(),
+            generation,
+            ranges,
+        });
+        Ok(GraphicsTicket {
+            owner: memory.owner_id(),
+            generation,
+            wait_generation: 0,
+            kind: GraphicsTicketKind::Admission,
+        })
+    }
+    /// Begin one owned execution after exact native call admission.
+    pub(crate) fn begin_graphics_execution(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        ranges: &[NativeRange],
+        kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
+    ) -> Result<super::GraphicsProgress, Failure> {
+        let ticket = self.graphics_enqueue(memory, Some(ranges))?;
+        self.resume_graphics_execution(memory, ticket, kernel, clock)
+    }
+    /// A serialized source SuspendPoint boundary under the original native token.
+    pub(crate) fn queue_graphics_suspend(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
+    ) -> Result<super::GraphicsProgress, Failure> {
+        let ticket = self.graphics_enqueue(memory, None)?;
+        self.resume_graphics_execution(memory, ticket, kernel, clock)
+    }
+    pub(crate) fn graphics_ticket_ready(
+        &mut self,
+        memory: &PausedNativeMemory<'_>,
+        ticket: &super::GraphicsTicket,
+    ) -> Result<bool, Failure> {
+        // A peer's actual terminal failure always wins over saved prefix state.
+        if self.poisoned || self.graphics_phase == GraphicsPhase::Failed {
+            return Err(Failure::Poisoned);
+        }
+        if ticket.owner != memory.owner_id() {
+            return Err(Failure::Memory);
+        }
+        self.graphics_check_owner(memory)?;
+        // Authenticate before any budget/predicate error may fail this queue.
+        // An old, foreign or already-completed ticket cannot poison its owner.
+        match ticket.kind {
+            GraphicsTicketKind::Admission => {
+                if ticket.wait_generation != 0
+                    || !self.graphics_admissions.iter().any(|item| {
+                        item.generation == ticket.generation && item.owner == ticket.owner
+                    })
+                {
+                    return Err(Failure::UnsupportedQueue);
+                }
+            }
+            GraphicsTicketKind::Selected => {
+                if !self.graphics_execution.as_ref().is_some_and(|run| {
+                    run.owner == ticket.owner
+                        && run.generation == ticket.generation
+                        && run.wait_generation == ticket.wait_generation
+                        && run.pending.is_some()
+                }) {
+                    return Err(Failure::UnsupportedQueue);
+                }
+            }
+        }
+        let result = (|| {
+            self.usage.preparation_work = add(
+                self.usage.preparation_work,
+                64 + self.graphics_admissions.len() as u64,
+                self.limits.max_preparation_work,
+            )?;
+            match ticket.kind {
+                GraphicsTicketKind::Admission => Ok(self.graphics_execution.is_none()
+                    && self.graphics_phase == GraphicsPhase::Idle
+                    && self
+                        .graphics_admissions
+                        .first()
+                        .is_some_and(|item| item.generation == ticket.generation)),
+                GraphicsTicketKind::Selected => {
+                    let wait = self
+                        .graphics_execution
+                        .as_ref()
+                        .and_then(|run| run.pending)
+                        .ok_or(Failure::UnsupportedQueue)?;
+                    Ok(!self.graphics_selected_wait(memory, wait)?)
+                }
+            }
+        })();
+        if result.is_err() {
+            // The exact admitted request failed, retaining any active prefix
+            // and allocations until authenticated owner teardown.
+            self.graphics_phase = GraphicsPhase::Failed;
+            self.poisoned = true;
+        }
+        result
+    }
+
+    fn fail_graphics_admission(&mut self, error: Failure) -> Failure {
+        self.graphics_phase = GraphicsPhase::Failed;
+        self.poisoned = true;
+        error
+    }
+    pub(crate) fn resume_graphics_execution(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        ticket: super::GraphicsTicket,
+        mut kernel: Option<&mut pentax_kernel::Kernel>,
+        clock: Option<super::GraphicsClock>,
+    ) -> Result<super::GraphicsProgress, Failure> {
+        if !self.graphics_ticket_ready(memory, &ticket)? {
+            return Ok(GraphicsProgress::Waiting(ticket));
+        }
+        let mut execution = match ticket.kind {
+            GraphicsTicketKind::Selected => self
+                .graphics_execution
+                .take()
+                .ok_or(Failure::UnsupportedQueue)
+                .map_err(|error| self.fail_graphics_admission(error))?,
+            GraphicsTicketKind::Admission => {
+                // Readiness proved this exact FIFO head. Charge all bounded
+                // shifts before mutation; never let another request overtake.
+                self.usage.preparation_work = add(
+                    self.usage.preparation_work,
+                    (self.graphics_admissions.len() * size_of::<GraphicsAdmission>()) as u64,
+                    self.limits.max_preparation_work,
+                )
+                .map_err(|error| self.fail_graphics_admission(error))?;
+                let boundary = if self.graphics_admissions[0].ranges.is_none() {
+                    Some(
+                        self.frame
+                            .boundaries
+                            .checked_add(1)
+                            .ok_or(Failure::Limit)
+                            .map_err(|error| self.fail_graphics_admission(error))?,
+                    )
+                } else {
+                    None
+                };
+                let admission = self.graphics_admissions.remove(0);
+                if let Some(boundary) = boundary {
+                    self.frame.boundaries = boundary;
+                    self.frame.reset_before_graphics = true;
+                    return Ok(GraphicsProgress::Complete(0));
+                }
+                let prepared = self.prepare_graphics_execution(
+                    memory,
+                    admission.ranges.as_ref().unwrap(),
+                    kernel.as_deref_mut(),
+                    clock,
+                );
+                let mut run = match prepared {
+                    Ok(Some(run)) => run,
+                    Ok(None) => return Ok(GraphicsProgress::Complete(0)),
+                    Err(error) => {
+                        self.graphics_phase = GraphicsPhase::Failed;
+                        self.poisoned = true;
+                        return Err(error);
+                    }
+                };
+                run.generation = admission.generation;
+                run
+            }
+        };
+        self.graphics_phase = GraphicsPhase::Running;
+        // Restore only the currently authenticated prefix after checking global
+        // terminal poison above. No peer failure is overwritten on resume.
+        self.poisoned = execution.effect_started;
+        let outcome = (|| {
+            execution.max_host_bytes = execution.max_host_bytes.min(self.graphics_host_limit()?);
+            if execution.retained > execution.max_host_bytes {
+                return Err(Failure::Limit);
+            }
+            let current = self.presentation_limits()?;
+            execution.presentation.max_frame_bytes = execution
+                .presentation
+                .max_frame_bytes
+                .min(current.max_frame_bytes);
+            execution.presentation.max_held_bytes = execution.presentation.max_held_bytes.min(
+                current
+                    .max_held_bytes
+                    .checked_sub(execution.retained)
+                    .ok_or(Failure::Limit)?,
+            );
+            execution.presentation.max_work = execution.presentation.max_work.min(current.max_work);
+            self.advance_graphics_execution(memory, &mut execution, kernel, clock)
+        })();
+        execution.effect_started |= self.poisoned;
+        match outcome {
+            Ok(GraphicsAdvance::Complete(value)) => {
+                self.graphics_phase = GraphicsPhase::Idle;
+                self.poisoned = false;
+                Ok(GraphicsProgress::Complete(value))
+            }
+            Ok(GraphicsAdvance::Waiting) => {
+                let next = GraphicsTicket {
+                    owner: execution.owner,
+                    generation: execution.generation,
+                    wait_generation: execution.wait_generation,
+                    kind: GraphicsTicketKind::Selected,
+                };
+                // Infallible publication comes BEFORE clearing the transient
+                // latch. The exact prefix/plan is always InFlight or Failed.
+                self.graphics_execution = Some(execution);
+                self.graphics_phase = GraphicsPhase::Parked;
+                self.poisoned = false;
+                Ok(GraphicsProgress::Waiting(next))
+            }
+            Err(error) => {
+                self.graphics_execution = Some(execution);
+                self.graphics_phase = GraphicsPhase::Failed;
+                self.poisoned = true;
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn has_pending_graphics_continuation(&self) -> bool {
+        self.graphics_execution.is_some() || !self.graphics_admissions.is_empty()
+    }
+
+    /// Failure cleanup is independent of remaining work/diagnostic budgets.
+    /// Only the actual owner teardown may release its retained capacities.
+    pub(crate) fn revoke_graphics_owner(
+        &mut self,
+        owner: pentax_platform::native_memory::NativeOwnerId,
+    ) -> Result<(), Failure> {
+        if self
+            .graphics_execution
+            .as_ref()
+            .is_some_and(|run| run.owner != owner)
+            || self
+                .graphics_admissions
+                .iter()
+                .any(|item| item.owner != owner)
+            || self.graphics_owner.is_some_and(|old| old != owner)
+        {
+            return Err(Failure::Memory);
+        }
+        self.video.check_owner(owner)?;
+        self.graphics_execution = None;
+        self.graphics_admissions = Vec::new();
+        self.graphics_phase = GraphicsPhase::Failed;
+        self.poisoned = true;
+        Ok(())
     }
 }

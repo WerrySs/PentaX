@@ -70,6 +70,7 @@ pub enum Action {
     Draw(usize),
     IndirectDraw(super::IndirectDraw),
     LiveDraw,
+    WaitFlip(crate::WaitFlip),
     Flip(Flip),
     Memory(usize),
 }
@@ -322,6 +323,8 @@ fn plan(
                 words
             } else if crate::queue_reset::is_header(header.raw()) {
                 2
+            } else if let Some(words) = crate::wait_flip::packet_words(header.raw()) {
+                words
             } else if let Some(words) = crate::memory_sync::packet_words(header.raw()) {
                 words
             } else if let Some(words) = crate::marker::packet_words(header.raw()) {
@@ -386,9 +389,22 @@ fn plan(
                 && header.opcode() == 0x10
                 && crate::marker::packet_words(header.raw()).is_none()
                 && crate::memory_sync::packet_words(header.raw()).is_none()
+                && crate::wait_flip::packet_words(header.raw()).is_none()
                 && matches!(word(at + 1), 0x6875_0777 | 0x6875_0778 | 0x6875_0781)
             {
                 return Err(Error::Unsupported("unsupported graphics flip marker"));
+            }
+            if crate::wait_flip::packet_words(header.raw()).is_some() {
+                if actions.len() >= action_count {
+                    return Err(Error::Limit("command actions"));
+                }
+                let wait = crate::wait_flip::decode(&bytes[at * 4..end * 4])
+                    .map_err(Error::Unsupported)?;
+                work(&mut usage, limits, size_of::<Action>() as u64)?;
+                actions.push(Action::WaitFlip(wait));
+                fresh_draw = false;
+                at = end;
+                continue;
             }
             if length == 1
                 || (header.opcode() == 0x10

@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 269] = {
+const ENTRIES: [(&str, Function, usize, usize); 271] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 269] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 269];
+    let mut entries = [BASE_ENTRIES[0]; 271];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -223,6 +223,19 @@ const ENTRIES: [(&str, Function, usize, usize); 269] = {
     let (nid, function) = crate::gpu::driver::INDIRECT_DRAW_EXPORTS[0];
     entries[267] = (nid, function, 1, 1);
     entries[268] = (nid, function, 2, 2);
+    // Exact appended producer; all prior269 marker IDs and scopes stay fixed.
+    entries[269] = (
+        "MWiElSNE8j8",
+        Function::AgcDcbWaitUntilSafeForRendering,
+        1,
+        1,
+    );
+    entries[270] = (
+        "MWiElSNE8j8",
+        Function::AgcDcbWaitUntilSafeForRendering,
+        2,
+        2,
+    );
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -426,7 +439,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -513,7 +526,7 @@ mod reset_queue_tests {
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -540,7 +553,7 @@ mod memory_sync_tests {
     #[test]
     fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -567,7 +580,7 @@ mod marker_binding_tests {
     #[test]
     fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -591,7 +604,7 @@ mod context_binding_tests {
     #[test]
     fn context_operation_appends_exact_canonical_and_observed_pair_without_moving_old_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[244],
             ("H7uZqCoNuWk", Function::AgcDcbPopMarker, 2, 2)
@@ -622,7 +635,7 @@ mod primitive_binding_tests {
     #[test]
     fn primitive_creation_appends_only_exact_canonical_and_observed_pairs_after_context_state() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[246],
             ("qj7QZpgr9Uw", Function::AgcDcbContextStateOp, 2, 2)
@@ -653,7 +666,7 @@ mod packet_payload_binding_tests {
     #[test]
     fn packet_payload_address_appends_only_exact_pairs_and_preserves_primitive_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[248],
             ("D9sr1xGUriE", Function::AgcCreatePrimState, 2, 2)
@@ -689,7 +702,7 @@ mod index_size_0600_binding_tests {
     #[test]
     fn index_size_0600_appends_exact_pairs_without_moving_old_builder_or_payload_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[250],
             (
@@ -728,7 +741,7 @@ mod transfer_binding_tests {
     #[test]
     fn four_transfer_roles_append_after_253_immutable_rows_in_exact_verified_pairs() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[252],
             ("-KRzWekV120", Function::AgcDcbSetIndexSize0600, 2, 2)
@@ -753,7 +766,7 @@ mod indirect_dispatch_binding_tests {
     #[test]
     fn three_indirect_producers_append_after_261_rows_in_only_verified_pairs() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(ENTRIES[260], ("WmAc2MEj6Io", Function::AgcDcbDmaData, 2, 2));
         for (index, (nid, function)) in [
             ("j3EtxFkSIhQ", Function::AgcAcbDispatchIndirect),
@@ -783,7 +796,7 @@ mod indexed_indirect_binding_tests {
     #[test]
     fn indexed_indirect_appends_only_exact_pairs_after_all_indirect_dispatch_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 269);
+        assert_eq!(provider.function_count(), 271);
         assert_eq!(
             ENTRIES[266],
             ("RmaJwLtc8rY", Function::AgcDcbSetBaseIndirectArgs, 2, 2)
@@ -802,5 +815,34 @@ mod indexed_indirect_binding_tests {
             2
         );
         assert!(!ENTRIES.iter().any(|row| row.0 == "ypVBz4uPKcQ"));
+    }
+    #[test]
+    fn wait_safe_appends_exact_scoped_producer_without_replacing_existing_ordinals() {
+        let provider = build_graphics_provider(16384).unwrap();
+        assert_eq!(provider.function_count(), 271);
+        for (at, scope) in [(269, 1), (270, 2)] {
+            assert_eq!(
+                ENTRIES[at],
+                (
+                    "MWiElSNE8j8",
+                    Function::AgcDcbWaitUntilSafeForRendering,
+                    scope,
+                    scope
+                )
+            );
+            let marker = provider.markers().nth(at).unwrap();
+            assert_eq!(marker.function, Function::AgcDcbWaitUntilSafeForRendering);
+            assert_eq!(marker.id(), BASE + at as u32 + 1);
+            assert_eq!(marker.rva(), 0x100 + at as u64 * 16);
+        }
+        assert_eq!(
+            ENTRIES[267],
+            ("t1vNu082-jM", Function::AgcDcbDrawIndexIndirect, 1, 1)
+        );
+        assert_eq!(
+            ENTRIES[268],
+            ("t1vNu082-jM", Function::AgcDcbDrawIndexIndirect, 2, 2)
+        );
+        assert_eq!(crate::gpu::driver::COMMAND_BUILDER_EXPORTS.len(), 52);
     }
 }

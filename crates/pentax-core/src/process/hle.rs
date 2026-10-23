@@ -57,8 +57,8 @@ pub use kernel_startup::{
     PreparedImeCallback, PreparedLibcBuiltins, PreparedNativeEntry, PreparedNativeKernelStartup,
     PreparedNativeModuleStart, PreparedNativeSource, PreparedNativeThread, PreparedNetCtlCallback,
     PreparedNpCallback, PreparedPthreadOnce, PreparedThreadStart, ThreadEntryLayout,
-    plan_kernel_startup, prepare_native_kernel_startup, prepare_native_kernel_startup_in,
-    run_original_prepared_fixture,
+    ThreadWaitAdvance, plan_kernel_startup, prepare_native_kernel_startup,
+    prepare_native_kernel_startup_in, run_original_prepared_fixture,
 };
 pub use kernel_startup::{GraphicsStartupOptions, plan_kernel_startup_with_graphics};
 pub use kernel_startup::{

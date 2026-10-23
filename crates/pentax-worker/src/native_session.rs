@@ -579,6 +579,14 @@ pub(super) fn run_prepared_with_consumer<'plan, 'image>(
         }
         consumer.cancel();
     }
+    // This is the terminal owner boundary, after guest execution and consumer
+    // cancellation. A parked/queued graphics call is abandoned, never returned.
+    // Owner-bound cleanup cannot consume an exhausted admission/sleep budget.
+    let cleanup = session.revoke_graphics_continuations_on_teardown();
+    if result.is_ok() && cleanup? {
+        // A main-thread return cannot certify an abandoned peer submission.
+        result = Err(NativeSessionError::Frame(frame_bridge::Error::Cancelled));
+    }
     result
 }
 
@@ -1567,6 +1575,7 @@ fn execute_epoch<'plan, 'image>(
                     return Ok(None);
                 }
                 NativeBlockStop::PreSyscall(token) => {
+                    state.scheduling.check_service_wait_slot(&engine, token)?;
                     state.service_stops = state
                         .service_stops
                         .checked_add(1)

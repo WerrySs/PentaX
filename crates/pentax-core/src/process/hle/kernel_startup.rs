@@ -54,7 +54,7 @@ pub use native_thread::PreparedNativeThread;
 mod pthread_create;
 pub use pthread_create::{PendingThreadCreate, PreparedThreadStart, ThreadEntryLayout};
 mod pthread_wait;
-pub use pthread_wait::PendingThreadWait;
+pub use pthread_wait::{PendingThreadWait, ThreadWaitAdvance};
 
 mod native_entry;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]

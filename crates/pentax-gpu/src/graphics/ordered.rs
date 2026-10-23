@@ -19,6 +19,7 @@ use crate::{
 pub enum OrderedStep {
     Array,
     IndirectDraw,
+    WaitFlip(crate::WaitFlip),
     Draw(Draw),
     Memory(usize),
     Flip(Flip),
@@ -280,6 +281,13 @@ impl OrderedCommands {
                 }
                 _ => {}
             }
+            if header.raw() == 0xc005_1018 {
+                let Some(Action::WaitFlip(wait)) = self.plan.actions().get(self.action) else {
+                    return Err(Error::Unsupported("ordered wait-flip action alignment"));
+                };
+                self.action += 1;
+                return Ok(Some(OrderedStep::WaitFlip(*wait)));
+            }
             if header.raw() == 0xc003_2500 {
                 let Some(Action::IndirectDraw(descriptor)) = self.plan.actions().get(self.action)
                 else {
@@ -534,7 +542,7 @@ mod tests {
                     assert_eq!(draw.instance_count(), 2);
                     assert_eq!(draw.vertex_count(), if draws == 1 { 3 } else { 5 });
                 }
-                OrderedStep::Flip(_) | OrderedStep::IndirectDraw => {
+                OrderedStep::Flip(_) | OrderedStep::IndirectDraw | OrderedStep::WaitFlip(_) => {
                     panic!("no original flip/indirect draw")
                 }
             }

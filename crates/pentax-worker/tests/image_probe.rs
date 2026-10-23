@@ -1635,3 +1635,6 @@ mod agc_draw_index_indirect;
 
 #[path = "image_probe/sse4a_bitfields.rs"]
 mod sse4a_bitfields;
+
+#[path = "image_probe/agc_wait_safe.rs"]
+mod agc_wait_safe;

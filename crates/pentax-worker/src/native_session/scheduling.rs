@@ -5,10 +5,13 @@
 use super::*;
 use pentax_core::process::hle::{
     PendingThreadCreate, PendingThreadWait, PreparedNativeThread, PreparedThreadStart,
+    ThreadWaitAdvance,
 };
 use pentax_kernel::ThreadPriorityClass;
 use pentax_platform::native_dispatch::NativeThreadContext;
 
+#[cfg(test)]
+mod graphics_wait_tests;
 mod observations;
 #[cfg(test)]
 mod tests;
@@ -360,18 +363,44 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         engine: &mut NativeBlockStepper<'_, '_, '_>,
     ) -> Result<bool, NativeSessionError> {
         if let Some((pending, token)) = &self.threads[self.active].waiting {
-            let Some(value) = session.complete_thread_wait(pending, *token, proof, engine)? else {
-                // Opening a source drain barrier can admit the next real wait
-                // without completing its syscall. Keep its exact token/CPU
-                // parked and reconsider readiness on another scheduling pass.
-                self.force_switch = true;
-                return Ok(false);
-            };
-            engine.complete_syscall(*token, value)?;
+            let original_token = *token;
+            match session.advance_thread_wait(pending, original_token, proof, engine)? {
+                ThreadWaitAdvance::Pending => {
+                    self.force_switch = true;
+                    return Ok(false);
+                }
+                ThreadWaitAdvance::Replace(replacement) => {
+                    // Only the opaque wait changes. Keep the executor's original
+                    // pending token, complete CPU, phase, TLS and callback frames.
+                    session.check_thread_wait(&replacement, original_token)?;
+                    self.threads[self.active].waiting = Some((replacement, original_token));
+                    self.force_switch = true;
+                    return Ok(false);
+                }
+                ThreadWaitAdvance::Returned(value) => {
+                    engine.complete_syscall(original_token, value)?
+                }
+            }
             self.threads[self.active].waiting = None;
             self.threads[self.active].waiting_service = None;
         }
         Ok(true)
+    }
+
+    /// Reserve the already-allocated wait publication slot before a service can
+    /// retire a graphics prefix. This check creates no token or guest effect.
+    pub(super) fn check_service_wait_slot(
+        &self,
+        engine: &NativeBlockStepper<'_, '_, '_>,
+        token: PreSyscallToken,
+    ) -> Result<(), NativeSessionError> {
+        if engine.thread_index() != self.active || self.active_blocked() {
+            return Err(NativeSessionError::FixtureInvariant(
+                "service wait publication phase",
+            ));
+        }
+        engine.validate_pending_syscall(token)?;
+        Ok(())
     }
 
     pub(super) fn wait(

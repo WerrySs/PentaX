@@ -133,7 +133,8 @@ pub(crate) const INDIRECT_DRAW_EXPORTS: [(&str, Function); 1] =
     [("t1vNu082-jM", Function::AgcDcbDrawIndexIndirect)];
 
 pub(crate) fn supports(function: Function) -> bool {
-    function == Function::AgcDcbSetIndexSize0600
+    function == Function::AgcDcbWaitUntilSafeForRendering
+        || function == Function::AgcDcbSetIndexSize0600
         || EXPORTS
             .iter()
             .chain(RESET_EXPORTS.iter())
@@ -320,6 +321,7 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcDcbWaitUntilSafeForRendering => Packet::fixed(&[0xc005_1018, a[1], a[2], 0, 0, 0, 0]),
         AgcDcbDrawIndexIndirect => {
             let low = a[2];
             let stage = low >> 29;

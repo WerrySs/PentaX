@@ -1037,3 +1037,15 @@ rewriting, unsupported SGPR destinations or index8. Relative-instance shaders
 use a sealed native-indirect compiler context; generic/direct DrawParameters
 requirements and refusals remain unchanged. Original ordinary and separately ignored physical
 GPU consumers are source fixtures; their presence is not a rendering result.
+
+The exact scoped WaitUntilSafeForRendering producer writes seven command words
+through the existing checked allocator/grow callback. Native command submission
+retains an owned graphics plan across a selected VideoOut wait with bounded
+FIFO admission, actual pending-request predicates and opaque generations.
+Replacement wait tickets preserve the same syscall token, CPU, TLS and callback
+frames. Real Frame acknowledgement permits resumption without replaying a
+prefix; terminal failure remains poisoned. Legacy scalar-only submission still
+refuses a wait stream before effects. See
+`../pentax-gpu/src/graphics/continuation.md` for ownership and transport details.
+Original token/CPU-frame fixtures and the separately ignored driver presentation
+fixture are distinct from a rendered game frame or performance result.

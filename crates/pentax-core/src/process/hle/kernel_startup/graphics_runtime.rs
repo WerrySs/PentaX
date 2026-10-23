@@ -278,6 +278,32 @@ pub(super) fn stop(
             marker.function == driver::Function::AgcGetRegisterDefaultsInternal,
             request.args[0],
         )
+    } else if actions
+        && matches!(
+            marker.function,
+            driver::Function::CommandBuffer
+                | driver::Function::MultiCommandBuffers
+                | driver::Function::SuspendPoint
+        )
+    {
+        // Prepare publication identity before a prefix can retire. No allocation
+        // or TLS discovery follows the first possible command effect.
+        let thread_pointer =
+            thread_pointer.ok_or(KernelStartupError::InvalidProvider("graphics wait TLS"))?;
+        let progress = driver
+            .begin_native_graphics_submit(
+                &mut paused,
+                marker.function,
+                request.args,
+                &mut session.kernel,
+                graphics_clock,
+            )
+            .map_err(KernelStartupError::Graphics)?;
+        return Ok(super::pthread_wait::graphics_progress(
+            request,
+            thread_pointer,
+            progress,
+        ));
     } else if matches!(
         marker.function,
         driver::Function::CommandBuffer | driver::Function::MultiCommandBuffers
@@ -316,6 +342,25 @@ pub(super) fn stop(
     .map_err(KernelStartupError::Graphics)
     .map(NativeServiceAction::Returned)
 }
+pub(super) fn graphics_clock(
+    kernel: &mut pentax_kernel::Kernel,
+    paused: &mut PausedNativeMemory<'_>,
+) -> Result<u64, driver::Failure> {
+    let guest = super::super::kernel_adapter::KernelMemory {
+        paused,
+        source: None,
+        supplied_modules: 0,
+        lookup_limits: None,
+        lookup_work: None,
+        loaded_modules: None,
+        thread_tls: None,
+        initial_entry: None,
+    };
+    kernel
+        .process_time_counter(&guest)
+        .map_err(driver::Failure::Kernel)
+}
+
 fn display_clock(
     kernel: &mut pentax_kernel::Kernel,
     paused: &mut pentax_platform::native_memory::PausedNativeMemory<'_>,
@@ -336,6 +381,23 @@ fn display_clock(
 }
 
 impl PreparedNativeKernelStartup<'_, '_> {
+    /// Terminal native owner teardown only. Never completes an abandoned call.
+    /// This cleanup has no work/sleep/provider admission and cannot clear poison.
+    pub fn revoke_graphics_continuations_on_teardown(
+        &mut self,
+    ) -> Result<bool, KernelStartupError> {
+        let owner = self.owner_id();
+        if let Some(driver) = self.graphics.as_mut()
+            && driver.has_pending_graphics_continuation()
+        {
+            driver
+                .revoke_graphics_owner(owner)
+                .map_err(KernelStartupError::Graphics)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Final diagnostics: open ports, committed buffer registrations and retained
     /// vblank subscriptions for those exact live port generations. Registration
     /// is not live pixel permission, notification readiness or display proof.
@@ -618,6 +680,9 @@ impl PreparedNativeKernelStartup<'_, '_> {
 }
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+mod wait_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 mod defaults_tests;
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
@@ -673,6 +738,11 @@ mod tests {
             ("Graphics5", "Graphics5", 2, "YUeqkyT7mEQ", 0),
             ("Graphics5", "libSceAgc", 1, "YUeqkyT7mEQ", 1),
             ("Graphics5Driver", "Graphics5Driver", 1, "YUeqkyT7mEQ", 1),
+            ("Graphics5", "Graphics5", 1, "MWiElSNE8j8", 0),
+            ("libSceAgc", "libSceAgc", 1, "MWiElSNE8j8", 0),
+            ("Graphics5", "libSceAgc", 1, "MWiElSNE8j8", 1),
+            ("Graphics5Driver", "Graphics5Driver", 1, "MWiElSNE8j8", 1),
+            ("libSceAgc", "libSceAgc", 2, "MWiElSNE8j8", 0),
             ("Graphics5", "Graphics5", 1, "k3GhuSNmBLU", 0),
             ("libSceAgc", "libSceAgc", 1, "k3GhuSNmBLU", 0),
             ("Graphics5", "libSceAgc", 1, "k3GhuSNmBLU", 1),
@@ -716,7 +786,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 269);
+            assert_eq!(binding.factory.function_count(), 271);
             let open = binding
                 .factory
                 .markers()

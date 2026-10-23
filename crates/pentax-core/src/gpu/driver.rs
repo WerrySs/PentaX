@@ -32,6 +32,7 @@ mod function_profile;
 pub use function_profile::FunctionProfile;
 #[path = "driver/graphics.rs"]
 mod graphics;
+pub(crate) use graphics::{GraphicsProgress, GraphicsTicket};
 #[path = "driver/interrupts.rs"]
 mod interrupts;
 #[path = "driver/memory_transfer.rs"]
@@ -172,6 +173,7 @@ pub enum Function {
     AgcDcbDispatchIndirect,
     AgcDcbSetBaseIndirectArgs,
     AgcDcbDrawIndexIndirect,
+    AgcDcbWaitUntilSafeForRendering,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -296,6 +298,9 @@ pub(crate) struct Driver {
     queues: [compute::ComputeState; 56],
     graphics: draw::GraphicsState,
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
+    graphics_execution: Option<graphics::GraphicsExecution>,
+    graphics_admissions: Vec<graphics::GraphicsAdmission>,
+    graphics_phase: graphics::GraphicsPhase,
     poisoned: bool,
     frame: FrameState,
     video: super::video::State,
@@ -331,6 +336,9 @@ impl Driver {
             queues: [compute::ComputeState::empty(); 56],
             graphics: draw::GraphicsState::empty(),
             graphics_owner: None,
+            graphics_execution: None,
+            graphics_admissions: Vec::new(),
+            graphics_phase: graphics::GraphicsPhase::Idle,
             poisoned: false,
             frame: FrameState::default(),
             video: super::video::State::default(),
@@ -468,6 +476,47 @@ impl Driver {
         self.function_profile.record(Function::VideoSubmitFlip);
         self.video_submit_flip(memory, args, clock)
     }
+    fn admit_submit_call(&mut self, function: Function) -> Result<(), Failure> {
+        if self.poisoned {
+            return Err(Failure::Poisoned);
+        }
+        self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
+        self.function_profile.record(function);
+        Ok(())
+    }
+
+    /// Exact native action entry. The original call is admitted only here;
+    /// subsequent waits resume the owned graphics plan, never this method.
+    pub(crate) fn begin_native_graphics_submit(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        function: Function,
+        args: [u64; 6],
+        kernel: &mut pentax_kernel::Kernel,
+        clock: GraphicsClock,
+    ) -> Result<GraphicsProgress, Failure> {
+        if !matches!(
+            function,
+            Function::CommandBuffer | Function::MultiCommandBuffers | Function::SuspendPoint
+        ) {
+            return Err(Failure::UnsupportedQueue);
+        }
+        self.admit_submit_call(function)?;
+        if function == Function::SuspendPoint {
+            return self.queue_graphics_suspend(memory, Some(kernel), Some(clock));
+        }
+        if let Some(value) = null_result(function, args) {
+            return Ok(GraphicsProgress::Complete(value));
+        }
+        let (queue, ranges) = self.ranges(memory, function, args)?;
+        if !(0x20..0x58).contains(&queue) {
+            self.begin_graphics_execution(memory, &ranges, Some(kernel), Some(clock))
+        } else {
+            self.execute_compute_ranges(memory, queue, ranges, Some(kernel))
+                .map(GraphicsProgress::Complete)
+        }
+    }
+
     fn submit_impl(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
@@ -477,11 +526,7 @@ impl Driver {
         mut kernel: Option<&mut pentax_kernel::Kernel>,
         clock: Option<GraphicsClock>,
     ) -> Result<u64, Failure> {
-        if self.poisoned {
-            return Err(Failure::Poisoned);
-        }
-        self.usage.calls = add(self.usage.calls, 1, self.limits.max_calls)?;
-        self.function_profile.record(function);
+        self.admit_submit_call(function)?;
         if matches!(
             function,
             Function::VideoGetVblankStatus
@@ -651,6 +696,9 @@ impl Driver {
             );
         }
         if function == Function::SuspendPoint {
+            if self.graphics_execution.is_some() || !self.graphics_admissions.is_empty() {
+                return Err(Failure::Waiting);
+            }
             // Every admitted compute submission waits for its Vulkan fence and
             // same-owner writeback before returning. There is no pending queue
             // to drain here. Poisoned/partial submissions are rejected above.
@@ -681,6 +729,16 @@ impl Driver {
             }
             return Err(Failure::UnsupportedQueue);
         }
+        self.execute_compute_ranges(memory, queue, ranges, kernel)
+    }
+
+    fn execute_compute_ranges(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        queue: u32,
+        ranges: Vec<NativeRange>,
+        mut kernel: Option<&mut pentax_kernel::Kernel>,
+    ) -> Result<u64, Failure> {
         for range in ranges.into_iter().filter(|r| r.address != 0 && r.size != 0) {
             let next_bytes = add(
                 self.usage.command_bytes,

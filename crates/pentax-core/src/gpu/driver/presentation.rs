@@ -26,11 +26,13 @@ impl Driver {
         let original = self.limits.video_presentation;
         let frame = original.max_frame_bytes.min(max_frame_bytes);
         let held = original.max_held_bytes.min(max_held_bytes);
+        let retained = self.graphics_retained_bytes()?;
         if frame == 0
             || held == 0
             || external_held
                 .checked_add(self.video.retained_frame_bytes())
-                .is_none_or(|n| n > held)
+                .and_then(|n| n.checked_add(retained))
+                .is_none_or(|n| n > held || n > self.limits.graphics.max_host_bytes)
         {
             return Err(Failure::Limit);
         }
@@ -44,10 +46,13 @@ impl Driver {
             max_held_bytes: held,
             external_held,
         });
-        // Census only: no numeric capacity grants access or ownership. The
-        // non-guest transport pump includes these still-queued allocations
-        // in every decoder/backend growth admission until the next census.
-        Ok(self.video.retained_frame_bytes())
+        // Census only: no numeric capacity grants access or ownership. Include
+        // both queued Frames and parked/queued graphics allocations in the
+        // transport growth admission until its next census.
+        self.video
+            .retained_frame_bytes()
+            .checked_add(retained)
+            .ok_or(Failure::Limit)
     }
     pub(super) fn presentation_limits(
         &self,
@@ -61,18 +66,26 @@ impl Driver {
                 .checked_sub(consumer.external_held)
                 .ok_or(Failure::Limit)?;
         }
+        limits.max_held_bytes = limits
+            .max_held_bytes
+            .checked_sub(self.graphics_retained_bytes()?)
+            .ok_or(Failure::Limit)?;
         Ok(limits)
     }
     pub(super) fn graphics_host_limit(&self) -> Result<usize, Failure> {
-        match self.consumer {
-            Some(consumer) => self
-                .limits
-                .graphics
-                .max_host_bytes
+        self.graphics_host_ceiling()?
+            .checked_sub(self.graphics_retained_bytes()?)
+            .ok_or(Failure::Limit)
+    }
+    pub(super) fn graphics_host_ceiling(&self) -> Result<usize, Failure> {
+        let mut maximum = self.limits.graphics.max_host_bytes;
+        if let Some(consumer) = self.consumer {
+            maximum = maximum
+                .min(consumer.max_held_bytes)
                 .checked_sub(consumer.external_held)
-                .ok_or(Failure::Limit),
-            None => Ok(self.limits.graphics.max_host_bytes),
+                .ok_or(Failure::Limit)?;
         }
+        Ok(maximum)
     }
     pub(crate) fn video_peek_ready_frame(
         &self,

@@ -11,6 +11,7 @@ mod indexed;
 mod linkage;
 mod staging;
 mod tiled;
+mod wait_flip;
 
 const VS: u64 = 0x10000;
 const PS: u64 = 0x11000;

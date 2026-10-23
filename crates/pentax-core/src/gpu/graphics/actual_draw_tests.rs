@@ -688,7 +688,7 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
                 assert!(product.usage().shader_words > 0);
                 prepared += 1;
             }
-            OrderedStep::Flip(_) | OrderedStep::IndirectDraw => {
+            OrderedStep::Flip(_) | OrderedStep::IndirectDraw | OrderedStep::WaitFlip(_) => {
                 panic!("no original flip or indirect draw")
             }
         }

@@ -20,6 +20,7 @@ pub struct PendingThreadWait {
     ticket: Ticket,
 }
 enum Ticket {
+    Graphics(crate::gpu::driver::GraphicsTicket),
     Join(pthread_create::JoinTicket),
     EventQueue(EventQueueWait),
     Condition(ConditionWait),
@@ -31,7 +32,49 @@ enum Ticket {
     AudioOut2(AudioOut2Wait),
     Time(TimeWait),
 }
+/// Explicit transport for an admitted wait advancing to a different wait.
+/// Replacement never grants permission to complete the original native token.
+#[derive(Debug)]
+pub enum ThreadWaitAdvance {
+    Pending,
+    Replace(PendingThreadWait),
+    Returned(u64),
+}
+
+pub(super) fn graphics_progress(
+    request: NativeServiceRequest,
+    thread_pointer: u64,
+    progress: crate::gpu::driver::GraphicsProgress,
+) -> NativeServiceAction {
+    match progress {
+        crate::gpu::driver::GraphicsProgress::Complete(value) => {
+            NativeServiceAction::Returned(value)
+        }
+        crate::gpu::driver::GraphicsProgress::Waiting(ticket) => {
+            NativeServiceAction::WaitThread(PendingThreadWait {
+                owner: request.owner_id,
+                thread_pointer,
+                pc: request.syscall_pc,
+                id: request.service_id,
+                args: request.args,
+                ticket: Ticket::Graphics(ticket),
+            })
+        }
+    }
+}
+
 impl PendingThreadWait {
+    fn with_graphics_ticket(&self, ticket: crate::gpu::driver::GraphicsTicket) -> Self {
+        Self {
+            owner: self.owner,
+            thread_pointer: self.thread_pointer,
+            pc: self.pc,
+            id: self.id,
+            args: self.args,
+            ticket: Ticket::Graphics(ticket),
+        }
+    }
+
     /// Classify an actual retained wait without probing or consuming its ticket.
     pub fn is_event_queue(&self) -> bool {
         matches!(&self.ticket, Ticket::EventQueue(_))
@@ -245,7 +288,19 @@ impl PreparedNativeKernelStartup<'_, '_> {
         if pending.owner != self.pause()?.owner_id() {
             return Err(KernelStartupError::InvalidProvider("thread wait owner"));
         }
+        if let Ticket::Graphics(ticket) = &pending.ticket {
+            let paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+            return self
+                .graphics
+                .as_mut()
+                .ok_or(KernelStartupError::InvalidProvider(
+                    "missing graphics state",
+                ))?
+                .graphics_ticket_ready(&paused, ticket)
+                .map_err(KernelStartupError::Graphics);
+        }
         match &pending.ticket {
+            Ticket::Graphics(_) => unreachable!(),
             Ticket::Join(ticket) => {
                 self.kernel
                     .poll_pthread_join()
@@ -319,7 +374,10 @@ impl PreparedNativeKernelStartup<'_, '_> {
                 .kernel
                 .event_queue_wait_delay(ticket)
                 .map_err(KernelStartupError::Kernel),
-            Ticket::Condition(_) | Ticket::Join(_) | Ticket::PthreadSemaphore(_) => Ok(None),
+            Ticket::Graphics(_)
+            | Ticket::Condition(_)
+            | Ticket::Join(_)
+            | Ticket::PthreadSemaphore(_) => Ok(None),
             Ticket::Semaphore(ticket) => self
                 .kernel
                 .semaphore_wait_delay(ticket)
@@ -384,13 +442,13 @@ impl PreparedNativeKernelStartup<'_, '_> {
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    pub fn complete_thread_wait(
+    fn validate_thread_wait_resume(
         &mut self,
         pending: &PendingThreadWait,
         token: pentax_platform::native_dispatch::PreSyscallToken,
         current: &PreparedNativeSource<'_, '_>,
         engine: &pentax_platform::native_dispatch::NativeBlockStepper<'_, '_, '_>,
-    ) -> Result<Option<u64>, KernelStartupError> {
+    ) -> Result<(), KernelStartupError> {
         self.check_thread_wait(pending, token)?;
         if current.owner_id() != self.owner_id()
             || current.materialized_source().source_plan().identity()
@@ -405,10 +463,65 @@ impl PreparedNativeKernelStartup<'_, '_> {
         engine.validate_pending_syscall(token).map_err(|_| {
             KernelStartupError::InvalidProvider("thread wait executor continuation")
         })?;
+        Ok(())
+    }
+
+    /// Advance a worker-owned wait without replacing its original CPU/token.
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub fn advance_thread_wait(
+        &mut self,
+        pending: &PendingThreadWait,
+        token: pentax_platform::native_dispatch::PreSyscallToken,
+        current: &PreparedNativeSource<'_, '_>,
+        engine: &pentax_platform::native_dispatch::NativeBlockStepper<'_, '_, '_>,
+    ) -> Result<ThreadWaitAdvance, KernelStartupError> {
+        if let Ticket::Graphics(ticket) = &pending.ticket {
+            self.validate_thread_wait_resume(pending, token, current, engine)?;
+            let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+            let progress = self
+                .graphics
+                .as_mut()
+                .ok_or(KernelStartupError::InvalidProvider(
+                    "missing graphics state",
+                ))?
+                .resume_graphics_execution(
+                    &mut paused,
+                    *ticket,
+                    Some(&mut self.kernel),
+                    Some(super::graphics_runtime::graphics_clock),
+                )
+                .map_err(KernelStartupError::Graphics)?;
+            return Ok(match progress {
+                crate::gpu::driver::GraphicsProgress::Complete(value) => {
+                    ThreadWaitAdvance::Returned(value)
+                }
+                crate::gpu::driver::GraphicsProgress::Waiting(next) => {
+                    ThreadWaitAdvance::Replace(pending.with_graphics_ticket(next))
+                }
+            });
+        }
+        self.complete_thread_wait(pending, token, current, engine)
+            .map(|value| value.map_or(ThreadWaitAdvance::Pending, ThreadWaitAdvance::Returned))
+    }
+
+    /// Compatibility completion for existing waits. Graphics requires explicit
+    /// replacement transport and can never be represented by immutable None.
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    pub fn complete_thread_wait(
+        &mut self,
+        pending: &PendingThreadWait,
+        token: pentax_platform::native_dispatch::PreSyscallToken,
+        current: &PreparedNativeSource<'_, '_>,
+        engine: &pentax_platform::native_dispatch::NativeBlockStepper<'_, '_, '_>,
+    ) -> Result<Option<u64>, KernelStartupError> {
+        self.validate_thread_wait_resume(pending, token, current, engine)?;
         // Admission is bound to its actual saved syscall and owner, rather than
         // the old source epoch: another thread may append an admitted module
         // while this one waits. The executor retains and validates that lineage.
         match &pending.ticket {
+            Ticket::Graphics(_) => Err(KernelStartupError::InvalidProvider(
+                "graphics wait requires replacement transport",
+            )),
             Ticket::Mutex(ticket) => self
                 .kernel
                 .complete_mutex_wait(ticket)

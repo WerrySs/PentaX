@@ -611,3 +611,6 @@ mod indirect_dispatch;
 
 #[path = "tests/draw_index_indirect.rs"]
 mod draw_index_indirect;
+
+#[path = "tests/wait_safe.rs"]
+mod wait_safe;

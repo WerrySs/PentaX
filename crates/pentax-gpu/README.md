@@ -342,3 +342,8 @@ only the low2 index type selects the existing U16/U32 upload path. Type2/3,
 unknown bits, altered header/selector and a missing mandatory bit remain typed
 refusals. Static admission and source-ordered replay retain the same index
 state and current owned index-buffer checks; no cache effect is inferred.
+
+The exact seven-word selected flip wait is a sealed graphics action, with
+strict reserved words and bounded static/live action positions. It conveys no
+completion or presentation authority. The owned driver continuation and its
+exact native HLE transport are described in `src/graphics/continuation.md`.

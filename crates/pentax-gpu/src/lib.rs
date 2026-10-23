@@ -45,6 +45,8 @@ mod inspect;
 mod limits;
 mod marker;
 mod memory_sync;
+mod wait_flip;
+pub use wait_flip::WaitFlip;
 mod memory_transfer;
 mod packet;
 mod queue_reset;

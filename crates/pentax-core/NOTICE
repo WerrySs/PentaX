@@ -668,3 +668,22 @@ Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT gra
 continue to apply. Original PentaX changes2026 add bounded current-owner live
 parameters, checked indices and physical output exclusions, actual source-order
 SGPR/instance state and fail-stop handling. All new consumers are original.
+
+The owned selected-flip graphics continuation additionally adapts public
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/graphicsRun.cpp: ExecWaitFlipDone/selected queue wait
+  src/graphics/presentation/videoOut.cpp: selected CPU/GPU flip requests
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp#L1021
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX modifications2026 retain bounded captured execution,
+opaque request generations and source-order effects across actual pending
+requests. Original fixtures use owned Frames; no upstream implementation,
+commercial shader or guest data is included. Native HLE binds the exact saved
+syscall/source/TLS identity and existing worker token across successor waits.
+
+The scoped WaitUntilSafeForRendering producer additionally follows the same
+public revision's src/libs/agc.cpp (seven-word allocation/packet) and
+libAgcDriver.cpp registration MWiElSNE8j8, as retained in the
+upstream source inventory. Existing copyright and license terms above apply.
+Original PentaX native thread-wait transport retains the original executor
+continuation and callback frames; no upstream scheduler implementation is copied.
