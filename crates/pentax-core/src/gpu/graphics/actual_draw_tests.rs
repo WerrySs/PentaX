@@ -31,6 +31,9 @@ mod buffer_resource_tests;
 #[path = "actual_draw_tests/parameters.rs"]
 mod parameters;
 
+#[path = "actual_draw_tests/sampled_lod.rs"]
+mod sampled_lod;
+
 fn unary(op: u32, dst: u32, src: u32) -> u32 {
     0x7e00_0000 | (dst << 17) | (op << 9) | src
 }

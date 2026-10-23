@@ -1624,7 +1624,13 @@ impl Emit<'_, '_> {
             Op::Barrier => {
                 let workgroup = self.const_u32(ScopeWorkgroup)?;
                 let semantics = self.const_u32(
-                    MemorySemanticsAcquireReleaseMask | MemorySemanticsWorkgroupMemoryMask,
+                    MemorySemanticsAcquireReleaseMask
+                        | MemorySemanticsWorkgroupMemoryMask
+                        | if self.profile.stage() == ShaderStage::Compute {
+                            MemorySemanticsUniformMemoryMask
+                        } else {
+                            0
+                        },
                 )?;
                 self.b
                     .func(OpControlBarrier, &[workgroup, workgroup, semantics])?;
@@ -2190,7 +2196,10 @@ impl Emit<'_, '_> {
             let variable =
                 self.define_binding(array, StorageClassStorageBuffer, "buffers", BINDING_BUFFERS)?;
             let writes = self.layout.buffers.iter().any(|b| b.written);
-            let coherent = self.layout.buffers.iter().any(|b| b.coherent);
+            // GLSL450 peer visibility needs coherent backing as well as the
+            // actual barrier's storage-class semantics. Keep guest flags in
+            // the manifest separate from this effective array decoration.
+            let coherent = self.layout.buffers_coherent();
             if !writes && !coherent {
                 self.b
                     .annotate(OpDecorate, &[variable, DecorationNonWritable])?;
@@ -2324,7 +2333,9 @@ pub(crate) fn emit_program(
     let entry_label = e.b.alloc_id()?;
     e.b.require_capability(CapabilityShader)?;
     e.b.require_capability(CapabilitySignedZeroInfNanPreserve)?;
-    if native_lane || uses_ballot {
+    // A host-subgroup completion barrier requires BASIC support, even when
+    // logical lane indexing does not require an exact native subgroup size.
+    if native_lane || uses_ballot || layout.subgroup_store_completion {
         e.b.require_capability(CapabilityGroupNonUniform)?;
     }
     if uses_ballot {

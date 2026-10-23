@@ -56,9 +56,10 @@ pub(super) fn run(
         vk::ShaderStageFlags::empty()
     };
     // No varying-subgroup-size pipeline flag or size-control extension is used.
-    // Actual subgroup operations require the manifest's exact native size.
-    // Logical EXEC/lane indexing and LDS Workgroup barriers do not impersonate
-    // native subgroup64 and need no such requirement by themselves.
+    // Native lane/ballot operations keep the manifest's exact native size.
+    // A host-subgroup completion barrier requires BASIC support but can be
+    // width-unconstrained. Logical EXEC/LDS/Workgroup synchronization never
+    // impersonates native subgroup64.
     let device = Device::open_required(
         DeviceRequirements {
             subgroup_stages: subgroup,

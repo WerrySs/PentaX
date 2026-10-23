@@ -52,7 +52,7 @@ fn state(words: &[u32]) -> draw::GraphicsState {
     let original = bytes(words);
     draw::plan_commands(
         &[&original],
-        draw::GraphicsState::empty(),
+        draw::GraphicsState::for_new_processor(),
         &Default::default(),
     )
     .unwrap()
@@ -143,7 +143,7 @@ fn a_late_nested_grammar_or_gpu_read_failure_precedes_every_prefix_write_and_sta
         let mut actual = [0; 4];
         memory.read(base + 0x3000, &mut actual).unwrap();
         assert_eq!(actual, [0xa5; 4]);
-        assert_eq!(driver.graphics, draw::GraphicsState::empty());
+        assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
         assert_eq!(driver.graphics_owner, None);
         assert!(driver.frame.reset_before_graphics);
         assert!(!driver.poisoned);
@@ -172,7 +172,10 @@ fn nested_closure_and_combined_capture_planning_capacities_share_the_existing_se
     .unwrap();
     let capture = captured.usage();
     let plan = captured
-        .plan(draw::GraphicsState::empty(), &Default::default())
+        .plan(
+            draw::GraphicsState::for_new_processor(),
+            &Default::default(),
+        )
         .unwrap();
     let prepared = plan.usage();
     assert!(
@@ -203,7 +206,7 @@ fn nested_closure_and_combined_capture_planning_capacities_share_the_existing_se
         let mut actual = [0; 4];
         memory.read(base + 0x7000, &mut actual).unwrap();
         assert_eq!(actual, [0xa5; 4]);
-        assert_eq!(driver.graphics, draw::GraphicsState::empty());
+        assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
         assert_eq!(driver.graphics_owner, None);
         assert!(!driver.poisoned);
         assert_eq!(driver.usage.written_bytes, 0);
@@ -241,7 +244,7 @@ fn nested_register_arrays_read_after_actual_prefix_writes_and_late_alias_failure
         let result = driver.submit_graphics(&mut memory, &[range(base + 0x1000, &root)]);
         if late_alias {
             assert_eq!(result, Err(Failure::Memory));
-            assert_eq!(driver.graphics, draw::GraphicsState::empty());
+            assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
             assert!(driver.poisoned);
             let before = driver.usage();
             assert_eq!(
@@ -320,7 +323,7 @@ fn nested_full_source_including_skipped_chain_tail_excludes_a_real_physical_alia
     let mut actual = [0; 4];
     memory.read(base + 0x810, &mut actual).unwrap();
     assert_eq!(actual, [0xa5; 4]);
-    assert_eq!(driver.graphics, draw::GraphicsState::empty());
+    assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
     assert_eq!(driver.graphics_owner, None);
     assert!(!driver.poisoned);
     assert_eq!((driver.usage.draws, driver.usage.written_bytes), (0, 0));
@@ -392,7 +395,7 @@ fn repeated_refused_nested_captures_consume_session_attempt_budgets_before_any_e
         let mut actual = [0; 4];
         memory.read(base + 0x3000, &mut actual).unwrap();
         assert_eq!(actual, [0xa5; 4]);
-        assert_eq!(driver.graphics, draw::GraphicsState::empty());
+        assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
         assert_eq!(driver.graphics_owner, None);
         assert!(!driver.poisoned);
         assert_eq!((driver.usage.draws, driver.usage.written_bytes), (0, 0));

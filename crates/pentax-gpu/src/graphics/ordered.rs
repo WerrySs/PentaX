@@ -140,6 +140,12 @@ impl OrderedCommands {
             finished: false,
         })
     }
+    /// Existing sealed stream and actual ordered cursor state, not completion
+    /// or the static plan's future final state. No copy, read or new authority.
+    pub fn diagnostic_view(&self) -> (&[u8], &GraphicsState) {
+        (self.program.diagnostic_bytes(), &self.state)
+    }
+
     pub fn static_actions(&self) -> &[Action] {
         self.plan.actions()
     }

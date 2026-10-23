@@ -46,6 +46,76 @@ impl fmt::Debug for GraphicsState {
     }
 }
 impl GraphicsState {
+    /// Only processor fields assigned by the public GuestGpu constructor and
+    /// its SuspendPoint Reset. Detached state and packet reset contracts stay
+    /// separate; this factory invents no other register or memory authority.
+    pub const fn for_new_processor() -> Self {
+        Self {
+            instances: Some(1),
+            index_type: Some(IndexType::U16),
+            index_base: Some(0),
+            index_count: Some(0),
+            draw_indirect_base: Some(0),
+            ..Self::empty()
+        }
+    }
+    /// Private diagnostic format: context, saved context and SH entries each
+    /// use one known byte plus little-endian u32. Ten scalar entries use one
+    /// known byte plus u64, followed by the context-pushed byte. Unknown values
+    /// have zero storage and remain explicitly unknown. This grants no access.
+    pub const DIAGNOSTIC_SNAPSHOT_BYTES: usize = (0x400 * 2 + 0x100) * 5 + 10 * 9 + 1;
+
+    /// Borrow the actual immutable draw snapshot, never a plan's future final state.
+    pub fn diagnostic_draw_state(draw: &super::Draw) -> &Self {
+        &draw.state
+    }
+
+    /// Candidates only, decoded by the same checked pure VS/PS address path
+    /// used during draw preparation. These grant no GPU read authority and
+    /// do not identify a failing stage or prove a complete shader extent.
+    pub fn diagnostic_shader_addresses(&self) -> [Option<u64>; 2] {
+        [
+            super::prepare::shader_address(self, 0xc8).ok(),
+            super::prepare::shader_address(self, 0x08).ok(),
+        ]
+    }
+
+    pub fn diagnostic_snapshot(&self, output: &mut [u8]) -> bool {
+        if output.len() != Self::DIAGNOSTIC_SNAPSHOT_BYTES {
+            return false;
+        }
+        let mut at = 0;
+        for bank in [&self.context[..], &self.saved_context[..], &self.sh[..]] {
+            for value in bank {
+                output[at] = u8::from(value.is_some());
+                output[at + 1..at + 5].copy_from_slice(&value.unwrap_or(0).to_le_bytes());
+                at += 5;
+            }
+        }
+        // Scalar order is part of this versioned data-only format.
+        for value in [
+            self.primitive.map(u64::from),
+            self.index_offset.map(u64::from),
+            self.primitive_restart.map(u64::from),
+            self.ge_control.map(u64::from),
+            self.ge_user_vgpr.map(u64::from),
+            self.instances.map(u64::from),
+            self.index_type.map(|kind| match kind {
+                IndexType::U16 => 0,
+                IndexType::U32 => 1,
+            }),
+            self.index_base,
+            self.index_count.map(u64::from),
+            self.draw_indirect_base,
+        ] {
+            output[at] = u8::from(value.is_some());
+            output[at + 1..at + 9].copy_from_slice(&value.unwrap_or(0).to_le_bytes());
+            at += 9;
+        }
+        output[at] = u8::from(self.context_pushed);
+        true
+    }
+
     pub const fn empty() -> Self {
         Self {
             context: [None; 0x400],
@@ -179,5 +249,46 @@ impl GraphicsState {
             _ => return Err(Error::Unsupported("graphics register")),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "state_initialization_tests.rs"]
+mod initialization_tests;
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_state_preserves_unknown_zero_saved_banks_and_full_width_without_authority() {
+        let mut state = GraphicsState::empty();
+        state.write(RegisterSpace::Context, 0x80, 0).unwrap();
+        state.write(RegisterSpace::Sh, 0x08, 0x1357_2468).unwrap();
+        state
+            .context_operation(crate::context_state::Operation::PushClear)
+            .unwrap();
+        state.index_base = Some(0xfedc_ba98_7654_3210);
+        let before = state;
+        let mut bytes = vec![0xa5; GraphicsState::DIAGNOSTIC_SNAPSHOT_BYTES];
+        assert!(state.diagnostic_snapshot(&mut bytes));
+        assert_eq!(&bytes[0x80 * 5..0x80 * 5 + 5], &[0; 5]);
+        assert_eq!(
+            &bytes[(0x400 + 0x80) * 5..(0x400 + 0x80) * 5 + 5],
+            &[1, 0, 0, 0, 0]
+        );
+        let sh = (0x800 + 8) * 5;
+        assert_eq!(&bytes[sh..sh + 5], &[1, 0x68, 0x24, 0x57, 0x13]);
+        let base = (0x400 * 2 + 0x100) * 5 + 7 * 9;
+        assert_eq!(bytes[base], 1);
+        assert_eq!(
+            &bytes[base + 1..base + 9],
+            &0xfedc_ba98_7654_3210u64.to_le_bytes()
+        );
+        assert_eq!(bytes.last(), Some(&1));
+        let mut short = [0xa5; 4];
+        assert!(!state.diagnostic_snapshot(&mut short));
+        assert_eq!(short, [0xa5; 4]);
+        assert_eq!(state, before);
     }
 }

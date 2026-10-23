@@ -481,6 +481,11 @@ impl CapturedCommands {
     pub fn command_ranges(&self) -> &[CommandRange] {
         &self.sources
     }
+    /// Data-only diagnostic view of the sealed expanded stream. This is not
+    /// an original root image, a new memory permission or execution authority.
+    pub fn diagnostic_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
     pub fn into_command_ranges(self) -> Vec<CommandRange> {
         self.sources
     }

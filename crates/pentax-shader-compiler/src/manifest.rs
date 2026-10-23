@@ -93,7 +93,12 @@ pub struct BufferElement {
     pub read: bool,
     pub written: bool,
     pub scalar: bool,
+    /// Guest access flags reported by resource discovery (GLC/DLC).
     pub coherent: bool,
+    /// Actual GLSL450 Coherent decoration on the whole descriptor array.
+    /// A surviving compute workgroup barrier can require this independently
+    /// of guest cache flags; it grants no guest resource or memory authority.
+    pub effective_coherent: bool,
     /// Largest immediate byte extent of any access (source `max_byte_extent`).
     pub max_byte_extent: u32,
     pub first_use_pc: u32,

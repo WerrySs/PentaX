@@ -219,7 +219,16 @@ fn check_contract_inner(
     }
     let size = manifest.required_subgroup_size();
     let supported_size = size == Some(32) || stage == ShaderStage::Compute && size == Some(64);
-    if (required.subgroup_basic() || required.subgroup_ballot()) && !supported_size
+    // BASIC alone can describe a real host-subgroup completion barrier,
+    // independent of guest/native lane numbering. Only the opaque compiler's
+    // width-unconstrained compute product receives this qualification.
+    let width_independent_basic = stage == ShaderStage::Compute
+        && size.is_none()
+        && required.subgroup_basic()
+        && !required.subgroup_ballot()
+        && !required.subgroup_arithmetic();
+    if (required.subgroup_basic() || required.subgroup_ballot() || required.subgroup_arithmetic())
+        && !(supported_size || width_independent_basic)
         || size.is_some() && !supported_size
     {
         return Err(VulkanError::InvalidCompilerContract("subgroup size"));
@@ -558,6 +567,53 @@ mod tests {
         assert!(shader.manifest().required_features().subgroup_basic());
         assert!(shader.manifest().required_features().subgroup_ballot());
         validate_optional("compute-anylane64-original", &shader);
+
+        // A real VSCNT and uniform S_BARRIER need BASIC support, while their
+        // manifest does not require a particular native subgroup width.
+        let mut common = CommonDescription::new(WaveSize::Wave64);
+        common.user_sgpr_count = 4;
+        common.buffers.push(BufferDescription {
+            user_sgpr: 0,
+            stride: 0,
+            swizzle: false,
+            index_stride: 0,
+            access: BufferAccess::WriteOnly,
+        });
+        let words = [
+            binary(0x25, 1, 137, 0),
+            binary(0x1a, 2, 130, 0),
+            0xe070_1000,
+            (128 << 24) | (1 << 8) | 2,
+            0xbbfd_0000,
+            0xbf8a_0000,
+            0xbf81_0000,
+        ];
+        let mut budget = Budget::new(super::super::GpuLimits::default());
+        let barrier = one(
+            &words,
+            StageDescription::Compute(ComputeDescription {
+                common,
+                workgroup_size: [64, 1, 1],
+                thread_ids: 1,
+                group_id: [false; 3],
+                workgroup_register: 4,
+                tg_size: false,
+                float_mode: 0xc0,
+                shared_memory_bytes: 0,
+            }),
+            ShaderStage::Compute,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(barrier.manifest().required_subgroup_size(), None);
+        assert!(barrier.manifest().required_features().subgroup_basic());
+        assert!(!barrier.manifest().required_features().subgroup_ballot());
+        assert!(!barrier.manifest().required_features().subgroup_arithmetic());
+        assert!(!barrier.manifest().buffers()[0].coherent);
+        assert!(barrier.manifest().buffers()[0].effective_coherent);
+        assert!(check_contract(&barrier, ShaderStage::Vertex).is_err());
+        assert!(check_graphics_contract(&barrier, ShaderStage::Pixel).is_err());
+        validate_optional("compute-basic-barrier-width-unconstrained", &barrier);
     }
 
     #[test]

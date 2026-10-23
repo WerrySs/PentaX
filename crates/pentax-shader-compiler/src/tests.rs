@@ -8,6 +8,7 @@ mod interpolation;
 mod logical_wave64;
 mod matrix;
 mod shared_memory;
+mod storage_barrier;
 use super::*;
 use pentax_shader::ShaderStage;
 

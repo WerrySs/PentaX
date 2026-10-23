@@ -152,3 +152,19 @@ AMD's RDNA2 ISA reference documents LDS and workgroup synchronization:
 https://docs.amd.com/v/u/en-US/rdna2-shader-instruction-set-architecture
 The bounded uniform-control policy and original test programs are PentaX
 modifications; no proprietary shader or specification prose is copied.
+
+Original PentaX compute storage-barrier correction
+------------------------------------------------
+The internal coherent StorageBuffer decoration and UniformMemory semantics for
+surviving compute workgroup barriers are original Rust changes based on public
+Khronos SPIR-V Memory Semantics/Coherent and GLSL shader memory control:
+https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html
+https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html
+The accompanying programs are original synthetic fixtures. Existing upstream
+licensing and attribution remain in force. No guest or private shader payload
+is used in these fixtures.
+
+Vulkan Basic Group Operations includes Subgroup control barriers. The original
+StoreCompletion feature declaration reports that actual emitted requirement
+separately from native lane/ballot width requirements:
+https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-group-operations

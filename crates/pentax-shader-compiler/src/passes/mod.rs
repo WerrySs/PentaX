@@ -234,10 +234,18 @@ pub(crate) struct Layout {
     pub memory_offset_count: u32,
     pub push_data_start: Option<u32>,
     pub shader_data_binding: bool,
+    /// Derived from surviving compute IR after DCE, not raw instruction bytes.
+    pub compute_workgroup_storage_barrier: bool,
+    /// Actual host-subgroup control barrier; does not require a guest wave size.
+    pub subgroup_store_completion: bool,
     pub undefined_reads: u32,
 }
 
 impl Layout {
+    pub fn buffers_coherent(&self) -> bool {
+        self.compute_workgroup_storage_barrier || self.buffers.iter().any(|buffer| buffer.coherent)
+    }
+
     pub fn shader_data_dwords(&self) -> u32 {
         self.memory_offset_dword + self.memory_offset_count.div_ceil(4)
     }
@@ -567,6 +575,10 @@ pub(crate) fn collect_info(
             budget.charge(1)?;
             let inst = *ir.inst(id);
             match inst.op {
+                Op::StoreCompletion => layout.subgroup_store_completion = true,
+                Op::Barrier if stage == ShaderStage::Compute => {
+                    layout.compute_workgroup_storage_barrier = true;
+                }
                 Op::GetAttribute | Op::GetInterpolationParameter => {
                     let ps = profile
                         .pixel()

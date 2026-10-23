@@ -92,7 +92,7 @@ fn driver_write_then_array_publishes_actual_compute_and_graphics_banks() {
     let direct = bytes(&[0xc001_6900, 0x318, 17]);
     let expected = draw::plan_commands(
         &[&direct],
-        draw::GraphicsState::empty(),
+        draw::GraphicsState::for_new_processor(),
         &Default::default(),
     )
     .unwrap()

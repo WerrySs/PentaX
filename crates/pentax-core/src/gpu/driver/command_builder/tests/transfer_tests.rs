@@ -179,7 +179,7 @@ fn transfers_read_actual_prior_writes_feed_live_arrays_and_repeat_whole_immediat
             if array && graphics {
                 let expected = draw::plan_commands(
                     &[&bytes(&[0xc001_6900, register, 17])],
-                    draw::GraphicsState::empty(),
+                    draw::GraphicsState::for_new_processor(),
                     &Default::default(),
                 )
                 .unwrap()

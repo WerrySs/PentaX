@@ -1928,3 +1928,22 @@ Primary sources: [direct DCB ABI](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a
 [scoped registrations](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/libAgcDriver.cpp),
 [DS translation](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/frontend/translate/Memory.cpp),
 and [Workgroup emission](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterMemory.cpp).
+
+
+### Qualified graphics processor reset defaults
+
+The public KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 initializes index type, index
+extent, index base, instance count and indirect base in `CommandProcessor::Reset`.
+The constructor and suspend path invoke that reset. PentaX admits those five
+values at the corresponding trusted boundaries while preserving detached unknown
+state and existing context-clear semantics. This comparison does not establish
+that a reset value caused a particular game's graphics refusal.
+
+The original Rust refusal classifier, bounded private diagnostics and regression
+fixtures preserve explicit unsupported cases and memory ownership checks.
+Detailed reset attribution is retained in the GPU crate NOTICE. Storage barrier
+translation and Vulkan subgroup contracts are documented in the shader compiler
+and platform notices; BASIC capability does not establish an exact subgroup width.
+
+Primary source: [graphics processor initialization and reset](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp).

@@ -42,7 +42,7 @@ struct Configuration {
     pixel: PixelRegisters,
 }
 
-fn shader_address(state: &GraphicsState, low: u32) -> Result<u64, Error> {
+pub(super) fn shader_address(state: &GraphicsState, low: u32) -> Result<u64, Error> {
     let lo = sh(state, low)?;
     let hi = sh(state, low + 1)?;
     if hi > 255 {

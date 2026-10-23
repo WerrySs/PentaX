@@ -47,6 +47,8 @@ mod packet_metadata;
 mod presentation;
 #[path = "driver/private_compute_failure.rs"]
 mod private_compute_failure;
+#[path = "driver/private_graphics_failure.rs"]
+mod private_graphics_failure;
 #[path = "driver/register_execution.rs"]
 mod register_execution;
 #[path = "driver/video_events.rs"]
@@ -368,7 +370,7 @@ impl Failure {
                     | "graphics shader resources1"
                     | "graphics shader scratch/LDS/resources2" => "graphics-shader-profile",
                     "command byte alignment" => "graphics-command",
-                    _ => "graphics-unsupported",
+                    _ => private_graphics_failure::unsupported_category(reason),
                 },
             },
             Self::Vulkan(error) => match error {
@@ -416,7 +418,7 @@ impl Driver {
             command_exclusions: Vec::new(),
             command_exclusion_bytes: 0,
             gds: None,
-            graphics: draw::GraphicsState::empty(),
+            graphics: draw::GraphicsState::for_new_processor(),
             lod_stats: None,
             graphics_owner: None,
             graphics_execution: None,

@@ -263,6 +263,11 @@ impl Program {
         })
     }
 
+    /// Borrow existing sealed bytes for a private diagnostic; no fresh read or authority.
+    pub(crate) fn diagnostic_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     pub fn array_count(&self) -> usize {
         self.packets
             .iter()

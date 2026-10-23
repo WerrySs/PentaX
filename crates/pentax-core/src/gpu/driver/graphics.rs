@@ -4,6 +4,7 @@
 // Source: pinned agc.cpp submit_command_buffer and graphicsRun.cpp Submit;
 // draw/state contracts are documented by pentax-gpu/src/graphics/README.md.
 
+use super::private_graphics_failure as diagnostic;
 use super::{Driver, Failure, NativeRange, PausedNativeMemory, add, compute, draw};
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -100,7 +101,15 @@ impl Driver {
             return Err(Failure::UnsupportedQueue);
         }
         // Preserve the synchronous route for every existing no-wait stream.
-        match self.advance_graphics_execution(memory, &mut execution, kernel, clock)? {
+        let advanced = self.advance_graphics_execution(memory, &mut execution, kernel, clock);
+        let advanced = match advanced {
+            Ok(advanced) => advanced,
+            Err(error) => {
+                self.record_graphics_execution_failure(memory, &execution, &error);
+                return Err(error);
+            }
+        };
+        match advanced {
             GraphicsAdvance::Complete(value) => Ok(value),
             GraphicsAdvance::Waiting => {
                 self.poisoned |= execution.effect_started;
@@ -256,10 +265,30 @@ impl Driver {
             capture.work,
             self.limits.max_preparation_work,
         )?;
-        let captured = captured_attempt.map_err(|failure| match failure.error {
-            draw::Error::Memory(_) => Failure::Memory,
-            error => Failure::GraphicsPreparation(error),
-        })?;
+        let captured = match captured_attempt {
+            Ok(captured) => captured,
+            Err(failure) => {
+                let error = match failure.error {
+                    draw::Error::Memory(_) => Failure::Memory,
+                    error => Failure::GraphicsPreparation(error),
+                };
+                if let Some(root) = roots.first().copied() {
+                    diagnostic::capture_from_env(
+                        memory,
+                        diagnostic::Source::LiveRoot(root),
+                        diagnostic::Context {
+                            retired: &self.graphics,
+                            selected: None,
+                            shader_words: self.limits.graphics.max_shader_words,
+                            reset_before_graphics: self.frame.reset_before_graphics,
+                            phase: diagnostic::Phase::CaptureAdmission,
+                        },
+                        &error,
+                    );
+                }
+                return Err(error);
+            }
+        };
         drop(roots);
         Ok(Some(CapturedGraphicsAdmission {
             owner: memory.owner_id(),
@@ -333,22 +362,36 @@ impl Driver {
                     .saturating_sub(self.usage.preparation_work),
             );
         let initial = if self.frame.reset_before_graphics {
-            draw::GraphicsState::empty()
+            draw::GraphicsState::for_new_processor()
         } else {
             self.graphics
         };
-        let plan = if captured.contains_arrays() || captured.contains_draw_arguments() {
-            GraphicsCommands::Ordered(
-                captured
-                    .prepare_ordered(initial, &commands)
-                    .map_err(Failure::GraphicsPreparation)?,
-            )
+        let planned = if captured.contains_arrays() || captured.contains_draw_arguments() {
+            captured
+                .prepare_ordered(initial, &commands)
+                .map(GraphicsCommands::Ordered)
         } else {
-            GraphicsCommands::Static {
-                plan: captured
-                    .plan(initial, &commands)
-                    .map_err(Failure::GraphicsPreparation)?,
-                action: 0,
+            captured
+                .plan(initial, &commands)
+                .map(|plan| GraphicsCommands::Static { plan, action: 0 })
+        };
+        let plan = match planned {
+            Ok(plan) => plan,
+            Err(error) => {
+                let failure = Failure::GraphicsPreparation(error);
+                diagnostic::capture_from_env(
+                    memory,
+                    diagnostic::Source::SealedExpanded(captured.diagnostic_bytes()),
+                    diagnostic::Context {
+                        retired: &self.graphics,
+                        selected: Some(diagnostic::SelectedState::HeadInitial(&initial)),
+                        shader_words: self.limits.graphics.max_shader_words,
+                        reset_before_graphics: self.frame.reset_before_graphics,
+                        phase: diagnostic::Phase::HeadPlanning,
+                    },
+                    &failure,
+                );
+                return Err(failure);
             }
         };
         self.usage.preparation_work = add(
@@ -475,6 +518,64 @@ impl Driver {
             wait_generation: 0,
         }))
     }
+    fn record_graphics_execution_failure(
+        &self,
+        memory: &PausedNativeMemory<'_>,
+        execution: &GraphicsExecution,
+        failure: &Failure,
+    ) {
+        if execution.owner != memory.owner_id() {
+            return;
+        }
+        match &execution.plan {
+            GraphicsCommands::Ordered(ordered) => {
+                let (bytes, current) = ordered.diagnostic_view();
+                diagnostic::capture_from_env(
+                    memory,
+                    diagnostic::Source::SealedExpanded(bytes),
+                    diagnostic::Context {
+                        retired: &self.graphics,
+                        selected: Some(diagnostic::SelectedState::OrderedCurrent(current)),
+                        shader_words: self.limits.graphics.max_shader_words,
+                        reset_before_graphics: self.frame.reset_before_graphics,
+                        phase: diagnostic::Phase::Execution,
+                    },
+                    failure,
+                );
+            }
+            GraphicsCommands::Static { plan, action } => {
+                // Static plans no longer own their original byte stream. Do
+                // not substitute the future final_state for a retired state.
+                if let Some(root) = execution.sources.first().copied() {
+                    let selected = action
+                        .checked_sub(1)
+                        .and_then(|index| plan.actions().get(index))
+                        .and_then(|action| match action {
+                            draw::Action::Draw(index) => plan.draws().get(*index),
+                            _ => None,
+                        })
+                        .map(|draw| {
+                            diagnostic::SelectedState::DrawSnapshot(
+                                draw::GraphicsState::diagnostic_draw_state(draw),
+                            )
+                        });
+                    diagnostic::capture_from_env(
+                        memory,
+                        diagnostic::Source::LiveRoot(root),
+                        diagnostic::Context {
+                            retired: &self.graphics,
+                            selected,
+                            shader_words: self.limits.graphics.max_shader_words,
+                            reset_before_graphics: self.frame.reset_before_graphics,
+                            phase: diagnostic::Phase::Execution,
+                        },
+                        failure,
+                    );
+                }
+            }
+        }
+    }
+
     fn graphics_selected_wait(
         &self,
         memory: &PausedNativeMemory<'_>,
@@ -1501,6 +1602,7 @@ impl Driver {
                 Ok(GraphicsProgress::Waiting(next))
             }
             Err(error) => {
+                self.record_graphics_execution_failure(memory, &execution, &error);
                 self.graphics_execution = Some(execution);
                 self.graphics_phase = GraphicsPhase::Failed;
                 self.poisoned = true;

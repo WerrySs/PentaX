@@ -518,3 +518,29 @@ preserve logical Wave64 across native32 subgroups without granting native64
 ballot or shuffle support. GDS, LDS atomics and other DS widths remain unsupported.
 Original physical tests check actual output values and guards; source inspection
 and compilation alone do not establish physical correctness or game rendering.
+
+
+### Graphics initialization and refusal evidence
+
+A trusted new graphics processor starts with the five public reset values:
+U16 indices, zero index extent and base, one instance and zero indirect base.
+The same initialization occurs at the qualified suspend boundary. Detached state
+remains unknown; context clearing and the separate processor-reset event retain
+their existing scopes. A zero base grants no permission to read guest memory.
+
+Graphics refusals expose a closed set of static reason tokens. Unknown reasons
+keep the generic category. An optional, default-off local diagnostic records
+bounded state and command evidence before failure-owned data is released. Sealed
+command bytes, consumed draw state and post-failure live reads carry distinct
+provenance. Shader prefixes are candidates, not proof of the failing stage.
+Diagnostic output cannot replace the original failure or authorize execution.
+Private captures are excluded from project publication and release artifacts.
+
+Compute workgroup barriers include storage-buffer ordering for admitted storage
+accesses. Effective host coherence is tracked separately from guest cache flags.
+Subgroup-scoped completion reports the BASIC requirement without imposing an
+exact subgroup width. Lane and ballot programs retain their explicit width and
+feature checks. Unsupported guest cache modes and register fields remain refused.
+Original physical fixtures cover cross-invocation storage visibility and implicit
+image sampling with both LOD-query components. Their presence in source does not
+establish a passed GPU run or a rendered commercial game frame.

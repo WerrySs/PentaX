@@ -180,6 +180,7 @@ fn manifest_of(
                 written: buffer.written,
                 scalar: buffer.scalar,
                 coherent: buffer.coherent,
+                effective_coherent: layout.buffers_coherent(),
                 max_byte_extent: buffer.max_byte_extent,
                 first_use_pc: buffer.first_use_pc,
             },

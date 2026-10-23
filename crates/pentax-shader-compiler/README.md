@@ -300,3 +300,34 @@ GDS, atomics, other DS widths and LDS in branching/looping control flow remain
 explicit typed refusals. CPU contract tests inspect original decoded shaders,
 post-SSA data dependencies and actual emitted storage/barrier operations;
 they do not establish device execution or a commercial rendered frame.
+
+Compute workgroup barriers and storage buffers
+---------------------------------------------
+A surviving compute `S_BARRIER` emits a Workgroup execution/memory barrier with
+AcquireRelease semantics for both WorkgroupMemory and UniformMemory. The
+StorageBuffer descriptor array receives the GLSL450 Coherent decoration for
+that compiled module. `BufferElement.coherent` still records guest GLC/DLC;
+`effective_coherent` records the actual array decoration, including the internal
+barrier requirement. Resource discovery and guest coherent-flag admission are
+unchanged.
+
+This memory-class correction preserves the existing execution scope and control
+flow policy. The original physical consumer is straight-line with a uniform
+workgroup rendezvous. General divergent or looping `S_BARRIER` convergence is
+not proved by this change; the existing multi-block LDS refusal remains. No
+standalone VSCNT logical-wave64 synchronization, R1 acceptance, image visibility,
+or device-wide execution rendezvous is added.
+
+The surviving `StoreCompletion` from a real VSCNT wait emits a host Subgroup
+control barrier and declares BASIC support. This is independent of an exact
+native wave-width requirement: the following Workgroup barrier, rather than
+that Subgroup barrier alone, orders the original128-invocation consumer.
+A compute module with only this BASIC operation can retain a width-unconstrained
+manifest. Native lane/ballot operations keep their actual exact-size contract.
+
+For manifest-driven compute admission, no required native size means no hidden
+native32 constraint: BASIC stage/operation support is still checked. Genuine
+native lane/ballot size32/64 contracts remain exact. The retained original
+backend fixture/reset wrapper and real fragment LOD feedback explicitly keep
+their qualified native32 contracts. This does not turn a standalone VSCNT
+Subgroup barrier into a logical64 or Workgroup visibility proof.

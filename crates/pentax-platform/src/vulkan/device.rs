@@ -60,12 +60,12 @@ fn check_index_value(full: bool, limit: u32, maximum: u32) -> Result<(), VulkanE
 }
 
 fn subgroup_supported(
-    size: u32,
+    size: Option<u32>,
     stages: vk::ShaderStageFlags,
     ballot: vk::ShaderStageFlags,
     properties: &vk::PhysicalDeviceSubgroupProperties<'_>,
 ) -> bool {
-    properties.subgroup_size == size
+    size.is_none_or(|size| properties.subgroup_size == size)
         && properties.supported_stages.contains(stages)
         && properties
             .supported_operations
@@ -82,7 +82,7 @@ pub(super) struct DeviceRequirements {
     pub ballot_stages: vk::ShaderStageFlags,
     pub arithmetic_stages: vk::ShaderStageFlags,
     pub fragment_stores_and_atomics: bool,
-    // None preserves the existing native32 contract for graphics/old callers.
+    // None imposes no width constraint; requested stage/operation support still applies.
     pub required_subgroup_size: Option<u32>,
 }
 
@@ -96,6 +96,9 @@ impl Device {
             DeviceRequirements {
                 subgroup_stages,
                 ballot_stages,
+                // The retained original fixture/reset callers have a native32
+                // contract. New manifest-driven callers use open_required.
+                required_subgroup_size: (!subgroup_stages.is_empty()).then_some(32),
                 ..Default::default()
             },
             budget,
@@ -112,10 +115,10 @@ impl Device {
             fragment_stores_and_atomics,
             required_subgroup_size,
         } = requirements;
-        let subgroup_size = required_subgroup_size.unwrap_or(32);
-        if !matches!(subgroup_size, 32 | 64)
+        if required_subgroup_size.is_some_and(|size| !matches!(size, 32 | 64))
             || required_subgroup_size.is_some() && subgroup_stages.is_empty()
-            || subgroup_size == 64 && subgroup_stages != vk::ShaderStageFlags::COMPUTE
+            || required_subgroup_size == Some(64)
+                && subgroup_stages != vk::ShaderStageFlags::COMPUTE
         {
             return Err(VulkanError::InvalidCompilerContract(
                 "required subgroup size",
@@ -240,7 +243,12 @@ impl Device {
                 continue;
             }
             if !subgroup_stages.is_empty()
-                && !subgroup_supported(subgroup_size, subgroup_stages, ballot_stages, &subgroup)
+                && !subgroup_supported(
+                    required_subgroup_size,
+                    subgroup_stages,
+                    ballot_stages,
+                    &subgroup,
+                )
             {
                 continue;
             }
@@ -442,22 +450,44 @@ mod tests {
             .supported_operations(
                 vk::SubgroupFeatureFlags::BASIC | vk::SubgroupFeatureFlags::BALLOT,
             );
-        assert!(subgroup_supported(32, compute, compute, &reported));
-        assert!(!subgroup_supported(64, compute, compute, &reported));
+        assert!(subgroup_supported(Some(32), compute, compute, &reported));
+        assert!(!subgroup_supported(Some(64), compute, compute, &reported));
+        assert!(subgroup_supported(None, compute, compute, &reported));
         reported.subgroup_size = 64;
-        assert!(subgroup_supported(64, compute, compute, &reported));
-        assert!(!subgroup_supported(32, fragment, fragment, &reported));
+        assert!(subgroup_supported(None, compute, compute, &reported));
+        assert!(subgroup_supported(Some(64), compute, compute, &reported));
+        assert!(!subgroup_supported(Some(32), fragment, fragment, &reported));
         reported.supported_operations = vk::SubgroupFeatureFlags::BASIC;
-        assert!(!subgroup_supported(64, compute, compute, &reported));
+        assert!(!subgroup_supported(Some(64), compute, compute, &reported));
         assert!(subgroup_supported(
-            64,
+            Some(64),
             compute,
             vk::ShaderStageFlags::empty(),
             &reported
         ));
+        assert!(subgroup_supported(
+            None,
+            compute,
+            vk::ShaderStageFlags::empty(),
+            &reported
+        ));
+        reported.supported_operations = vk::SubgroupFeatureFlags::BALLOT;
+        assert!(!subgroup_supported(
+            None,
+            compute,
+            vk::ShaderStageFlags::empty(),
+            &reported
+        ));
+        reported.supported_operations = vk::SubgroupFeatureFlags::BASIC;
         reported.supported_stages = fragment;
         assert!(!subgroup_supported(
-            64,
+            None,
+            compute,
+            vk::ShaderStageFlags::empty(),
+            &reported
+        ));
+        assert!(!subgroup_supported(
+            Some(64),
             compute,
             vk::ShaderStageFlags::empty(),
             &reported

@@ -536,3 +536,7 @@ mod compute_resources_tests;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "gpu/lds_hardware_tests.rs"]
 mod lds_hardware_tests;
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "gpu/storage_barrier_hardware_tests.rs"]
+mod storage_barrier_hardware_tests;

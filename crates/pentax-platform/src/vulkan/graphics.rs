@@ -427,6 +427,9 @@ pub(super) fn run_with_lod(
                 vk::ShaderStageFlags::empty()
             },
             fragment_stores_and_atomics: has_feedback,
+            // Real fragment LOD reductions/election retain their qualified
+            // native32 profile, independent of width-unconstrained barriers.
+            required_subgroup_size: has_feedback.then_some(32),
             ..Default::default()
         },
         &mut budget,
