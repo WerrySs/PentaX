@@ -246,6 +246,7 @@ fn compute_submission_returns_one_real_token_and_background_progress_preserves_c
             assert_eq!(session.graphics_usage().calls, calls + 1);
             assert!(!session.pump_compute_queues().unwrap());
             assert!(!session.revoke_graphics_continuations_on_teardown().unwrap());
+            Ok::<_, ()>(())
         },
     )
     .unwrap();

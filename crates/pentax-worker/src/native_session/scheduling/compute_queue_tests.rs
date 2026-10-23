@@ -140,6 +140,7 @@ fn all_parked_compute_pending_retries_with_existing_idle_cap_and_empty_queues_ke
                 owner.revoke_graphics_continuations_on_teardown().unwrap(),
                 queued
             );
+            Ok::<_, ()>(())
         })
         .unwrap();
     }

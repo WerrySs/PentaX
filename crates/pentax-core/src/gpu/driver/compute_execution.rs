@@ -693,7 +693,7 @@ impl Driver {
             )?;
             if let Some(mapped) = self.shaders.mapping(memory.owner_id(), address) {
                 if mapped.kind != 0 {
-                    return Err(Failure::Shader(super::shaders::ShaderFailure::Stage));
+                    return Err(Failure::Shader(crate::gpu::shaders::ShaderFailure::Stage));
                 }
                 // Zero size follows the source's unspecified-size metadata
                 // behavior. A nonzero declared extent bounds real decoding.

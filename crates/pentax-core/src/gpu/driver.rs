@@ -13,11 +13,10 @@ use pentax_platform::{
     vulkan::GpuLimits,
 };
 
-#[path = "driver/compute_execution.rs"]
-mod compute_execution;
-pub(crate) use compute_execution::ComputePump;
 #[path = "driver/command_builder.rs"]
 mod command_builder;
+#[path = "driver/compute_execution.rs"]
+mod compute_execution;
 #[path = "driver/flip_encoder.rs"]
 mod flip_encoder;
 pub(crate) use command_builder::CONTEXT_EXPORTS;
