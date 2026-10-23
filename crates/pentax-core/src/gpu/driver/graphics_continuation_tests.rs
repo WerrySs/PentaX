@@ -330,7 +330,7 @@ fn opaque_tickets_budget_retention_and_peer_failure_preserve_exact_owner_authori
     ));
     assert_eq!(driver.graphics_admissions.len(), before);
     assert!(!driver.poisoned);
-    let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 0x4000).unwrap();
+    let mut foreign = NativeAddressSpace::reserve_any(Default::default(), 0x10000).unwrap();
     assert!(matches!(
         driver.resume_graphics_execution(&mut foreign.pause().unwrap(), ticket, None, None),
         Err(Failure::Memory)
