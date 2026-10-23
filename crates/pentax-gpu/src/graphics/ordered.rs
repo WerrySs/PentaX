@@ -18,6 +18,7 @@ use crate::{
 #[allow(clippy::large_enum_variant)]
 pub enum OrderedStep {
     Array,
+    IndirectDraw,
     Draw(Draw),
     Memory(usize),
     Flip(Flip),
@@ -30,6 +31,8 @@ pub struct OrderedCommands {
     packet: usize,
     action: usize,
     pending: Option<crate::IndirectRegisters>,
+    pending_indirect: Option<super::IndirectDraw>,
+    max_vertices: u64,
     failed: bool,
     finished: bool,
 }
@@ -106,7 +109,7 @@ impl OrderedCommands {
         let mut static_limits = *limits;
         static_limits.max_host_bytes = host;
         static_limits.max_work = work;
-        let plan = super::plan_commands(&[&sanitized], initial, &static_limits)?;
+        let plan = super::commands::plan_ordered_commands(&[&sanitized], initial, &static_limits)?;
         if program
             .array_count()
             .checked_add(plan.actions().len())
@@ -129,6 +132,8 @@ impl OrderedCommands {
             packet: 0,
             action: 0,
             pending: None,
+            pending_indirect: None,
+            max_vertices: limits.max_vertices,
             failed: false,
             finished: false,
         })
@@ -164,6 +169,7 @@ impl OrderedCommands {
         if self.failed
             || !self.finished
             || self.pending.is_some()
+            || self.pending_indirect.is_some()
             || self.program.packet(self.packet).is_some()
         {
             return Err(Error::Unsupported("unfinished ordered graphics stream"));
@@ -187,8 +193,21 @@ impl OrderedCommands {
         self.failed = false;
         Ok(())
     }
+    pub fn resolve_indirect(&mut self, memory: &impl Memory) -> Result<Option<Draw>, Error> {
+        if self.failed {
+            return Err(Error::Unsupported("failed ordered graphics stream"));
+        }
+        self.failed = true;
+        let descriptor = self
+            .pending_indirect
+            .take()
+            .ok_or(Error::Unsupported("no current indirect draw"))?;
+        let result = descriptor.resolve(&mut self.state, memory, self.max_vertices)?;
+        self.failed = false;
+        Ok(result)
+    }
     pub fn next_step(&mut self) -> Result<Option<OrderedStep>, Error> {
-        if self.failed || self.pending.is_some() {
+        if self.failed || self.pending.is_some() || self.pending_indirect.is_some() {
             return Err(Error::Unsupported("unresolved ordered graphics stream"));
         }
         self.failed = true;
@@ -236,6 +255,10 @@ impl OrderedCommands {
                 continue;
             }
             match header.opcode() {
+                0x11 => {
+                    self.state.draw_indirect_base =
+                        Some(u64::from(word(2) & !7) | (u64::from(word(3) & 0xffff) << 32))
+                }
                 0x2f => self.state.instances = Some(word(1)),
                 0x7a => {
                     self.state.index_type = Some(if word(2) & 3 == 0 {
@@ -257,6 +280,15 @@ impl OrderedCommands {
                 }
                 _ => {}
             }
+            if header.raw() == 0xc003_2500 {
+                let Some(Action::IndirectDraw(descriptor)) = self.plan.actions().get(self.action)
+                else {
+                    return Err(Error::Unsupported("ordered indirect action alignment"));
+                };
+                self.action += 1;
+                self.pending_indirect = Some(*descriptor);
+                return Ok(Some(OrderedStep::IndirectDraw));
+            }
             let draw = matches!(header.opcode(), 0x27 | 0x35 | 0x2d);
             let memory = crate::memory_sync::packet_words(header.raw()).is_some()
                 || crate::marker::packet_words(header.raw()).is_some()
@@ -273,6 +305,9 @@ impl OrderedCommands {
                     _ => 1,
                 });
                 if count == 0 || self.state.instances == Some(0) {
+                    if matches!(self.plan.actions().get(self.action), Some(Action::LiveDraw)) {
+                        self.action += 1;
+                    }
                     continue;
                 }
             }
@@ -284,7 +319,7 @@ impl OrderedCommands {
                     .ok_or(Error::Unsupported("ordered graphics action alignment"))?;
                 self.action += 1;
                 return Ok(Some(match action {
-                    Action::Draw(_) if draw => {
+                    Action::Draw(_) | Action::LiveDraw if draw => {
                         // The immutable plan proves packet/action budgets. The
                         // execution product is materialized from the original
                         // packet and actual replayed state, never its snapshot.
@@ -362,6 +397,8 @@ fn materialize(
         })
     };
     Ok(Draw {
+        native_offsets: None,
+        indirect_arguments: None,
         state,
         vertex_count: count,
         instance_count: instances,
@@ -497,7 +534,9 @@ mod tests {
                     assert_eq!(draw.instance_count(), 2);
                     assert_eq!(draw.vertex_count(), if draws == 1 { 3 } else { 5 });
                 }
-                OrderedStep::Flip(_) => panic!("no original flip"),
+                OrderedStep::Flip(_) | OrderedStep::IndirectDraw => {
+                    panic!("no original flip/indirect draw")
+                }
             }
         }
         assert_eq!(draws, 2);

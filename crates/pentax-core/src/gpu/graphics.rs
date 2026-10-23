@@ -276,6 +276,17 @@ pub(super) fn execute_draw_admitted(
         )?;
         work = work.checked_add(index_work).ok_or(Error::Limit)?;
     }
+    if let Some(arguments) = draw.indirect_arguments() {
+        // The live argument snapshot is data, not backing authority. Keep its
+        // complete current owner/rights and physical output exclusion checked.
+        let argument_work = preflight_read_source(
+            paused,
+            arguments,
+            target,
+            remaining.checked_sub(work).ok_or(Error::Limit)?,
+        )?;
+        work = work.checked_add(argument_work).ok_or(Error::Limit)?;
+    }
     // Immutable copies alone do not authorize GPU access or target writeback.
     // Resolve both stages against this same paused owner and actual backing.
     // Their mutual read/read aliases remain legal and each upload is charged.

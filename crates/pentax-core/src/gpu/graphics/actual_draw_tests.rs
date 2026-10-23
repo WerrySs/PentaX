@@ -702,3 +702,6 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
 
 #[path = "actual_draw_tests/primitive.rs"]
 mod primitive;
+
+#[path = "actual_draw_tests/draw_indirect.rs"]
+mod draw_indirect;

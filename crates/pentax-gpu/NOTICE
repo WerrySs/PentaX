@@ -265,3 +265,14 @@ closed normalized memory/immediate domains, checked aggregate output versus
 maximum scratch storage, static/live/captured action alignment and original
 whole-stream refusal fixtures. No payload is captured early and no unsupported
 clock, GDS, register or discard behavior is replaced by invented success.
+The bounded single indexed-indirect descriptor and native shader offset
+integration additionally adapt public KytyPS5/KytyPS5
+revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp: CpOpDrawIndirect/SetBase
+  src/graphics/guest_gpu/graphicsRun.cpp: DrawIndirect/Multi/PatchIndirectDrawOffsets
+  src/graphics/host_gpu/renderer/renderDraw.cpp: native indirect fetch convention
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp#L869
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX's original bounded implementation uses sealed live
+metadata, source-ordered user-SGPR patches, checked count/index/instance fields,
+and explicit existing renderer/compiler profile refusals. Fixtures are original.

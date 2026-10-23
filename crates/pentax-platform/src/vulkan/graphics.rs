@@ -570,8 +570,8 @@ pub(super) fn run(
                 batch.raw,
                 indices.count(),
                 prepared.instance_count(),
-                0,
-                0,
+                0, // The uploaded index span already starts at the actual firstIndex.
+                prepared.vertex_offset(), // Native guest fetch consumes patched SGPRs once.
                 prepared.first_instance(),
             );
         } else {

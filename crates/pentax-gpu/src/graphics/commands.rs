@@ -68,6 +68,8 @@ impl Flip {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Draw(usize),
+    IndirectDraw(super::IndirectDraw),
+    LiveDraw,
     Flip(Flip),
     Memory(usize),
 }
@@ -84,8 +86,13 @@ pub struct Draw {
     pub(super) vertex_count: u32,
     pub(super) instance_count: u32,
     pub(super) indices: Option<IndexSource>,
+    pub(super) native_offsets: Option<super::NativeIndirectOffsets>,
+    pub(super) indirect_arguments: Option<crate::compute::CommandRange>,
 }
 impl Draw {
+    pub fn indirect_arguments(&self) -> Option<crate::compute::CommandRange> {
+        self.indirect_arguments
+    }
     pub fn vertex_count(&self) -> u32 {
         self.vertex_count
     }
@@ -198,6 +205,23 @@ pub fn plan_commands(
     initial: GraphicsState,
     limits: &CommandLimits,
 ) -> Result<CommandPlan, Error> {
+    plan(buffers, initial, limits, false)
+}
+
+pub(super) fn plan_ordered_commands(
+    buffers: &[&[u8]],
+    initial: GraphicsState,
+    limits: &CommandLimits,
+) -> Result<CommandPlan, Error> {
+    plan(buffers, initial, limits, true)
+}
+
+fn plan(
+    buffers: &[&[u8]],
+    initial: GraphicsState,
+    limits: &CommandLimits,
+    ordered: bool,
+) -> Result<CommandPlan, Error> {
     if buffers.len() > limits.max_buffers {
         return Err(Error::Limit("command buffers"));
     }
@@ -273,6 +297,7 @@ pub fn plan_commands(
         .ok_or(Error::Limit("command host bytes"))?;
     work(&mut usage, limits, action_bytes as u64)?;
     let mut state = initial;
+    let mut live = false;
     let mut memory = Vec::<MemoryAction>::new();
     let mut fresh_draw = false;
     for (buffer_index, bytes) in buffers.iter().enumerate() {
@@ -378,7 +403,7 @@ pub fn plan_commands(
                 || crate::marker::packet_words(header.raw()).is_some()
                 || matches!(
                     header.opcode(),
-                    0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
+                    0x25 | 0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
                 )
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
                 && actions.len() >= action_count
@@ -481,6 +506,35 @@ pub fn plan_commands(
                         state.write(space, first + i, word(at + 2 + i as usize))?;
                     }
                 }
+                0x11 if header.raw() == 0xc002_1100 && word(at + 1) == 1 => {
+                    state.draw_indirect_base = Some(
+                        u64::from(word(at + 2) & !7) | (u64::from(word(at + 3) & 0xffff) << 32),
+                    );
+                }
+                0x25 if header.raw() == 0xc003_2500 => {
+                    if !ordered {
+                        return Err(fail("indexed indirect draw requires live execution"));
+                    }
+                    let descriptor =
+                        super::IndirectDraw::decode(std::array::from_fn(|i| word(at + i)))?;
+                    usage.draw_packets = usage
+                        .draw_packets
+                        .checked_add(1)
+                        .ok_or(Error::Limit("draw packets"))?;
+                    if usage.draw_packets > limits.max_draws as u64 {
+                        return Err(Error::Limit("draw count"));
+                    }
+                    work(
+                        &mut usage,
+                        limits,
+                        64 + 4 * size_of::<GraphicsState>() as u64,
+                    )?;
+                    actions.push(Action::IndirectDraw(descriptor));
+                    // Structural ordered admission never executes this state.
+                    // Actual instance count/patches are resolved at the live turn.
+                    live = true;
+                    fresh_draw = true;
+                }
                 0x2f if length == 2 => state.instances = Some(word(at + 1)),
                 0x7a if header.raw() == 0xc001_7a00 => {
                     let value = word(at + 2);
@@ -510,6 +564,35 @@ pub fn plan_commands(
                         1 => IndexType::U32,
                         _ => return Err(fail("index type profile")),
                     });
+                }
+                0x2d | 0x27 | 0x35
+                    if ordered
+                        && live
+                        && matches!(header.raw(), 0xc001_2d00 | 0xc004_2700 | 0xc003_3500) =>
+                {
+                    if header.opcode() == 0x2d {
+                        if word(at + 2) != 2 {
+                            return Err(fail("draw initiator"));
+                        }
+                    } else {
+                        let offset = header.opcode() == 0x35;
+                        if word(at + if offset { 3 } else { 4 }) > word(at + 1)
+                            || word(at + if offset { 4 } else { 5 }) != 0
+                            || (!offset && word(at + 3) >= 0x8000)
+                        {
+                            return Err(fail("indexed draw profile"));
+                        }
+                    }
+                    usage.draw_packets = usage
+                        .draw_packets
+                        .checked_add(1)
+                        .ok_or(Error::Limit("draw packets"))?;
+                    if usage.draw_packets > limits.max_draws as u64 {
+                        return Err(Error::Limit("draw count"));
+                    }
+                    work(&mut usage, limits, size_of::<Draw>() as u64)?;
+                    actions.push(Action::LiveDraw);
+                    fresh_draw = true;
                 }
                 0x2d if length == 3 => {
                     // AUTO_INDEX source only. USE_OPAQUE/streamout draw counts
@@ -546,6 +629,8 @@ pub fn plan_commands(
                         actions.push(Action::Draw(draws.len()));
                         fresh_draw = true;
                         draws.push(Draw {
+                            native_offsets: None,
+                            indirect_arguments: None,
                             state,
                             vertex_count,
                             instance_count,
@@ -616,6 +701,8 @@ pub fn plan_commands(
                         actions.push(Action::Draw(draws.len()));
                         fresh_draw = true;
                         draws.push(Draw {
+                            native_offsets: None,
+                            indirect_arguments: None,
                             state,
                             vertex_count: count,
                             instance_count: instances,

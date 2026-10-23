@@ -760,6 +760,7 @@ pub fn prepare_draw_with_target(
         height: config.height,
         vertex_count: draw.vertex_count,
         instance_count: draw.instance_count,
+        native_offsets: draw.native_offsets,
         shader_ranges,
         indices,
         vertex_buffer,

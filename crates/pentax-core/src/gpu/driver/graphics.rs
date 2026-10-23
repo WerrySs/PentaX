@@ -203,7 +203,7 @@ impl Driver {
         } else {
             self.graphics
         };
-        let mut plan = if captured.contains_arrays() {
+        let mut plan = if captured.contains_arrays() || captured.contains_draw_arguments() {
             GraphicsCommands::Ordered(
                 captured
                     .prepare_ordered(initial, &commands)
@@ -324,6 +324,21 @@ impl Driver {
                     plan.resolve_array(&super::super::Memory(cursor.paused_memory()))
                         .map_err(Failure::GraphicsPreparation)?;
                     continue;
+                }
+                GraphicsStep::IndirectDraw => {
+                    let memory = cursor.into_pause();
+                    let resolved = plan
+                        .resolve_indirect(&super::super::Memory(memory))
+                        .map_err(Failure::GraphicsPreparation)?;
+                    // Source patches/NUM_INSTANCES are a real state transition,
+                    // including zero work; no prior draw receipt survives it.
+                    self.poisoned = true;
+                    cursor = Cursor::Paused(memory);
+                    let Some(draw) = resolved else {
+                        continue;
+                    };
+                    owned_draw = draw;
+                    &owned_draw
                 }
                 GraphicsStep::StaticDraw(index) => plan.static_draw(index),
                 GraphicsStep::OrderedDraw(draw) => {
@@ -542,6 +557,7 @@ enum GraphicsCommands {
 #[allow(clippy::large_enum_variant)]
 enum GraphicsStep {
     Array,
+    IndirectDraw,
     StaticDraw(usize),
     OrderedDraw(draw::Draw),
     Memory(usize),
@@ -579,6 +595,15 @@ impl GraphicsCommands {
             _ => Err(draw::Error::Unsupported("static register array")),
         }
     }
+    fn resolve_indirect(
+        &mut self,
+        memory: &impl compute::Memory,
+    ) -> Result<Option<draw::Draw>, draw::Error> {
+        match self {
+            Self::Ordered(plan) => plan.resolve_indirect(memory),
+            _ => Err(draw::Error::Unsupported("static indirect draw")),
+        }
+    }
     fn memory_action(&self, index: usize) -> &draw::MemoryAction {
         match self {
             Self::Static { plan, .. } => plan.memory_action(index),
@@ -606,12 +631,16 @@ impl GraphicsCommands {
                 *action += 1;
                 Some(match *next {
                     draw::Action::Draw(index) => GraphicsStep::StaticDraw(index),
+                    draw::Action::IndirectDraw(_) | draw::Action::LiveDraw => {
+                        return Err(draw::Error::Unsupported("static live draw action"));
+                    }
                     draw::Action::Memory(index) => GraphicsStep::Memory(index),
                     draw::Action::Flip(flip) => GraphicsStep::Flip(flip),
                 })
             }
             Self::Ordered(plan) => plan.next_step()?.map(|next| match next {
                 draw::OrderedStep::Array => GraphicsStep::Array,
+                draw::OrderedStep::IndirectDraw => GraphicsStep::IndirectDraw,
                 draw::OrderedStep::Draw(draw) => GraphicsStep::OrderedDraw(draw),
                 draw::OrderedStep::Memory(index) => GraphicsStep::Memory(index),
                 draw::OrderedStep::Flip(flip) => GraphicsStep::Flip(flip),

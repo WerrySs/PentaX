@@ -15,6 +15,8 @@ use pentax_shader_compiler::CompiledShader;
 use std::fmt;
 
 mod commands;
+mod draw_indirect;
+pub use draw_indirect::{IndirectDraw, NativeIndirectOffsets};
 mod indirect;
 pub use indirect::{CaptureFailure, CaptureUsage, CapturedCommands};
 mod ordered;
@@ -246,6 +248,7 @@ pub struct PreparedDraw {
     height: u32,
     vertex_count: u32,
     instance_count: u32,
+    native_offsets: Option<NativeIndirectOffsets>,
     shader_ranges: [CommandRange; 2],
     indices: Option<PreparedIndices>,
     vertex_buffer: Option<PreparedBuffer>,
@@ -308,6 +311,14 @@ impl PreparedDraw {
     pub fn pixel_buffer(&self) -> Option<&PreparedBuffer> {
         self.pixel_buffer.as_ref()
     }
+    /// The admitted compiler executes native guest fetches: patched SGPRs carry
+    /// indirect offsets, so applying Vulkan offsets again would double them.
+    pub fn vertex_offset(&self) -> i32 {
+        0
+    }
+    pub fn native_indirect_offsets(&self) -> Option<NativeIndirectOffsets> {
+        self.native_offsets
+    }
     pub fn first_vertex(&self) -> u32 {
         0
     }
@@ -315,6 +326,7 @@ impl PreparedDraw {
         self.instance_count
     }
     pub fn first_instance(&self) -> u32 {
+        // Native indirect first-instance is already in the patched user SGPR.
         0
     }
     pub fn vertex_push_data(&self) -> &[u8; 128] {

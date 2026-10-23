@@ -1629,3 +1629,6 @@ mod agc_memory_transfer;
 
 #[path = "image_probe/agc_indirect_dispatch.rs"]
 mod agc_indirect_dispatch;
+
+#[path = "image_probe/agc_draw_index_indirect.rs"]
+mod agc_draw_index_indirect;

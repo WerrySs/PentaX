@@ -22,6 +22,7 @@ pub struct GraphicsState {
     pub(super) index_type: Option<IndexType>,
     pub(super) index_base: Option<u64>,
     pub(super) index_count: Option<u32>,
+    pub(super) draw_indirect_base: Option<u64>,
 }
 impl Default for GraphicsState {
     fn default() -> Self {
@@ -60,6 +61,7 @@ impl GraphicsState {
             index_type: None,
             index_base: None,
             index_count: None,
+            draw_indirect_base: None,
         }
     }
     pub(super) fn reset(&mut self, reset: crate::queue_reset::Reset) {
@@ -85,6 +87,7 @@ impl GraphicsState {
                 self.index_type = Some(IndexType::U16);
                 self.index_base = index_base;
                 self.index_count = Some(0);
+                self.draw_indirect_base = Some(0);
             }
         }
     }

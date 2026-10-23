@@ -9,7 +9,7 @@ own known register snapshot and real vertex/instance counts. State-only streams
 are supported. Zero-count draws consume their command position without shader
 reads or a render product. This flat API refuses indirect buffers; the separate
 bounded capture API below expands ordinary IB calls/chains. Predicates,
-use-opaque counts, indirect draws, unported barriers and unknown registers are refused. Selected
+use-opaque counts, unported indirect-draw variants, unported barriers and unknown registers are refused. Selected
 ordered memory operations are described below.
 No reset register value is invented. Final state is published by a queue owner
 only after execution; a failed plan returns no executable prefix.
@@ -53,7 +53,8 @@ The first profile is deliberately finite:
   Natural alignment is an explicit finite profile restriction. The final
   flags word is exactly0; the source's additional0x20 option remains refused.
   `GE_MULTI_PRIM_IB_RESET_EN` must be explicitly known0. Base vertex is0,
-  primitive restart is disabled and indirect/index8 profiles remain unsupported.
+  primitive restart and index8 remain unsupported; single indexed-indirect draws
+  use only the ordered native-shader profile described below.
   max_count bounds the element count, never the values stored in the index
   buffer. VertexIndex values greater than or equal to count remain valid.
   An admitted zero-count packet needs no index type or payload access.
@@ -294,7 +295,7 @@ All other memory actions, including empty writes, invalidate the preceding
 draw's eligibility. A later flip then needs a newly completed draw. Core execution reuses actual write permissions, physical
 command-source disjointness, completed GPU fences, checked label writes and
 post-write notifications. Unsatisfied waits stop explicitly; prior effects
-cannot be replayed. GDS, unknown wait/dispatch modes, indirect draws, opaque
+cannot be replayed. GDS, unknown wait/dispatch modes, unported indirect draws, opaque
 counts and unported destinations remain explicit execution refusals.
 Graphics release INT_SEL1 and INT_SEL4 have no label or reference-clock write,
 even if raw packet bytes retain a nonzero address. Their interrupt contexts
@@ -451,3 +452,29 @@ snapshot. Total output bytes and maximum reusable staging are distinct checked
 quantities under existing host/work/write limits. All transfers invalidate old
 draw eligibility. Original packet, capture, live-memory, permission and alias
 consumers are separate from the ignored physical-GPU coherency check.
+The exact single indexed-indirect packet `0xc0032500` is admitted only through
+ordered execution. Immutable capture reads packet bytes, never its argument
+payload. Graphics `SET_BASE` selector1/header `0xc0021100` stores an independent
+draw-arguments base; context-only Clear/Push/Pop preserve it and processor Reset
+clears it. At the live turn the owned full20-byte argument span supplies index
+count, instance count, first index, signed base vertex and first instance. Source
+patch order is vertex, instance, optional first index; aliased locations retain
+the final write and SH_NOP skips only its own patch. Known nonzero
+INDEX_BUFFER_SIZE clamps count; unknown state is refused, not defaulted.
+
+The current compiler executes native guest fetch code. Patched user SGPRs carry
+logical offsets, and Vulkan uses vertexOffset0/firstInstance0 as public source
+requires for native fetches. First index changes the guest index span once;
+the uploaded buffer starts at that span, so Vulkan firstIndex is0. Raw logical
+offsets remain attached to the sealed draw/prepared product for original
+consumers. Embedded fetch rewriting, destinations beyond the existing vertex
+user-SGPR bank, index8 and relative-instance shaders needing DrawParameters stay
+typed unsupported. No device feature or direct-draw behavior is promoted.
+
+Static ordered admission reserves every potential action and fixed live-read/
+state-copy work before effects. Dynamic counts are separately bounded at their
+actual turn and again by cumulative driver admission. Zero work still updates
+real SGPR/instance state and consumes prior draw eligibility. Late failures retain
+actual earlier effects and refuse replay. Arguments may be produced by earlier
+permitted writes; they are not globally mislabeled as immutable command bytes.
+Current target/argument physical aliases are explicitly refused before GPU work.

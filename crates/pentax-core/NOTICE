@@ -657,3 +657,14 @@ and authenticated grow continuation, append only the verified paired imports,
 and connect emitted packets to the existing current-owner compute receiver.
 All new bounded producer, current-dimension, permission and profile consumers
 are original. Packet emission proves no GPU execution or presentation.
+The single indexed-indirect producer and owned live-argument integration adapt
+public KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: AgcDcbDrawIndexIndirect and modifier packing
+  src/libs/libAgcDriver.cpp: exact t1vNu082-jM identity
+  src/graphics/guest_gpu/graphicsRun.cpp: DrawIndirect/Multi source state order
+  src/graphics/host_gpu/renderer/renderDraw.cpp: native indirect shader offsets
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L2751
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 add bounded current-owner live
+parameters, checked indices and physical output exclusions, actual source-order
+SGPR/instance state and fail-stop handling. All new consumers are original.

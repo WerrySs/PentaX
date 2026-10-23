@@ -129,6 +129,9 @@ pub(crate) const INDIRECT_DISPATCH_EXPORTS: [(&str, Function); 3] = [
     ("RmaJwLtc8rY", Function::AgcDcbSetBaseIndirectArgs),
 ];
 
+pub(crate) const INDIRECT_DRAW_EXPORTS: [(&str, Function); 1] =
+    [("t1vNu082-jM", Function::AgcDcbDrawIndexIndirect)];
+
 pub(crate) fn supports(function: Function) -> bool {
     function == Function::AgcDcbSetIndexSize0600
         || EXPORTS
@@ -139,6 +142,7 @@ pub(crate) fn supports(function: Function) -> bool {
             .chain(CONTEXT_EXPORTS.iter())
             .chain(TRANSFER_EXPORTS.iter())
             .chain(INDIRECT_DISPATCH_EXPORTS.iter())
+            .chain(INDIRECT_DRAW_EXPORTS.iter())
             .any(|(_, found)| *found == function)
 }
 
@@ -316,6 +320,33 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcDcbDrawIndexIndirect => {
+            let low = a[2];
+            let stage = low >> 29;
+            let sgpr = if matches!(stage, 3 | 5) { 0x10c } else { 0x8c };
+            let vertex = if low & 1 != 0 {
+                sgpr + ((low >> 9) & 31)
+            } else {
+                0x280
+            };
+            let instance = if low & 4 != 0 {
+                sgpr + ((low >> 19) & 31)
+            } else {
+                0x280
+            };
+            let index = if low & 2 != 0 {
+                sgpr + ((low >> 14) & 31)
+            } else {
+                0
+            };
+            Packet::fixed(&[
+                pm4(5, 0x25, 0),
+                a[1],
+                vertex | (index << 16),
+                instance | ((low & 2) << 27),
+                initiator(args[2]),
+            ])
+        }
         AgcAcbDispatchIndirect => Packet::fixed(&[
             pm4(4, 0x16, 0),
             a[1],

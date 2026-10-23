@@ -1027,3 +1027,12 @@ after earlier completed writes, and retains its wave32, permission, alias and
 work limits. Graphics indirect drawing and unobserved size exports remain
 outside the admitted profile. Original consumers cover actual emitted streams,
 zero-group retirement, changed permissions, fresh dimensions and grow migration.
+The observed single indexed-indirect draw builder now connects to the existing
+owned graphics path through source-ordered live twenty-byte argument reads.
+Actual count/clamp, instance count, first index and ordered user-SGPR patches
+are retained, including zero-work state changes. Native shaders consume signed
+base-vertex and first-instance values in those patches; Vulkan offsets remain
+zero by the proven native-fetch convention. This does not enable embedded-fetch
+rewriting, unsupported SGPR destinations, index8, or DrawParameters-dependent
+relative-instance shaders. Original ordinary and separately ignored physical
+GPU consumers are source fixtures; their presence is not a rendering result.

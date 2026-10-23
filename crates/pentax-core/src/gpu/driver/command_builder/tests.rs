@@ -608,3 +608,6 @@ mod transfer_tests;
 
 #[path = "tests/indirect_dispatch.rs"]
 mod indirect_dispatch;
+
+#[path = "tests/draw_index_indirect.rs"]
+mod draw_index_indirect;

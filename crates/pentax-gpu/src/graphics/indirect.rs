@@ -57,6 +57,7 @@ pub struct CapturedCommands {
     sources: Vec<CommandRange>,
     root_count: usize,
     arrays: bool,
+    draw_arguments: bool,
     transferred: bool,
     usage: CaptureUsage,
 }
@@ -203,6 +204,7 @@ impl CapturedCommands {
         let mut frames = Vec::<Frame>::new();
         let mut lineage = Vec::<CommandRange>::new();
         let mut arrays = false;
+        let mut draw_arguments = false;
         for (root_index, root) in roots.iter().copied().enumerate() {
             let snapshot = budget
                 .snapshot(root, memory)
@@ -338,6 +340,7 @@ impl CapturedCommands {
                     continue;
                 }
                 arrays |= crate::registers::indirect_opcode(header);
+                draw_arguments |= header.raw() == 0xc003_2500;
                 budget.reserve(&mut bytes, length)?;
                 bytes.extend_from_slice(&frames[index].bytes[at..at + length]);
                 budget.work(length as u64)?;
@@ -350,6 +353,7 @@ impl CapturedCommands {
             sources,
             root_count: roots.len(),
             arrays,
+            draw_arguments,
             transferred: false,
             usage: budget.usage,
         })
@@ -365,6 +369,9 @@ impl CapturedCommands {
     }
     pub fn contains_arrays(&self) -> bool {
         self.arrays
+    }
+    pub fn contains_draw_arguments(&self) -> bool {
+        self.draw_arguments
     }
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
