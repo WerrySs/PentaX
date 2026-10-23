@@ -1626,3 +1626,6 @@ mod agc_index_size_0600;
 
 #[path = "image_probe/agc_memory_transfer.rs"]
 mod agc_memory_transfer;
+
+#[path = "image_probe/agc_indirect_dispatch.rs"]
+mod agc_indirect_dispatch;

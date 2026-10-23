@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 261] = {
+const ENTRIES: [(&str, Function, usize, usize); 267] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 261] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 261];
+    let mut entries = [BASE_ENTRIES[0]; 267];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -210,6 +210,14 @@ const ENTRIES: [(&str, Function, usize, usize); 261] = {
         let (nid, function) = transfers[i];
         entries[253 + i * 2] = (nid, function, 1, 1);
         entries[254 + i * 2] = (nid, function, 2, 2);
+        i += 1;
+    }
+    let indirect = crate::gpu::driver::INDIRECT_DISPATCH_EXPORTS;
+    i = 0;
+    while i < indirect.len() {
+        let (nid, function) = indirect[i];
+        entries[261 + i * 2] = (nid, function, 1, 1);
+        entries[262 + i * 2] = (nid, function, 2, 2);
         i += 1;
     }
     entries
@@ -415,7 +423,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -502,7 +510,7 @@ mod reset_queue_tests {
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -529,7 +537,7 @@ mod memory_sync_tests {
     #[test]
     fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -556,7 +564,7 @@ mod marker_binding_tests {
     #[test]
     fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -580,7 +588,7 @@ mod context_binding_tests {
     #[test]
     fn context_operation_appends_exact_canonical_and_observed_pair_without_moving_old_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[244],
             ("H7uZqCoNuWk", Function::AgcDcbPopMarker, 2, 2)
@@ -611,7 +619,7 @@ mod primitive_binding_tests {
     #[test]
     fn primitive_creation_appends_only_exact_canonical_and_observed_pairs_after_context_state() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[246],
             ("qj7QZpgr9Uw", Function::AgcDcbContextStateOp, 2, 2)
@@ -642,7 +650,7 @@ mod packet_payload_binding_tests {
     #[test]
     fn packet_payload_address_appends_only_exact_pairs_and_preserves_primitive_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[248],
             ("D9sr1xGUriE", Function::AgcCreatePrimState, 2, 2)
@@ -678,7 +686,7 @@ mod index_size_0600_binding_tests {
     #[test]
     fn index_size_0600_appends_exact_pairs_without_moving_old_builder_or_payload_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[250],
             (
@@ -717,7 +725,7 @@ mod transfer_binding_tests {
     #[test]
     fn four_transfer_roles_append_after_253_immutable_rows_in_exact_verified_pairs() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 261);
+        assert_eq!(provider.function_count(), 267);
         assert_eq!(
             ENTRIES[252],
             ("-KRzWekV120", Function::AgcDcbSetIndexSize0600, 2, 2)
@@ -733,5 +741,35 @@ mod transfer_binding_tests {
                 assert_eq!(marker.function, function);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod indirect_dispatch_binding_tests {
+    use super::*;
+    #[test]
+    fn three_indirect_producers_append_after_261_rows_in_only_verified_pairs() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 267);
+        assert_eq!(ENTRIES[260], ("WmAc2MEj6Io", Function::AgcDcbDmaData, 2, 2));
+        for (index, (nid, function)) in [
+            ("j3EtxFkSIhQ", Function::AgcAcbDispatchIndirect),
+            ("CtB+A9-VxO0", Function::AgcDcbDispatchIndirect),
+            ("RmaJwLtc8rY", Function::AgcDcbSetBaseIndirectArgs),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(ENTRIES.iter().filter(|row| row.0 == nid).count(), 2);
+            for pair in [1, 2] {
+                let ordinal = 261 + index * 2 + pair - 1;
+                assert_eq!(ENTRIES[ordinal], (nid, function, pair, pair));
+                let marker = provider.markers().nth(ordinal).unwrap();
+                assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+                assert_eq!(marker.function, function);
+            }
+        }
+        assert_eq!(crate::gpu::driver::COMMAND_BUILDER_EXPORTS.len(), 52);
+        assert!(!ENTRIES.iter().any(|row| row.0 == "w8HVkEeXPv8"));
     }
 }

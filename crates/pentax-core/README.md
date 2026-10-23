@@ -1018,3 +1018,12 @@ no address and creates no bytes, fence, event or completion. Transfer actions
 consume prior graphics draw eligibility, including this conservative zero case.
 Original ordinary consumers and one separately ignored Vulkan consumer are
 provided; their presence alone establishes no physical execution or game image.
+Three additional observed producers encode ACB absolute dispatch arguments,
+DCB base-relative dispatch offsets, and the DCB indirect-argument base. Their
+source masks and real allocator/grow results are preserved; emission neither
+reads dimensions nor grants memory authority. The existing compute receiver
+reads the current owned twelve-byte dimensions at the ordered dispatch turn,
+after earlier completed writes, and retains its wave32, permission, alias and
+work limits. Graphics indirect drawing and unobserved size exports remain
+outside the admitted profile. Original consumers cover actual emitted streams,
+zero-group retirement, changed permissions, fresh dimensions and grow migration.

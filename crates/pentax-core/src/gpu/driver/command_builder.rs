@@ -122,6 +122,13 @@ pub(crate) const TRANSFER_EXPORTS: [(&str, Function); 4] = [
     ("WmAc2MEj6Io", Function::AgcDcbDmaData),
 ];
 
+// Keep the original builder table immutable; these roles append at provider261.
+pub(crate) const INDIRECT_DISPATCH_EXPORTS: [(&str, Function); 3] = [
+    ("j3EtxFkSIhQ", Function::AgcAcbDispatchIndirect),
+    ("CtB+A9-VxO0", Function::AgcDcbDispatchIndirect),
+    ("RmaJwLtc8rY", Function::AgcDcbSetBaseIndirectArgs),
+];
+
 pub(crate) fn supports(function: Function) -> bool {
     function == Function::AgcDcbSetIndexSize0600
         || EXPORTS
@@ -131,6 +138,7 @@ pub(crate) fn supports(function: Function) -> bool {
             .chain(MARKER_EXPORTS.iter())
             .chain(CONTEXT_EXPORTS.iter())
             .chain(TRANSFER_EXPORTS.iter())
+            .chain(INDIRECT_DISPATCH_EXPORTS.iter())
             .any(|(_, found)| *found == function)
 }
 
@@ -277,7 +285,8 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
         | AgcAcbCopyData
         | AgcDcbCopyData
         | AgcAcbDmaData
-        | AgcDcbDmaData => Ok(0),
+        | AgcDcbDmaData
+        | AgcAcbDispatchIndirect => Ok(0),
         AgcCbSetShRegisterRangeDirect
         | AgcDcbSetShRegisterDirect
         | AgcDcbSetCxRegisterDirect
@@ -307,6 +316,19 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
     use Function::*;
     let a = args.map(|value| value as u32);
     let packet = match function {
+        AgcAcbDispatchIndirect => Packet::fixed(&[
+            pm4(4, 0x16, 0),
+            a[1],
+            (args[1] >> 32) as u32,
+            (a[2] & 0xa038) | 0x41,
+        ]),
+        AgcDcbDispatchIndirect => Packet::fixed(&[pm4(3, 0x16, 0), a[1], (a[2] & 0xa038) | 0x41]),
+        AgcDcbSetBaseIndirectArgs => Packet::fixed(&[
+            pm4(4, 0x11, 0) | a[1].wrapping_shl(1),
+            1,
+            a[2] & !7,
+            (args[2] >> 32) as u32,
+        ]),
         AgcAcbAcquireMem | AgcDcbAcquireMem => {
             // Pinned209dffe producer framing differs from the later public
             // native-opcode encoder. Alignment/high-bit conditions only warn.
@@ -683,7 +705,8 @@ fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failur
         | AgcAcbCopyData
         | AgcDcbCopyData
         | AgcAcbDmaData
-        | AgcDcbDmaData => Ok(0),
+        | AgcDcbDmaData
+        | AgcAcbDispatchIndirect => Ok(0),
         AgcWaitRegMemPatchAddress | AgcWaitRegMemPatchReference => Ok(INVALID_PACKET),
         _ => Err(Failure::UnsupportedQueue),
     })

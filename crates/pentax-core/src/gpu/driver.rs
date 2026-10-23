@@ -19,6 +19,7 @@ mod command_builder;
 mod flip_encoder;
 pub(crate) use command_builder::CONTEXT_EXPORTS;
 pub(crate) use command_builder::EXPORTS as COMMAND_BUILDER_EXPORTS;
+pub(crate) use command_builder::INDIRECT_DISPATCH_EXPORTS;
 pub(crate) use command_builder::MARKER_EXPORTS;
 pub(crate) use command_builder::RESET_EXPORTS as RESET_QUEUE_EXPORTS;
 pub(crate) use command_builder::SYNC_EXPORTS as MEMORY_SYNC_EXPORTS;
@@ -166,6 +167,9 @@ pub enum Function {
     AgcDcbCopyData,
     AgcAcbDmaData,
     AgcDcbDmaData,
+    AgcAcbDispatchIndirect,
+    AgcDcbDispatchIndirect,
+    AgcDcbSetBaseIndirectArgs,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.

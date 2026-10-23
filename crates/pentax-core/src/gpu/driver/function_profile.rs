@@ -136,6 +136,9 @@ catalogue!(
     AgcDcbCopyData,
     AgcAcbDmaData,
     AgcDcbDmaData,
+    AgcAcbDispatchIndirect,
+    AgcDcbDispatchIndirect,
+    AgcDcbSetBaseIndirectArgs,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

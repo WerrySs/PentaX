@@ -645,3 +645,15 @@ whole-output GPU-write and physical-alias checks, preadmitted reusable staging
 and original bounded consumers. Source clock/GDS/register/query/discard domains
 remain unavailable. Command emission does not imply transfer execution, GPU
 completion, presenter acknowledgement or commercial rendering.
+The three indirect-dispatch producers additionally adapt public KytyPS5/KytyPS5
+revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: AgcDcbSetBaseIndirectArgs, AgcDcbDispatchIndirect,
+                    AgcAcbDispatchIndirect
+  src/libs/libAgcDriver.cpp: exact canonical identities/signatures
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L2727
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 use the existing checked allocator
+and authenticated grow continuation, append only the verified paired imports,
+and connect emitted packets to the existing current-owner compute receiver.
+All new bounded producer, current-dimension, permission and profile consumers
+are original. Packet emission proves no GPU execution or presentation.

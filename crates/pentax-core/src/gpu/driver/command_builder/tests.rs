@@ -605,3 +605,6 @@ mod index_size_0600;
 
 #[path = "tests/transfer_tests.rs"]
 mod transfer_tests;
+
+#[path = "tests/indirect_dispatch.rs"]
+mod indirect_dispatch;
