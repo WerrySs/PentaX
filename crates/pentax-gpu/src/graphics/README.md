@@ -498,8 +498,20 @@ use checked logical extents and explicit mip offsets. The target cannot alias
 any image source, including padding. Descriptor/image/sampler counts, compiler
 arenas, vector capacities, device memory and work use the existing limits.
 
-Image-specific MIN_LOD, mip feedback, nonzero sampler bias, tiled/compressed
-textures and unmodeled controls explicitly refuse. This sampled image path does
-not implement GET_LOD_STATS reports or publish a ready header. Original CPU
-snapshot tests and the separately ignored actual sampled draw fixture cover
-different execution boundaries; neither is a commercial frame claim.
+Image-specific MIN_LOD uses a distinct manifest sampler for each (image, S#)
+pair. The admitted nonzero-clamp subset requires equal min/mag texel filters,
+zero bias, and a view-relative minimum within the image view. This preserves
+post-sampler image clamping without a SPIR-V MinLod operand or changing another
+image that shares the source S#. Unequal filters with a raised image minimum,
+nonzero bias, tiled/compressed textures and unmodeled controls explicitly refuse.
+
+An explicitly initialized LOD interval enables compiler feedback before analysis,
+so samples survive dead-color elimination. Only real enabled sample operations
+request the514-word pixel storage binding90. Absolute T# thresholds and counter
+IDs are retained independently from view-relative sampler clamps. Query-only or
+counter-disabled products request no counter buffer and return no new snapshot.
+Preparation grants no counter completion or report-publication authority. The
+owned runtime retains the guest pause through GPU fence and whole target
+writeback before making actual counters available to its ordered receiver.
+Original CPU metadata fixtures and ignored hardware fixtures cover different
+boundaries; none is a commercial frame claim.

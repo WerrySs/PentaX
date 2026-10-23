@@ -32,6 +32,8 @@ mod function_profile;
 pub use function_profile::FunctionProfile;
 #[path = "driver/graphics.rs"]
 mod graphics;
+#[path = "driver/lod_stats.rs"]
+mod lod_stats;
 pub(crate) use graphics::{GraphicsProgress, GraphicsTicket};
 #[path = "driver/interrupts.rs"]
 mod interrupts;
@@ -298,6 +300,7 @@ pub(crate) struct Driver {
     function_profile: FunctionProfile,
     queues: [compute::ComputeState; 56],
     graphics: draw::GraphicsState,
+    lod_stats: Option<lod_stats::LodStatsState>,
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
     graphics_execution: Option<graphics::GraphicsExecution>,
     graphics_admissions: Vec<graphics::GraphicsAdmission>,
@@ -336,6 +339,7 @@ impl Driver {
             function_profile: FunctionProfile::default(),
             queues: [compute::ComputeState::empty(); 56],
             graphics: draw::GraphicsState::empty(),
+            lod_stats: None,
             graphics_owner: None,
             graphics_execution: None,
             graphics_admissions: Vec::new(),
@@ -1434,3 +1438,7 @@ mod suspend_tests {
         assert_eq!(driver.usage(), usage);
     }
 }
+
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "driver/actual_lod_tests.rs"]
+mod actual_lod_tests;

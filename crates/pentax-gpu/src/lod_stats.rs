@@ -48,6 +48,12 @@ impl fmt::Debug for Counters {
 }
 
 impl Counters {
+    /// Exact owned snapshot data for a subsequent real GPU upload.
+    /// This observation grants no collection, completion or guest-write authority.
+    pub const fn as_words(&self) -> &[u32; COUNTER_WORDS] {
+        &self.words
+    }
+
     pub fn from_words(words: &[u32]) -> Result<Self, Error> {
         let words = words.try_into().map_err(|_| Error::CounterWordCount)?;
         Ok(Self { words })
@@ -149,6 +155,7 @@ mod tests {
         words[257 + 17] = 0x123456;
         let mut bytes: Vec<_> = words.iter().flat_map(|word| word.to_le_bytes()).collect();
         let counters = Counters::from_le_bytes(&bytes).unwrap();
+        assert_eq!(counters.as_words(), &words);
         bytes.fill(0xff);
         words.fill(0);
         let report = counters.pack_report();

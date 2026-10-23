@@ -8,7 +8,7 @@
 use super::{
     Budget, GpuLimits, GraphicsReadback, VulkanError,
     commands::{Batch, buffer_host_barrier},
-    device::Device,
+    device::{Device, DeviceRequirements},
     pipeline::Pipeline,
     programs::check_graphics_contract,
     resources::{Buffer, Image, color_range},
@@ -18,6 +18,8 @@ use pentax_gpu::graphics::{IndexType, PreparedDraw, ShaderInterfaces, validate_s
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::CompiledShader;
 
+#[path = "graphics/lod_feedback.rs"]
+mod lod_feedback;
 #[path = "graphics/sampled.rs"]
 mod sampled;
 
@@ -277,13 +279,61 @@ pub(super) fn run(
     prepared: &PreparedDraw,
     limits: GpuLimits,
 ) -> Result<GraphicsReadback, VulkanError> {
+    run_with_lod(prepared, limits, None)
+}
+
+pub(super) fn run_with_lod(
+    prepared: &PreparedDraw,
+    limits: GpuLimits,
+    initial: Option<&pentax_gpu::lod_stats::Counters>,
+) -> Result<GraphicsReadback, VulkanError> {
     // All pure input/manifest/work admission precedes loader/device calls.
+    let mut budget = Budget::new(limits);
+    budget.work(1024)?;
     let sampled_upload_bytes = sampled::upload_length(prepared)?;
-    for texture in prepared.pixel_images() {
-        if texture.descriptor().min_lod_u4_8 != 0 || texture.descriptor().counter_id.is_some() {
-            return Err(VulkanError::Unsupported(
-                "sampled image clamp/feedback profile",
+    let has_feedback = prepared.pixel().manifest().lod_feedback_binding().is_some();
+    if prepared
+        .pixel()
+        .manifest()
+        .lod_feedback_binding()
+        .is_some_and(|binding| binding != 90)
+        || has_feedback
+            && (initial.is_none() || prepared.pixel().manifest().lod_counters().is_empty())
+    {
+        return Err(VulkanError::InvalidCompilerContract(
+            "initialized LOD feedback storage",
+        ));
+    }
+    for counter in prepared.pixel().manifest().lod_counters() {
+        let image = prepared
+            .pixel()
+            .manifest()
+            .images()
+            .iter()
+            .find(|image| image.user_sgpr == counter.user_sgpr)
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "LOD feedback image provenance",
+            ))?;
+        let texture = prepared
+            .pixel_images()
+            .iter()
+            .find(|texture| texture.binding() == image.binding)
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "LOD feedback image resource",
+            ))?;
+        let descriptor = texture.descriptor();
+        if descriptor.counter_id != Some(counter.counter_id)
+            || descriptor.base_level != counter.base_level
+            || descriptor.min_lod_u4_8 != counter.min_lod_u4_8
+        {
+            return Err(VulkanError::InvalidCompilerContract(
+                "LOD feedback descriptor provenance",
             ));
+        }
+    }
+    for texture in prepared.pixel_images() {
+        if texture.descriptor().counter_id.is_some() && initial.is_none() {
+            return Err(VulkanError::Unsupported("uninitialized image LOD feedback"));
         }
     }
     if prepared
@@ -293,7 +343,6 @@ pub(super) fn run(
     {
         return Err(VulkanError::Unsupported("sampled LOD bias"));
     }
-    let mut budget = Budget::new(limits);
     let first_instance = prepared.first_instance();
     let vertex_offset = prepared.vertex_offset();
     prepared
@@ -365,13 +414,38 @@ pub(super) fn run(
         resource_lengths,
         &mut budget,
     )?;
-    let device = Device::open(
-        vk::ShaderStageFlags::empty(),
-        vk::ShaderStageFlags::empty(),
+    let device = Device::open_required(
+        DeviceRequirements {
+            subgroup_stages: if has_feedback {
+                vk::ShaderStageFlags::FRAGMENT
+            } else {
+                vk::ShaderStageFlags::empty()
+            },
+            arithmetic_stages: if has_feedback {
+                vk::ShaderStageFlags::FRAGMENT
+            } else {
+                vk::ShaderStageFlags::empty()
+            },
+            fragment_stores_and_atomics: has_feedback,
+            ..Default::default()
+        },
         &mut budget,
     )?;
     let host = device.properties.limits;
     storage_limits(resource_lengths, &host)?;
+    if has_feedback {
+        let pixel_storage = 1 + u32::from(resource_lengths[1] != 0);
+        let total_storage = pixel_storage + u32::from(resource_lengths[0] != 0);
+        if host.max_storage_buffer_range < pentax_gpu::lod_stats::COUNTER_BYTES as u32
+            || host.max_per_stage_descriptor_storage_buffers < pixel_storage
+            || host.max_descriptor_set_storage_buffers < total_storage
+            || host.max_fragment_combined_output_resources < pixel_storage + 1
+        {
+            return Err(VulkanError::Unsupported(
+                "LOD feedback storage device limits",
+            ));
+        }
+    }
     interface_limits(
         interfaces,
         host.max_vertex_output_components,
@@ -431,17 +505,41 @@ pub(super) fn run(
             storage[index] = Some(buffer);
         }
     }
-    let sampled = sampled::SampledResources::new(&device, prepared, &mut budget)?;
+    let sampled =
+        sampled::SampledResources::new(&device, prepared, initial.is_some(), &mut budget)?;
+    let feedback = if has_feedback {
+        Some(lod_feedback::Feedback::new(
+            &device,
+            initial.ok_or(VulkanError::InvalidCompilerContract(
+                "missing LOD initial words",
+            ))?,
+            &mut budget,
+        )?)
+    } else {
+        None
+    };
+    let mut sampled_bindings = sampled.bindings();
+    sampled_bindings.lod_feedback = feedback.as_ref().map(|buffer| &buffer.storage);
     // Admit the future completed pixel Vec before any submitted GPU effect.
     if budget
         .usage
         .host_bytes
         .checked_add(length as u64)
+        .and_then(|bytes| {
+            bytes.checked_add(if has_feedback {
+                pentax_gpu::lod_stats::COUNTER_BYTES as u64
+            } else {
+                0
+            })
+        })
         .is_none_or(|bytes| bytes > budget.limits.max_host_bytes)
     {
         return Err(VulkanError::Limit("graphics readback host bytes"));
     }
-    let pipeline = if prepared.pixel_images().is_empty() && prepared.pixel_samplers().is_empty() {
+    let pipeline = if prepared.pixel_images().is_empty()
+        && prepared.pixel_samplers().is_empty()
+        && !has_feedback
+    {
         Pipeline::graphics_loaded(
             &device,
             prepared.vertex(),
@@ -457,7 +555,7 @@ pub(super) fn run(
             prepared.pixel(),
             &image,
             [storage[0].as_ref(), storage[1].as_ref()],
-            sampled.bindings(),
+            sampled_bindings,
             &mut budget,
         )?
     };
@@ -465,6 +563,9 @@ pub(super) fn run(
     // pipeline, framebuffer, image or buffer owner can be destroyed.
     let batch = Batch::begin(&device, &mut budget)?;
     sampled.record(&device, &batch, prepared, &mut budget)?;
+    if let Some(feedback) = &feedback {
+        feedback.begin(&device, &batch, &mut budget)?;
+    }
     budget.command(
         (if index_buffer.is_some() { 10 } else { 9 })
             + u32::from(pipeline.set != vk::DescriptorSet::null()),
@@ -655,10 +756,18 @@ pub(super) fn run(
         vk::PipelineStageFlags::TRANSFER,
         &mut budget,
     )?;
+    if let Some(feedback) = &feedback {
+        feedback.end(&device, &batch, &mut budget)?;
+    }
     batch.submit_wait(&mut budget)?;
     let bytes = readback.read_completed(&mut budget)?;
+    let lod_counters = feedback
+        .as_ref()
+        .map(|feedback| feedback.completed(&mut budget))
+        .transpose()?;
     Ok(GraphicsReadback {
         bytes,
+        lod_counters,
         usage: budget.usage,
     })
 }

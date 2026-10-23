@@ -510,6 +510,23 @@ impl Driver {
                     cursor = Cursor::Paused(memory);
                     continue;
                 }
+                GraphicsStep::LodStats(request) => {
+                    let memory = cursor.into_pause();
+                    // Earlier queued flips retain their owned Frames while
+                    // this report/reset runs, just as in the ordinary draw path.
+                    let held = retained
+                        .checked_add(self.video.retained_frame_bytes())
+                        .ok_or(Failure::Limit)?;
+                    self.lod_report(
+                        memory,
+                        request,
+                        plan.command_ranges(sources),
+                        held,
+                        max_host_bytes,
+                    )?;
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
                 GraphicsStep::Array => {
                     plan.resolve_array(&super::super::Memory(cursor.paused_memory()))
                         .map_err(Failure::GraphicsPreparation)?;
@@ -655,12 +672,18 @@ impl Driver {
             );
             self.usage.draws = add(self.usage.draws, 1, self.limits.max_draws)?;
             let gpu_limits = self.limits.graphics_backend_limits();
-            let current = super::super::graphics::execute_draw_current(
+            let initial_lod = self
+                .lod_stats
+                .as_ref()
+                .map(|state| state.counters(owner))
+                .transpose()?;
+            let mut current = super::super::graphics::execute_draw_current_with_lod(
                 cursor.into_pause(),
                 command,
                 &limits,
                 &gpu_limits,
                 plan.command_ranges(sources),
+                initial_lod,
                 |prepared, preflight, may_execute| {
                     let vertices = add(
                         self.usage.vertices,
@@ -694,6 +717,12 @@ impl Driver {
                 super::super::graphics::Error::Vulkan(error) => Failure::Vulkan(error),
                 super::super::graphics::Error::Limit => Failure::Limit,
             })?;
+            if let Some(counters) = current.take_lod_counters() {
+                self.lod_stats
+                    .as_mut()
+                    .ok_or(Failure::UnsupportedQueue)?
+                    .accept_draw(owner, counters)?;
+            }
             self.usage.written_bytes = self
                 .usage
                 .written_bytes
@@ -760,6 +789,7 @@ enum GraphicsCommands {
 enum GraphicsStep {
     Array,
     WaitFlip(pentax_gpu::WaitFlip),
+    LodStats(pentax_gpu::lod_stats_request::Request),
     IndirectDraw,
     StaticDraw(usize),
     OrderedDraw(draw::Draw),
@@ -847,6 +877,7 @@ impl GraphicsCommands {
                         return Err(draw::Error::Unsupported("static live draw action"));
                     }
                     draw::Action::WaitFlip(wait) => GraphicsStep::WaitFlip(wait),
+                    draw::Action::LodStats(request) => GraphicsStep::LodStats(request),
                     draw::Action::Memory(index) => GraphicsStep::Memory(index),
                     draw::Action::Flip(flip) => GraphicsStep::Flip(flip),
                 })
@@ -854,6 +885,7 @@ impl GraphicsCommands {
             Self::Ordered(plan) => plan.next_step()?.map(|next| match next {
                 draw::OrderedStep::Array => GraphicsStep::Array,
                 draw::OrderedStep::WaitFlip(wait) => GraphicsStep::WaitFlip(wait),
+                draw::OrderedStep::LodStats(request) => GraphicsStep::LodStats(request),
                 draw::OrderedStep::IndirectDraw => GraphicsStep::IndirectDraw,
                 draw::OrderedStep::Draw(draw) => GraphicsStep::OrderedDraw(draw),
                 draw::OrderedStep::Memory(index) => GraphicsStep::Memory(index),

@@ -172,10 +172,11 @@ sealed prepared mode and the backend must enforce actual firstInstance0.
 The image extension follows the public Jetsku/KytyPS5 revision
 `b719d67ce6bcfd21d402bd415f3e4f68e4793534` image sample and query lowerings.
 It accepts pixel-stage float 2D non-array, non-multisampled images with separate
-normalized, non-comparison samplers and zero texture-descriptor MIN_LOD. A
-nonzero per-image clamp is not represented by this initial profile and must be
-refused by resource admission, even if a shared sampler has its own LOD limits.
-`IMAGE_SAMPLE`, `IMAGE_SAMPLE_L`,
+normalized, non-comparison samplers. Per-image minimum LOD is represented by
+an explicit view-relative U4.8 field and separately bound image/sampler pairs.
+For a nonzero image minimum, resource admission must prove identical min/mag
+filters, zero bias, no anisotropy, and a minimum within the view's mip range;
+other combinations remain refused. `IMAGE_SAMPLE`, `IMAGE_SAMPLE_L`,
 `IMAGE_SAMPLE_LZ` and `IMAGE_GET_LOD` emit real SPIR-V sampled-image operations;
 query results retain both queried components. Coordinates and explicit LOD are
 f32. Sample DMASK components are packed into consecutive destination VGPRs.
@@ -192,7 +193,12 @@ validate and own the actual texture mip chain, format and sampler state. The
 compiler neither reads descriptors nor substitutes texture values.
 
 Each image gets its own set-zero binding, at kind1..16 in first-use order;
-samplers use kind17..32. The existing per-stage57 offset, buffer kind0 and
+sampler pairs use kind17..32. Reusing one source sampler for two images
+produces two bindings, each identifying its image user SGPR. The validated
+backend can derive pair min=max(samplerMin,imageMin) and
+max=max(samplerMax,imageMin). This preserves the image clamp only in the
+restricted filter profile above; it is not a general replacement for image-view
+minimum LOD. The existing per-stage57 offset, buffer kind0 and
 shader-data kind54 remain unchanged. The manifest exposes each exact binding
 and profile association. Query modules explicitly declare `ImageQuery` and
 record that capability in `RequiredFeatures`. Recursive manifest allocation
@@ -200,8 +206,46 @@ accounting includes images and samplers.
 
 Other dimensions, comparison, bias, derivatives, offsets, LOD clamps, NSA,
 A16/D16, status-return and 128-bit descriptors remain typed refusals. Queries
-currently admit only x/y DMASK bits. This extension does not provide LOD counter
-instrumentation, counter reports, texture upload, Vulkan execution or evidence
-of a rendered commercial frame. Original compiler fixtures inspect genuine
+currently admit only x/y DMASK bits. Counter report publication, texture upload,
+Vulkan execution and evidence of a rendered commercial frame are outside this
+compiler's authority. Original compiler fixtures inspect genuine
 SPIR-V operations and exact resource contracts; a separate backend must execute
 them before any physical sampling or image claim can be made.
+
+## Actual shader LOD feedback
+
+`CommonDescription::lod_feedback` is selected before analysis. It retains
+actual sample operations as side effects even when their color result is dead;
+feedback cannot be enabled after dead-code elimination. Specialization through
+`finish_with_lod_feedback` receives only actual enabled texture counter fields:
+image user SGPR, counter ID, base mip, and absolute U4.8 minimum LOD. The
+view-relative image clamp must equal the absolute minimum minus the base mip,
+saturating at zero. Descriptors without an enabled counter emit no update.
+Queries without an actual sample do not increment counters.
+
+A live counter uses a separate storage buffer at pixel binding90 containing
+514 u32 words: 257 finest levels followed by 257 counts. IDs are 0..255; the
+extra slots remain unused. An implicit sample issues a real `OpImageQueryLod`
+and uses its unclamped component. Explicit LOD and level-zero sampling use
+their actual LOD operands. The shader adds the base mip, clamps to0..14,
+floors, and reduces the finest level with subgroup UMin. The count predicate is
+clamped absolute LOD below the actual absolute U4.8 minimum; magnification at
+minimum zero is not counted. Subgroup UMax and Elect add ONE count per qualifying
+subgroup per dynamic sample instruction. Counts are not per-pixel or per-lane.
+
+Feedback eligibility is actual guest EXEC and not `HelperInvocation`. The
+sample and derivative-dependent query remain before the eligibility branch;
+reductions and election execute inside it so a helper cannot become the sole
+writer. Real device-scope relaxed `AtomicUMin` and `AtomicIAdd` update storage.
+The manifest requires an exact guest subgroup size, subgroup basic/arithmetic,
+and a fragment storage/atomic backend. Unknown subgroup configurations must be
+refused. Caller-provided counter IDs may intentionally alias across textures.
+
+This matches the public GPU instrumentation's u32 addition. Storage counts use
+u32 atomic arithmetic; packing a report saturates a copied count to24 bits,
+and an untouched finest word0xffffffff maps to the unsampled nibble0xf. That
+packing, actual GPU reset, command ordering, barriers, fence completion and
+514-word readback belong to the checked backend/report consumer. The compiler
+provides no host counter model, invented ready state, report writes or claim
+of completed GPU work. Original compiler fixtures inspect real operations and
+control-flow domination; separate physical fixtures must validate execution.

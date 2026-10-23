@@ -117,6 +117,9 @@ impl PixelRegisters {
                 }),
             InputInterface::FragCoord => self.enables & 0xf00 != 0,
             InputInterface::FrontFacing => self.enables & 0x1000 != 0,
+            InputInterface::HelperInvocation | InputInterface::SubgroupLocalInvocationId => {
+                pixel.manifest().lod_feedback_binding() == Some(90)
+            }
             _ => false,
         })
     }
@@ -198,6 +201,16 @@ pub fn validate_shader_interfaces(
             }
             InputInterface::FragCoord if system & 1 == 0 => system |= 1,
             InputInterface::FrontFacing if system & 2 == 0 => system |= 2,
+            InputInterface::HelperInvocation
+                if system & 4 == 0 && pixel.manifest().lod_feedback_binding() == Some(90) =>
+            {
+                system |= 4
+            }
+            InputInterface::SubgroupLocalInvocationId
+                if system & 8 == 0 && pixel.manifest().lod_feedback_binding() == Some(90) =>
+            {
+                system |= 8
+            }
             _ => return Err(Error::Unsupported("pixel interface manifest")),
         }
     }
@@ -207,6 +220,8 @@ pub fn validate_shader_interfaces(
         vertex_components: 4 + 4 * vertex_locations.count_ones(),
         pixel_components: 4 * pixel_locations.count_ones()
             + if system & 1 != 0 { 4 } else { 0 }
-            + if system & 2 != 0 { 1 } else { 0 },
+            + if system & 2 != 0 { 1 } else { 0 }
+            + if system & 4 != 0 { 1 } else { 0 }
+            + if system & 8 != 0 { 1 } else { 0 },
     })
 }

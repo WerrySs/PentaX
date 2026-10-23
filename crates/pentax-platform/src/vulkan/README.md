@@ -104,7 +104,7 @@ Graphics5Driver single/batch submit imports and verifies actual changed results.
 Neither diagnostic establishes commercial-game compatibility.
 
 Persistent guest queues, general allocation aliasing/coherence, surface/swapchain
-presentation, textures/samplers, caches/invalidation, depth/blend specialization,
+presentation, general texture classes, caches/invalidation, depth/blend specialization,
 multi-queue/timeline scheduling, additional shader capabilities and graphics resource classes remain outside
 this profile. No game frame, startup or game
 compatibility is claimed by an original diagnostic result.
@@ -116,5 +116,18 @@ exact compiler feature and pixel-image profile. No compute feature is promoted.
 Images, views, upload buffers, samplers and descriptors remain owned through the
 same batch fence/drain as the render target. Explicit host/transfer/shader
 barriers precede sampling; only fenced target readback reaches guest writeback.
-Unsupported format/filter/device limits and image clamps, feedback or sampler
-bias refuse without replacement samples. Existing nonimage entry points remain.
+Unsupported format/filter/device limits and sampler bias refuse without
+replacement samples. Image MIN_LOD is admitted only through checked per-image
+sampler pairs with equal min/mag filters when the image minimum is nonzero.
+
+Real pixel LOD feedback uses the compiler's exact binding90 and514-word layout.
+Fragment stores/atomics, subgroup BASIC/ARITHMETIC and actual subgroup size32
+must be supported before device creation; ordinary shaders enable none of these
+features implicitly. Each instrumented draw uploads only the driver's prior
+fenced snapshot, uses host-to-fragment and fragment-to-host barriers, waits for
+its own submission, and reads the actual GPU buffer. Samples are never counted
+on the CPU. Reset uses two actual GPU fills followed by the same fence/readback
+boundary. Logical intervals survive this backend's per-draw device lifetime by
+fenced snapshot/reupload; no persistent-device claim is made. Query-only and
+counter-disabled draws leave the prior logical snapshot unchanged. The backend
+never publishes a guest report-ready header. Existing nonimage APIs remain.

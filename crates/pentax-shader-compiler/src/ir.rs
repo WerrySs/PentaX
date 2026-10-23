@@ -66,7 +66,8 @@ macro_rules! ops {
 
         impl Op {
     pub fn is_image(self) -> bool {
-        matches!(self, Self::ImageSampleImplicit | Self::ImageSampleLod | Self::ImageQueryLod)
+        matches!(self, Self::ImageSampleImplicit | Self::ImageSampleLod | Self::ImageQueryLod
+            | Self::ImageSampleImplicitFeedback | Self::ImageSampleLodFeedback)
     }
 
             pub fn result(self) -> Type {
@@ -248,6 +249,8 @@ ops! {
     GetSamplerResource: Resource(U32, U32, U32, U32);
     ImageSampleImplicit: F32x4(Resource, Resource, F32x2);
     ImageSampleLod: F32x4(Resource, Resource, F32x2, F32);
+    ImageSampleImplicitFeedback: F32x4(Resource, Resource, F32x2, U1);
+    ImageSampleLodFeedback: F32x4(Resource, Resource, F32x2, F32, U1);
     ImageQueryLod: F32x2(Resource, Resource, F32x2);
     ReadConstBuffer: U32(Resource, U32);
     LoadBufferU32: U32(Resource, U32, U32, U32, U1);
@@ -269,12 +272,21 @@ ops! {
 }
 
 impl Op {
+    pub fn has_lod_feedback(self) -> bool {
+        matches!(
+            self,
+            Self::ImageSampleImplicitFeedback | Self::ImageSampleLodFeedback
+        )
+    }
+
     /// Source `HasSideEffects` for the ported operations. Register writes are
     /// only meaningful before SSA construction, where DCE does not run.
     pub fn has_side_effects(self) -> bool {
         matches!(
             self,
-            Op::StoreBufferU32
+            Op::ImageSampleImplicitFeedback
+                | Op::ImageSampleLodFeedback
+                | Op::StoreBufferU32
                 | Op::StoreBufferU32x2
                 | Op::StoreBufferU32x3
                 | Op::StoreBufferU32x4

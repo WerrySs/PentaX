@@ -65,12 +65,16 @@ pub struct BufferDescription {
 
 /// An admitted, non-array, non-multisampled float-sampled 2D image. The
 /// caller owns descriptor decoding, format, mip storage and memory authority.
-/// This initial profile requires zero texture-descriptor MIN_LOD; nonzero
-/// per-image clamps cannot be silently folded into a shared sampler.
+/// Nonzero per-image minimum LOD uses separately bound image/sampler pairs.
+/// The caller must prove equal min/mag filters, zero bias and no anisotropy
+/// for those pairs, or refuse them; arbitrary sampler rewriting is not valid.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageDescription {
     /// First of eight consecutive, unmodified user SGPRs (4-aligned).
     pub user_sgpr: u8,
+    /// Texture minimum LOD relative to the image view base, in U4.8. The
+    /// caller proves this is within the resident view's mip range.
+    pub min_lod_u4_8: u16,
 }
 
 /// An admitted normalized-coordinate, non-comparison sampler. Filtering,
@@ -79,6 +83,16 @@ pub struct ImageDescription {
 pub struct SamplerDescription {
     /// First of four consecutive, unmodified user SGPRs (4-aligned).
     pub user_sgpr: u8,
+}
+
+/// Actual enabled T# counter metadata, supplied by validated descriptor decoding.
+/// LOD thresholds use absolute mip U4.8; the query operand is view-relative.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LodCounterDescription {
+    pub user_sgpr: u8,
+    pub counter_id: u8,
+    pub base_level: u8,
+    pub min_lod_u4_8: u16,
 }
 
 /// The host subgroup execution the caller guarantees (for example through a
@@ -104,6 +118,10 @@ pub struct CommonDescription {
     pub buffers: Vec<BufferDescription>,
     pub images: Vec<ImageDescription>,
     pub samplers: Vec<SamplerDescription>,
+    /// Retain every actual sample before resource discovery, including dead-color
+    /// samples whose enabled texture counter can have an observable GPU effect.
+    pub lod_feedback: bool,
+    pub lod_counters: Vec<LodCounterDescription>,
 }
 
 impl CommonDescription {
@@ -118,6 +136,8 @@ impl CommonDescription {
             buffers: Vec::new(),
             images: Vec::new(),
             samplers: Vec::new(),
+            lod_feedback: false,
+            lod_counters: Vec::new(),
         }
     }
 }
@@ -248,6 +268,7 @@ fn validate_common(common: &CommonDescription) -> Result<(), ProfileError> {
     if common.buffers.len() > MAX_BUFFERS
         || common.images.len() > MAX_IMAGES
         || common.samplers.len() > MAX_IMAGES
+        || common.lod_counters.len() > MAX_IMAGES
     {
         return Err(ProfileError::ResourceCount);
     }
@@ -264,7 +285,7 @@ fn validate_common(common: &CommonDescription) -> Result<(), ProfileError> {
                 .map(|(index, sampler)| (4, index, sampler.user_sgpr)),
         )
     {
-        if reg % 4 != 0
+        if !reg.is_multiple_of(4)
             || u32::from(reg) < u32::from(common.user_sgpr_base)
             || u32::from(reg) + width > end
         {
@@ -281,6 +302,27 @@ fn validate_common(common: &CommonDescription) -> Result<(), ProfileError> {
         };
         if duplicate {
             return Err(ProfileError::DuplicateResource);
+        }
+    }
+    if common.images.iter().any(|image| image.min_lod_u4_8 > 0xfff) {
+        return Err(ProfileError::LodFeedbackProfile);
+    }
+    for (index, counter) in common.lod_counters.iter().enumerate() {
+        if !common.lod_feedback
+            || counter.base_level > 14
+            || counter.min_lod_u4_8 > 0xfff
+            || !common.images.iter().any(|image| {
+                image.user_sgpr == counter.user_sgpr
+                    && image.min_lod_u4_8
+                        == counter
+                            .min_lod_u4_8
+                            .saturating_sub(u16::from(counter.base_level) * 256)
+            })
+            || common.lod_counters[..index]
+                .iter()
+                .any(|other| other.user_sgpr == counter.user_sgpr)
+        {
+            return Err(ProfileError::LodFeedbackProfile);
         }
     }
     for (index, buffer) in common.buffers.iter().enumerate() {
@@ -310,6 +352,9 @@ impl Profile {
         match &desc {
             StageDescription::Vertex(vertex) => {
                 validate_common(&vertex.common)?;
+                if vertex.common.lod_feedback {
+                    return Err(ProfileError::LodFeedbackProfile);
+                }
                 if vertex.start_instance_sgpr.is_some_and(|reg| reg >= 106) {
                     return Err(ProfileError::StartInstanceRegister);
                 }
@@ -350,6 +395,9 @@ impl Profile {
             }
             StageDescription::Compute(compute) => {
                 validate_common(&compute.common)?;
+                if compute.common.lod_feedback {
+                    return Err(ProfileError::LodFeedbackProfile);
+                }
                 let [x, y, z] = compute.workgroup_size;
                 let total = u64::from(x)
                     .checked_mul(u64::from(y))
@@ -432,6 +480,20 @@ impl Profile {
         let mut result = Self::new(self.desc)?;
         result.vertex_instance_contract = context;
         Ok(result)
+    }
+
+    pub(crate) fn with_lod_counters(
+        mut self,
+        counters: Vec<LodCounterDescription>,
+    ) -> Result<Self, ProfileError> {
+        let StageDescription::Pixel(pixel) = &mut self.desc else {
+            if counters.is_empty() {
+                return Ok(self);
+            }
+            return Err(ProfileError::LodFeedbackProfile);
+        };
+        pixel.common.lod_counters = counters;
+        Self::new(self.desc)
     }
 
     pub fn common(&self) -> &CommonDescription {

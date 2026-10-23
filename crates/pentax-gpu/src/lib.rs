@@ -67,3 +67,4 @@ mod tests;
 
 pub mod image_descriptor;
 pub mod lod_stats;
+pub mod lod_stats_request;

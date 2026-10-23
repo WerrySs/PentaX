@@ -52,6 +52,7 @@ impl<'d> SampledResources<'d> {
     pub fn new(
         device: &'d Device,
         prepared: &PreparedDraw,
+        allow_counter_images: bool,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
         let textures = prepared.pixel_images();
@@ -63,7 +64,10 @@ impl<'d> SampledResources<'d> {
             || textures.len() > limits.max_descriptor_set_sampled_images as usize
             || samplers.len() > limits.max_per_stage_descriptor_samplers as usize
             || samplers.len() > limits.max_descriptor_set_samplers as usize
-            || textures.len() + samplers.len() + usize::from(prepared.pixel_buffer().is_some())
+            || textures.len()
+                + samplers.len()
+                + usize::from(prepared.pixel_buffer().is_some())
+                + usize::from(prepared.pixel().manifest().lod_feedback_binding().is_some())
                 > limits.max_per_stage_resources as usize
         {
             return Err(VulkanError::Unsupported("sampled descriptor device limits"));
@@ -102,10 +106,8 @@ impl<'d> SampledResources<'d> {
         )?;
         for (index, texture) in textures.iter().enumerate() {
             let d = texture.descriptor();
-            if d.min_lod_u4_8 != 0 || d.counter_id.is_some() {
-                return Err(VulkanError::Unsupported(
-                    "sampled image clamp/feedback profile",
-                ));
+            if d.counter_id.is_some() && !allow_counter_images {
+                return Err(VulkanError::Unsupported("uninitialized image LOD feedback"));
             }
             let [r, g, b, a] = d.swizzle.map(component);
             let image = SampledImage::rgba8(
@@ -134,6 +136,42 @@ impl<'d> SampledResources<'d> {
         }
         for (index, sampler) in samplers.iter().enumerate() {
             let d = sampler.descriptor();
+            let pair = prepared
+                .pixel()
+                .manifest()
+                .samplers()
+                .get(index)
+                .filter(|pair| pair.binding == sampler.binding())
+                .ok_or(VulkanError::InvalidCompilerContract(
+                    "paired sampler binding",
+                ))?;
+            let image = prepared
+                .pixel()
+                .manifest()
+                .images()
+                .iter()
+                .find(|image| image.user_sgpr == pair.image_user_sgpr)
+                .ok_or(VulkanError::InvalidCompilerContract("paired sampler image"))?;
+            let texture = textures
+                .iter()
+                .find(|texture| texture.binding() == image.binding)
+                .ok_or(VulkanError::InvalidCompilerContract(
+                    "paired sampler texture",
+                ))?;
+            let source = texture.descriptor();
+            let minimum = source
+                .min_lod_u4_8
+                .saturating_sub(u16::from(source.base_level) * 256);
+            if image.min_lod_u4_8 != minimum
+                || minimum > u16::from(source.last_level - source.base_level) * 256
+                || d.min_lod_u4_8 < minimum
+                || d.max_lod_u4_8 < minimum
+                || minimum != 0 && d.min_filter != d.mag_filter
+            {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "paired image minimum LOD",
+                ));
+            }
             // Bias interaction with explicit-LOD instructions is outside this
             // initial closed profile, rather than a silently dropped S# field.
             if d.lod_bias_s6_8 != 0 {
@@ -169,6 +207,7 @@ impl<'d> SampledResources<'d> {
             image_bindings: &self.image_bindings[..self.images.len()],
             samplers: &self.samplers,
             sampler_bindings: &self.sampler_bindings[..self.samplers.len()],
+            lod_feedback: None,
         }
     }
     pub fn record(

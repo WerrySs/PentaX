@@ -4,6 +4,21 @@ use super::*;
 use crate::profile::MAX_IMAGES;
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) struct LodCounterUse {
+    pub image: usize,
+    pub profile_index: usize,
+    pub first_use_pc: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SamplerUse {
+    pub user_sgpr: u8,
+    pub image_user_sgpr: u8,
+    pub profile_index: usize,
+    pub first_use_pc: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ImageUse {
     pub user_sgpr: u8,
     pub profile_index: usize,
@@ -55,9 +70,10 @@ pub(crate) fn track_images(
     layout: &mut Layout,
 ) -> Result<(), CompileError> {
     let (images, samplers) = discover_images(ir, budget)?;
+    let mut sampler_uses = Vec::new();
     for (sampler, requirements, entries) in [
         (false, &images, &mut layout.images),
-        (true, &samplers, &mut layout.samplers),
+        (true, &samplers, &mut sampler_uses),
     ] {
         for requirement in requirements {
             let base = requirement.user_sgpr;
@@ -148,18 +164,75 @@ pub(crate) fn track_images(
                 Op::GetSamplerResource,
                 4,
             )?;
-            budget.charge_usize(layout.images.len() + layout.samplers.len())?;
+            budget
+                .charge_usize(layout.images.len() + sampler_uses.len() + layout.samplers.len())?;
+            let image_user_sgpr = image;
             let image = layout
                 .images
                 .iter()
                 .position(|d| d.user_sgpr == image)
                 .ok_or(CompileError::Internal("tracked image missing"))?;
-            let sampler = layout
-                .samplers
+            let source = sampler_uses
                 .iter()
-                .position(|d| d.user_sgpr == sampler)
+                .find(|d| d.user_sgpr == sampler)
                 .ok_or(CompileError::Internal("tracked sampler missing"))?;
+            let sampler = if let Some(index) = layout.samplers.iter().position(|pair| {
+                pair.user_sgpr == sampler && pair.image_user_sgpr == image_user_sgpr
+            }) {
+                layout.samplers[index].first_use_pc =
+                    layout.samplers[index].first_use_pc.min(inst.pc);
+                index
+            } else {
+                budget.push(
+                    &mut layout.samplers,
+                    SamplerUse {
+                        user_sgpr: source.user_sgpr,
+                        image_user_sgpr,
+                        profile_index: source.profile_index,
+                        first_use_pc: inst.pc,
+                    },
+                    MAX_IMAGES,
+                    LimitKind::SourceTable,
+                )?;
+                layout.samplers.len() - 1
+            };
             ir.inst_mut(id).aux = image as u32 | ((sampler as u32) << 16);
+            if inst.op.has_lod_feedback() {
+                budget.charge_usize(profile.common().lod_counters.len())?;
+                if let Some(profile_index) = profile
+                    .common()
+                    .lod_counters
+                    .iter()
+                    .position(|counter| counter.user_sgpr == layout.images[image].user_sgpr)
+                {
+                    if profile.common().subgroup.is_none() {
+                        return Err(CompileError::unsupported(
+                            inst.pc,
+                            None,
+                            UnsupportedReason::RequiresExactSubgroup,
+                        ));
+                    }
+                    budget.charge_usize(layout.lod_counters.len())?;
+                    if let Some(entry) = layout
+                        .lod_counters
+                        .iter_mut()
+                        .find(|entry| entry.image == image)
+                    {
+                        entry.first_use_pc = entry.first_use_pc.min(inst.pc);
+                    } else {
+                        budget.push(
+                            &mut layout.lod_counters,
+                            LodCounterUse {
+                                image,
+                                profile_index,
+                                first_use_pc: inst.pc,
+                            },
+                            MAX_IMAGES,
+                            LimitKind::SourceTable,
+                        )?;
+                    }
+                }
+            }
         }
     }
     Ok(())

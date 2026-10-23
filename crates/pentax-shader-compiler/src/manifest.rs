@@ -5,6 +5,11 @@
 
 use pentax_shader::ShaderStage;
 
+/// Fixed feedback ABI: 256 visible texture counters plus one reserved slot,
+/// followed by the corresponding counts. These constants confer no authority.
+pub const LOD_COUNTER_ENTRIES: u32 = 257;
+pub const LOD_COUNTER_WORDS: u32 = 514;
+
 /// Features actually declared by the emitted SPIR-V module. A host must check
 /// and enable their API equivalents before creating or executing a pipeline.
 /// These describe module requirements, never an inference about a device.
@@ -20,9 +25,14 @@ pub struct RequiredFeatures {
     pub(crate) subgroup_basic: bool,
     pub(crate) subgroup_ballot: bool,
     pub(crate) image_query: bool,
+    pub(crate) subgroup_arithmetic: bool,
 }
 
 impl RequiredFeatures {
+    pub fn subgroup_arithmetic(&self) -> bool {
+        self.subgroup_arithmetic
+    }
+
     pub fn image_query(&self) -> bool {
         self.image_query
     }
@@ -94,6 +104,7 @@ pub struct BufferElement {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageElement {
     pub user_sgpr: u8,
+    pub min_lod_u4_8: u16,
     pub profile_index: usize,
     pub binding: u32,
     pub first_use_pc: u32,
@@ -103,8 +114,22 @@ pub struct ImageElement {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SamplerElement {
     pub user_sgpr: u8,
+    /// The image associated with this separately bound sampler pair.
+    pub image_user_sgpr: u8,
     pub profile_index: usize,
     pub binding: u32,
+    pub first_use_pc: u32,
+}
+
+/// One image's actual enabled counter specialization. Counter storage is separate
+/// from guest memory; binding presence does not assert GPU execution/completion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LodCounterElement {
+    pub user_sgpr: u8,
+    pub profile_index: usize,
+    pub counter_id: u8,
+    pub base_level: u8,
+    pub min_lod_u4_8: u16,
     pub first_use_pc: u32,
 }
 
@@ -119,6 +144,7 @@ pub enum InputInterface {
     LocalInvocationId,
     LocalInvocationIndex,
     SubgroupLocalInvocationId,
+    HelperInvocation,
     /// A pixel vec4 parameter at `location`.
     Parameter {
         input: u32,
@@ -162,6 +188,8 @@ pub struct Manifest {
     pub(crate) buffers: Vec<BufferElement>,
     pub(crate) images: Vec<ImageElement>,
     pub(crate) samplers: Vec<SamplerElement>,
+    pub(crate) lod_counters: Vec<LodCounterElement>,
+    pub(crate) lod_feedback_binding: Option<u32>,
     pub(crate) inputs: Vec<InputInterface>,
     pub(crate) outputs: Vec<OutputInterface>,
     pub(crate) workgroup_size: Option<[u32; 3]>,
@@ -170,6 +198,14 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Exact storage-buffer binding for 514 u32 counter words, descriptor set zero.
+    pub fn lod_feedback_binding(&self) -> Option<u32> {
+        self.lod_feedback_binding
+    }
+    pub fn lod_counters(&self) -> &[LodCounterElement] {
+        &self.lod_counters
+    }
+
     pub fn images(&self) -> &[ImageElement] {
         &self.images
     }
@@ -180,9 +216,14 @@ impl Manifest {
     /// Actual recursive vector capacities retained by this manifest. Fixed
     /// metadata is inline; there are no other owned allocations in its fields.
     pub fn retained_host_bytes(&self) -> usize {
-        self.images
+        self.lod_counters
             .capacity()
-            .saturating_mul(std::mem::size_of::<ImageElement>())
+            .saturating_mul(std::mem::size_of::<LodCounterElement>())
+            .saturating_add(
+                self.images
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<ImageElement>()),
+            )
             .saturating_add(
                 self.samplers
                     .capacity()

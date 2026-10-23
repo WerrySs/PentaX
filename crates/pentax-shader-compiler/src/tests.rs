@@ -138,11 +138,15 @@ fn assert_manifest_requirements(module: &CompiledShader) {
     assert_eq!(requirements.draw_parameters(), capabilities.contains(&4427));
     assert_eq!(requirements.subgroup_basic(), capabilities.contains(&61));
     assert_eq!(requirements.subgroup_ballot(), capabilities.contains(&64));
+    assert_eq!(
+        requirements.subgroup_arithmetic(),
+        capabilities.contains(&63)
+    );
     assert_eq!(requirements.image_query(), capabilities.contains(&50));
     assert!(
         capabilities
             .iter()
-            .all(|capability| [1, 4466, 11, 4427, 61, 64, 50].contains(capability))
+            .all(|capability| [1, 4466, 11, 4427, 61, 63, 64, 50].contains(capability))
     );
 }
 

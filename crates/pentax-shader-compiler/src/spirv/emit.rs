@@ -33,6 +33,7 @@ type R<T> = Result<T, CompileError>;
 pub(crate) const BINDING_BUFFERS: u32 = 0;
 pub(crate) const BINDING_IMAGES: u32 = 1;
 pub(crate) const BINDING_SAMPLERS: u32 = 17;
+pub(crate) const BINDING_LOD_FEEDBACK: u32 = 33;
 pub(crate) const BINDING_SHADER_DATA: u32 = 54;
 const BINDING_GROUP: u32 = 57;
 
@@ -68,6 +69,8 @@ struct Emit<'a, 'b> {
     buffers_var: u32,
     image_vars: Vec<u32>,
     sampler_vars: Vec<u32>,
+    lod_feedback_var: u32,
+    helper_var: u32,
     shader_data_var: u32,
     inputs: Vec<(StageInput, u32)>,
     outputs: Vec<(crate::passes::StageOutput, u32)>,
@@ -1548,9 +1551,11 @@ impl Emit<'_, '_> {
                 self.cmp_const(OpINotEqual, either, 0)?
             }
             Op::GetBufferResource | Op::GetImageResource | Op::GetSamplerResource => 0,
-            Op::ImageSampleImplicit | Op::ImageSampleLod | Op::ImageQueryLod => {
-                self.emit_image(id)?
-            }
+            Op::ImageSampleImplicit
+            | Op::ImageSampleLod
+            | Op::ImageQueryLod
+            | Op::ImageSampleImplicitFeedback
+            | Op::ImageSampleLodFeedback => self.emit_image(id)?,
             Op::CompositeExtractF32x2 | Op::CompositeExtractF32x4 => {
                 let value = self.arg(id, 0)?;
                 let ty = self.ty_f32()?;
@@ -1936,24 +1941,152 @@ impl Emit<'_, '_> {
         if op == Op::ImageQueryLod {
             self.b.require_capability(CapabilityImageQuery)?;
             let ty = self.ty_fvec(2)?;
-            self.op(OpImageQueryLod, ty, &[sampled, coords])
+            return self.op(OpImageQueryLod, ty, &[sampled, coords]);
+        }
+        let explicit = matches!(op, Op::ImageSampleLod | Op::ImageSampleLodFeedback);
+        let ty = self.ty_fvec(4)?;
+        let sample = if explicit {
+            let lod = self.arg(id, 3)?;
+            self.op(
+                OpImageSampleExplicitLod,
+                ty,
+                &[sampled, coords, ImageOperandsLodMask, lod],
+            )?
         } else {
-            let ty = self.ty_fvec(4)?;
-            if op == Op::ImageSampleLod {
-                let lod = self.arg(id, 3)?;
-                self.op(
-                    OpImageSampleExplicitLod,
-                    ty,
-                    &[sampled, coords, ImageOperandsLodMask, lod],
-                )
-            } else {
-                self.op(OpImageSampleImplicitLod, ty, &[sampled, coords])
+            self.op(OpImageSampleImplicitLod, ty, &[sampled, coords])?
+        };
+        if op.has_lod_feedback() {
+            self.b
+                .budget()
+                .charge_usize(self.layout.lod_counters.len())?;
+            if let Some(counter) = self
+                .layout
+                .lod_counters
+                .iter()
+                .find(|counter| counter.image == image_index)
+            {
+                let description = self.profile.common().lod_counters[counter.profile_index];
+                let lod = if explicit {
+                    self.arg(id, 3)?
+                } else {
+                    self.b.require_capability(CapabilityImageQuery)?;
+                    let query_type = self.ty_fvec(2)?;
+                    let query = self.op(OpImageQueryLod, query_type, &[sampled, coords])?;
+                    self.f32op(OpCompositeExtract, &[query, 1])?
+                };
+                let active = self.arg(id, if explicit { 4 } else { 3 })?;
+                let bool_type = self.ty_bool()?;
+                let helper = self.op(OpLoad, bool_type, &[self.helper_var])?;
+                let ordinary = self.boolop(OpLogicalNot, &[helper])?;
+                let eligible = self.boolop(OpLogicalAnd, &[active, ordinary])?;
+                // Derivative-dependent query remains before this conditional.
+                // Helpers and guest EXEC-inactive lanes cannot elect a writer.
+                self.if_condition(eligible, |e| e.emit_lod_record(description, lod))?;
             }
         }
+        Ok(sample)
+    }
+
+    fn lod_counter_pointer(&mut self, index: u32) -> R<u32> {
+        let word = self.ty_u32()?;
+        let pointer_type = self.ty_pointer(StorageClassStorageBuffer, word)?;
+        let zero = self.const_u32(0)?;
+        let index = self.const_u32(index)?;
+        self.op(
+            OpAccessChain,
+            pointer_type,
+            &[self.lod_feedback_var, zero, index],
+        )
+    }
+
+    fn emit_lod_record(&mut self, counter: crate::LodCounterDescription, lod: u32) -> R<()> {
+        self.b.require_capability(CapabilityGroupNonUniform)?;
+        self.b
+            .require_capability(CapabilityGroupNonUniformArithmetic)?;
+        let base = self.const_u32(u32::from(counter.base_level))?;
+        let base = self.f32op(OpConvertUToF, &[base])?;
+        let absolute = self.f32op(OpFAdd, &[lod, base])?;
+        let zero = self.const_f32(0)?;
+        let fourteen = self.const_f32(0x4160_0000)?;
+        let clamped = self.ext_f32(GLSLstd450FClamp, &[absolute, zero, fourteen])?;
+        let floor = self.ext_f32(GLSLstd450Floor, &[clamped])?;
+        let level = self.u32op(OpConvertFToU, &[floor])?;
+        let scope = self.const_u32(ScopeSubgroup)?;
+        let finest = self.u32op(OpGroupNonUniformUMin, &[scope, 0, level])?;
+        let threshold = self.const_u32(u32::from(counter.min_lod_u4_8))?;
+        let threshold = self.f32op(OpConvertUToF, &[threshold])?;
+        let scale = self.const_f32(0x3b80_0000)?; // exactly 1/256
+        let threshold = self.f32op(OpFMul, &[threshold, scale])?;
+        // Magnification at MIN_LOD zero is not a minimum-LOD clamp.
+        let below = self.boolop(OpFOrdLessThan, &[clamped, threshold])?;
+        let one = self.const_u32(1)?;
+        let zero = self.const_u32(0)?;
+        let counted = self.select_u32(below, one, zero)?;
+        let counted = self.u32op(OpGroupNonUniformUMax, &[scope, 0, counted])?;
+        let elected = self.boolop(OpGroupNonUniformElect, &[scope])?;
+        self.if_condition(elected, |e| {
+            let pointer = e.lod_counter_pointer(u32::from(counter.counter_id))?;
+            let device = e.const_u32(ScopeDevice)?;
+            let semantics = e.const_u32(MemorySemanticsMaskNone)?;
+            e.u32op(OpAtomicUMin, &[pointer, device, semantics, finest])?;
+            let any = e.cmp_const(OpINotEqual, counted, 0)?;
+            e.if_condition(any, |e| {
+                let pointer = e.lod_counter_pointer(
+                    crate::LOD_COUNTER_ENTRIES + u32::from(counter.counter_id),
+                )?;
+                let one = e.const_u32(1)?;
+                e.u32op(OpAtomicIAdd, &[pointer, device, semantics, one])?;
+                Ok(())
+            })
+        })
+    }
+
+    fn define_lod_feedback(&mut self) -> R<()> {
+        if self.layout.lod_counters.is_empty() {
+            return Ok(());
+        }
+        let word = self.ty_u32()?;
+        let count = self.const_u32(crate::LOD_COUNTER_WORDS)?;
+        let array = self.b.decorated_ty(
+            OpTypeArray,
+            &[Annotation {
+                op: OpDecorate,
+                operands: &[DecorationArrayStride, 4],
+            }],
+            &[word, count],
+        )?;
+        let block = self.b.decorated_ty(
+            OpTypeStruct,
+            &[
+                Annotation {
+                    op: OpMemberDecorate,
+                    operands: &[0, DecorationOffset, 0],
+                },
+                Annotation {
+                    op: OpDecorate,
+                    operands: &[DecorationBlock],
+                },
+            ],
+            &[array],
+        )?;
+        self.lod_feedback_var = self.define_binding(
+            block,
+            StorageClassStorageBuffer,
+            "lod_feedback",
+            BINDING_LOD_FEEDBACK,
+        )?;
+        let bool_type = self.ty_bool()?;
+        self.helper_var =
+            self.define_interface(bool_type, StorageClassInput, "gl_HelperInvocation")?;
+        self.b.annotate(
+            OpDecorate,
+            &[self.helper_var, DecorationBuiltIn, BuiltInHelperInvocation],
+        )
     }
 
     /// Source `DefineDescriptors` (push data, Buffers, ShaderData).
     fn define_descriptors(&mut self) -> R<()> {
+        self.define_lod_feedback()?;
         for index in 0..self.layout.images.len() {
             let ty = self.sampled_image_type()?;
             let variable = self.define_binding(
@@ -2129,6 +2262,8 @@ pub(crate) fn emit_program(
         buffers_var: 0,
         image_vars: Vec::new(),
         sampler_vars: Vec::new(),
+        lod_feedback_var: 0,
+        helper_var: 0,
         shader_data_var: 0,
         inputs: Vec::new(),
         outputs: Vec::new(),

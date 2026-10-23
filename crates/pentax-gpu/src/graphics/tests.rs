@@ -432,3 +432,5 @@ mod native_instance;
 mod lod_stats;
 
 mod sampled_textures;
+
+mod lod_receiver;

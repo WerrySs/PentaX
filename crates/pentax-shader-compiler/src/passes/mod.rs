@@ -216,7 +216,8 @@ pub(crate) struct StageOutput {
 pub(crate) struct Layout {
     pub buffers: Vec<BufferUse>,
     pub images: Vec<images::ImageUse>,
-    pub samplers: Vec<images::ImageUse>,
+    pub samplers: Vec<images::SamplerUse>,
+    pub lod_counters: Vec<images::LodCounterUse>,
     pub inputs: Vec<StageInput>,
     pub outputs: Vec<StageOutput>,
     pub user_data_registers: Vec<u8>,

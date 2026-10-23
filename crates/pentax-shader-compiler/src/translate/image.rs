@@ -64,12 +64,25 @@ impl Translator<'_> {
         let y = self.read_f32(y_op)?;
         let coords = self.e.emit(Op::CompositeConstructF32x2, &[x, y])?;
         let query = inst.opcode == Opcode::ImageGetLod;
+        let feedback = self.profile.common().lod_feedback;
+        let active = if feedback {
+            self.e.get(Op::GetExec, 0)?
+        } else {
+            Value::U1(true)
+        };
         let result = if query {
             self.e
                 .emit(Op::ImageQueryLod, &[texture, sampler, coords])?
         } else if flags == F::NONE {
-            self.e
-                .emit(Op::ImageSampleImplicit, &[texture, sampler, coords])?
+            if feedback {
+                self.e.emit(
+                    Op::ImageSampleImplicitFeedback,
+                    &[texture, sampler, coords, active],
+                )?
+            } else {
+                self.e
+                    .emit(Op::ImageSampleImplicit, &[texture, sampler, coords])?
+            }
         } else {
             let lod = if flags == F::LEVEL_ZERO {
                 Value::F32(0)
@@ -77,8 +90,15 @@ impl Translator<'_> {
                 let operand = self.offset_operand(inst.src(0), 2)?;
                 self.read_f32(operand)?
             };
-            self.e
-                .emit(Op::ImageSampleLod, &[texture, sampler, coords, lod])?
+            if feedback {
+                self.e.emit(
+                    Op::ImageSampleLodFeedback,
+                    &[texture, sampler, coords, lod, active],
+                )?
+            } else {
+                self.e
+                    .emit(Op::ImageSampleLod, &[texture, sampler, coords, lod])?
+            }
         };
         // DMASK selects components, packed consecutively in destination VGPRs.
         // Snapshot every source before overwriting any potentially aliased VGPR.

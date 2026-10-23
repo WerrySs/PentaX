@@ -11,8 +11,8 @@ use super::{
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
     BufferAccess, BufferDescription, CommonDescription, CompiledShader, ImageDescription,
-    Limits as CompilerLimits, Profile, SamplerDescription, ShaderProgram, StageDescription,
-    VertexDescription, WaveSize, analyze,
+    Limits as CompilerLimits, LodCounterDescription, Profile, SamplerDescription, ShaderProgram,
+    StageDescription, VertexDescription, WaveSize, analyze,
 };
 
 fn context(state: &GraphicsState, register: u32) -> Result<u32, Error> {
@@ -291,12 +291,25 @@ fn read_program(
 fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
     let manifest = compiled.manifest();
     let features = manifest.required_features();
+    let feedback = manifest.lod_feedback_binding() == Some(90);
     if manifest.shader_data_binding().is_some()
         || manifest.undefined_register_reads() != 0
-        || manifest.required_subgroup_size().is_some()
-        || features.subgroup_basic()
         || features.subgroup_ballot()
         || features.draw_parameters()
+        || manifest
+            .lod_feedback_binding()
+            .is_some_and(|binding| binding != 90)
+        || feedback
+            && (manifest.stage() != ShaderStage::Pixel
+                || !features.subgroup_basic()
+                || !features.subgroup_arithmetic()
+                || manifest.required_subgroup_size() != Some(32)
+                || manifest.lod_counters().is_empty())
+        || !feedback
+            && (manifest.required_subgroup_size().is_some()
+                || features.subgroup_basic()
+                || features.subgroup_arithmetic()
+                || !manifest.lod_counters().is_empty())
     {
         return Err(Error::Unsupported("graphics resource/subgroup manifest"));
     }
@@ -315,7 +328,11 @@ fn validate_manifest(compiled: &CompiledShader) -> Result<(), Error> {
             .iter()
             .enumerate()
             .any(|(index, sampler)| {
-                sampler.profile_index != index
+                sampler.profile_index >= 16
+                    || !manifest
+                        .images()
+                        .iter()
+                        .any(|image| image.user_sgpr == sampler.image_user_sgpr)
                     || sampler.binding != 74 + index as u32
                     || sampler.user_sgpr > 12
                     || !sampler.user_sgpr.is_multiple_of(4)
@@ -349,6 +366,7 @@ struct BufferSource {
 struct SampledSources {
     images: Vec<crate::image_descriptor::Image2D>,
     samplers: Vec<crate::image_descriptor::Sampler>,
+    sampler_users: [u8; 16],
 }
 
 fn compile_stage(
@@ -361,6 +379,7 @@ fn compile_stage(
 ) -> Result<(CompiledShader, Option<BufferSource>, SampledSources), Error> {
     let state = &draw.state;
     let users = profile.common().user_sgpr_count;
+    let enable_lod = profile.common().lod_feedback;
     let native = vertex && draw.native_offsets.is_some();
     budget.peak(compiler.max_bytes)?;
     let analysis = if native {
@@ -438,9 +457,16 @@ fn compile_stage(
     let mut sampled = SampledSources::default();
     let mut images = Vec::new();
     let mut samplers = Vec::new();
+    let mut counters = Vec::new();
+    let counter_capacity = if enable_lod {
+        analysis.images().len()
+    } else {
+        0
+    };
     let initial_description_bytes = analysis.images().len()
         * std::mem::size_of::<ImageDescription>()
-        + analysis.samplers().len() * std::mem::size_of::<SamplerDescription>();
+        + analysis.samplers().len() * std::mem::size_of::<SamplerDescription>()
+        + counter_capacity * std::mem::size_of::<LodCounterDescription>();
     let initial_image_bytes =
         analysis.images().len() * std::mem::size_of::<crate::image_descriptor::Image2D>();
     let initial_sampler_bytes =
@@ -470,8 +496,12 @@ fn compile_stage(
     samplers
         .try_reserve_exact(analysis.samplers().len())
         .map_err(|_| Error::Allocation)?;
+    counters
+        .try_reserve_exact(counter_capacity)
+        .map_err(|_| Error::Allocation)?;
     let description_bytes = images.capacity() * std::mem::size_of::<ImageDescription>()
-        + samplers.capacity() * std::mem::size_of::<SamplerDescription>();
+        + samplers.capacity() * std::mem::size_of::<SamplerDescription>()
+        + counters.capacity() * std::mem::size_of::<LodCounterDescription>();
     budget.host(description_bytes - initial_description_bytes)?;
     budget.host(
         sampled.images.capacity() * std::mem::size_of::<crate::image_descriptor::Image2D>()
@@ -507,17 +537,24 @@ fn compile_stage(
             },
         )
         .map_err(|_| Error::Unsupported("sampled image descriptor"))?;
-        if descriptor.counter_id.is_some() {
-            return Err(Error::Unsupported("sampled image LOD feedback"));
+        if let Some(counter_id) = descriptor.counter_id {
+            if !enable_lod {
+                return Err(Error::Unsupported("uninitialized image LOD feedback"));
+            }
+            counters.push(LodCounterDescription {
+                user_sgpr: requirement.user_sgpr,
+                counter_id,
+                base_level: descriptor.base_level,
+                min_lod_u4_8: descriptor.min_lod_u4_8,
+            });
         }
-        if descriptor.min_lod_u4_8 != 0 {
-            // The same S# may serve different images. Its clamp cannot replace
-            // the image-specific clamp without an admitted shader/device mode.
-            return Err(Error::Unsupported("sampled image minimum LOD"));
-        }
+        let min_lod_u4_8 = descriptor
+            .min_lod_u4_8
+            .saturating_sub(u16::from(descriptor.base_level) * 256);
         sampled.images.push(descriptor);
         images.push(ImageDescription {
             user_sgpr: requirement.user_sgpr,
+            min_lod_u4_8,
         });
     }
     for requirement in analysis.samplers() {
@@ -537,6 +574,7 @@ fn compile_stage(
                 0x0c + u32::from(requirement.user_sgpr) + index as u32,
             )?;
         }
+        sampled.sampler_users[sampled.samplers.len()] = requirement.user_sgpr;
         sampled.samplers.push(
             crate::image_descriptor::decode_sampler(words)
                 .map_err(|_| Error::Unsupported("sampled image sampler"))?,
@@ -549,10 +587,11 @@ fn compile_stage(
     // The caller supplies no new entry, interface or register policy here.
     budget.peak(compiler.max_bytes)?;
     let compiled = analysis
-        .finish_with_images(description.as_slice(), &images, &samplers)
+        .finish_with_lod_feedback(description.as_slice(), &images, &samplers, &counters)
         .map_err(|_| Error::Compile)?;
     drop(images);
     drop(samplers);
+    drop(counters);
     budget.release(description_bytes)?;
     budget.host(compiled.retained_host_bytes())?;
     validate_manifest(&compiled)?;
@@ -568,7 +607,11 @@ fn compile_stage(
         return Err(Error::Unsupported("graphics buffer specialization"));
     }
     if compiled.manifest().images().len() != sampled.images.len()
-        || compiled.manifest().samplers().len() != sampled.samplers.len()
+        || compiled.manifest().samplers().len() > 16
+        || compiled.manifest().samplers().iter().any(|sampler| {
+            sampler.profile_index >= sampled.samplers.len()
+                || sampled.sampler_users[sampler.profile_index] != sampler.user_sgpr
+        })
     {
         return Err(Error::Unsupported("sampled resource specialization"));
     }
@@ -661,6 +704,16 @@ pub fn prepare_draw_with_target(
     draw: &Draw,
     memory: &impl Memory,
     limits: &Limits,
+    decode: impl FnOnce(&[u8], TargetGeometry, TargetDecodeLimits) -> Result<DecodedTarget, Error>,
+) -> Result<PreparedDraw, Error> {
+    prepare_draw_with_target_and_lod(draw, memory, limits, false, decode)
+}
+
+pub fn prepare_draw_with_target_and_lod(
+    draw: &Draw,
+    memory: &impl Memory,
+    limits: &Limits,
+    enable_lod: bool,
     decode: impl FnOnce(&[u8], TargetGeometry, TargetDecodeLimits) -> Result<DecodedTarget, Error>,
 ) -> Result<PreparedDraw, Error> {
     let mut budget = Budget {
@@ -770,8 +823,13 @@ pub fn prepare_draw_with_target(
         start_instance_sgpr: None,
     }))
     .map_err(|_| Error::Compile)?;
-    let (pixel_description, pixel_profile_bytes) =
+    let (mut pixel_description, pixel_profile_bytes) =
         config.pixel.profile(config.pixel_users, &mut budget)?;
+    pixel_description.common.lod_feedback = enable_lod;
+    if enable_lod {
+        pixel_description.common.subgroup =
+            Some(pentax_shader_compiler::SubgroupProfile { size: 32 });
+    }
     let pixel_profile =
         Profile::new(StageDescription::Pixel(pixel_description)).map_err(|_| Error::Compile)?;
     let (vertex, vertex_source, vertex_sampled) = compile_stage(
@@ -832,14 +890,14 @@ pub fn prepare_draw_with_target(
     let initial_prepared_image_bytes =
         pixel_sampled.images.len() * std::mem::size_of::<super::PreparedTexture>();
     let initial_prepared_sampler_bytes =
-        pixel_sampled.samplers.len() * std::mem::size_of::<super::PreparedSampler>();
+        pixel.manifest().samplers().len() * std::mem::size_of::<super::PreparedSampler>();
     budget.host(initial_prepared_image_bytes)?;
     budget.host(initial_prepared_sampler_bytes)?;
     pixel_images
         .try_reserve_exact(pixel_sampled.images.len())
         .map_err(|_| Error::Allocation)?;
     pixel_samplers
-        .try_reserve_exact(pixel_sampled.samplers.len())
+        .try_reserve_exact(pixel.manifest().samplers().len())
         .map_err(|_| Error::Allocation)?;
     budget.host(
         pixel_images.capacity() * std::mem::size_of::<super::PreparedTexture>()
@@ -849,6 +907,49 @@ pub fn prepare_draw_with_target(
         pixel_samplers.capacity() * std::mem::size_of::<super::PreparedSampler>()
             - initial_prepared_sampler_bytes,
     )?;
+    budget.work(
+        ((pixel.manifest().images().len() + pixel.manifest().samplers().len()) as u64)
+            .checked_mul(32)
+            .ok_or(Error::Limit("sampled metadata work"))?,
+    )?;
+    for manifest in pixel.manifest().samplers() {
+        let mut descriptor = *pixel_sampled
+            .samplers
+            .get(manifest.profile_index)
+            .ok_or(Error::Unsupported("sampler source specialization"))?;
+        let image_index = pixel
+            .manifest()
+            .images()
+            .iter()
+            .position(|image| image.user_sgpr == manifest.image_user_sgpr)
+            .ok_or(Error::Unsupported("sampler image pair"))?;
+        let image = pixel_sampled
+            .images
+            .get(image_index)
+            .ok_or(Error::Unsupported("sampler image source"))?;
+        let minimum = image
+            .min_lod_u4_8
+            .saturating_sub(u16::from(image.base_level) * 256);
+        if pixel.manifest().images()[image_index].min_lod_u4_8 != minimum
+            || minimum > u16::from(image.last_level - image.base_level) * 256
+            || descriptor.lod_bias_s6_8 != 0
+            || minimum != 0 && descriptor.min_filter != descriptor.mag_filter
+        {
+            return Err(Error::Unsupported(
+                "paired image minimum LOD/filter profile",
+            ));
+        }
+        // Per-pair samplers preserve a shared source S# without changing any
+        // other image's clamp. Equal texel filters avoid changing min/mag
+        // selection when the source image clamp raises the sampled mip level.
+        descriptor.min_lod_u4_8 = descriptor.min_lod_u4_8.max(minimum);
+        descriptor.max_lod_u4_8 = descriptor.max_lod_u4_8.max(minimum);
+        pixel_samplers.push(super::PreparedSampler {
+            binding: manifest.binding,
+            descriptor,
+        });
+    }
+    drop(pixel_sampled.samplers);
     for (descriptor, manifest) in pixel_sampled
         .images
         .into_iter()
@@ -861,16 +962,6 @@ pub fn prepare_draw_with_target(
             target_range,
             &mut budget,
         )?);
-    }
-    for (descriptor, manifest) in pixel_sampled
-        .samplers
-        .into_iter()
-        .zip(pixel.manifest().samplers())
-    {
-        pixel_samplers.push(super::PreparedSampler {
-            binding: manifest.binding,
-            descriptor,
-        });
     }
     budget.release(image_metadata_bytes)?;
     budget.release(sampler_metadata_bytes)?;

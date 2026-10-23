@@ -193,6 +193,7 @@ fn manifest_of(
             ImageElement {
                 user_sgpr: entry.user_sgpr,
                 profile_index: entry.profile_index,
+                min_lod_u4_8: profile.common().images[entry.profile_index].min_lod_u4_8,
                 binding: spirv::emit::native_binding(
                     stage,
                     spirv::emit::BINDING_IMAGES + index as u32,
@@ -209,11 +210,29 @@ fn manifest_of(
             SamplerElement {
                 user_sgpr: entry.user_sgpr,
                 profile_index: entry.profile_index,
+                image_user_sgpr: entry.image_user_sgpr,
                 binding: spirv::emit::native_binding(
                     stage,
                     spirv::emit::BINDING_SAMPLERS + index as u32,
                 ),
                 first_use_pc: entry.first_use_pc,
+            },
+            profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+    }
+    let mut lod_counters = Vec::new();
+    for counter in &layout.lod_counters {
+        let description = profile.common().lod_counters[counter.profile_index];
+        budget.push(
+            &mut lod_counters,
+            LodCounterElement {
+                user_sgpr: description.user_sgpr,
+                profile_index: counter.profile_index,
+                counter_id: description.counter_id,
+                base_level: description.base_level,
+                min_lod_u4_8: description.min_lod_u4_8,
+                first_use_pc: counter.first_use_pc,
             },
             profile::MAX_IMAGES,
             LimitKind::SourceTable,
@@ -240,6 +259,14 @@ fn manifest_of(
             },
         };
         budget.push(&mut inputs, entry, 128, LimitKind::SourceTable)?;
+    }
+    if !layout.lod_counters.is_empty() {
+        budget.push(
+            &mut inputs,
+            InputInterface::HelperInvocation,
+            128,
+            LimitKind::SourceTable,
+        )?;
     }
     if uses_subgroup {
         budget.push(
@@ -278,10 +305,13 @@ fn manifest_of(
         buffers,
         images,
         samplers,
+        lod_counters,
+        lod_feedback_binding: (!layout.lod_counters.is_empty())
+            .then(|| spirv::emit::native_binding(stage, spirv::emit::BINDING_LOD_FEEDBACK)),
         inputs,
         outputs,
         workgroup_size: profile.compute().map(|cs| cs.workgroup_size),
-        required_subgroup_size: if uses_subgroup {
+        required_subgroup_size: if uses_subgroup || !layout.lod_counters.is_empty() {
             profile.common().subgroup.map(|s| s.size)
         } else {
             None

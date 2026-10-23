@@ -88,9 +88,22 @@ pub(super) fn check_graphics_contract(
     }
     check_contract_inner(shader, stage, true)?;
     let manifest = shader.manifest();
-    if manifest.required_features().subgroup_basic()
-        || manifest.required_features().subgroup_ballot()
-        || manifest.required_subgroup_size().is_some()
+    let feedback = manifest.lod_feedback_binding() == Some(90);
+    if manifest.required_features().subgroup_ballot()
+        || manifest
+            .lod_feedback_binding()
+            .is_some_and(|binding| binding != 90)
+        || feedback
+            && (stage != ShaderStage::Pixel
+                || !manifest.required_features().subgroup_basic()
+                || !manifest.required_features().subgroup_arithmetic()
+                || manifest.required_subgroup_size() != Some(32)
+                || manifest.lod_counters().is_empty())
+        || !feedback
+            && (manifest.required_subgroup_size().is_some()
+                || manifest.required_features().subgroup_basic()
+                || manifest.required_features().subgroup_arithmetic()
+                || !manifest.lod_counters().is_empty())
     {
         return Err(VulkanError::InvalidCompilerContract("graphics resources"));
     }
@@ -106,7 +119,10 @@ pub(super) fn check_graphics_contract(
                 || !image.user_sgpr.is_multiple_of(4)
         })
         || samplers.iter().enumerate().any(|(index, sampler)| {
-            sampler.profile_index != index
+            sampler.profile_index >= 16
+                || !images
+                    .iter()
+                    .any(|image| image.user_sgpr == sampler.image_user_sgpr)
                 || sampler.binding != 74 + index as u32
                 || sampler.user_sgpr > 12
                 || !sampler.user_sgpr.is_multiple_of(4)
@@ -178,7 +194,9 @@ fn check_contract_inner(
     if !graphics_push
         && (!manifest.images().is_empty()
             || !manifest.samplers().is_empty()
-            || required.image_query())
+            || required.image_query()
+            || required.subgroup_arithmetic()
+            || manifest.lod_feedback_binding().is_some())
     {
         return Err(VulkanError::InvalidCompilerContract(
             "compute sampled resource profile",
@@ -238,7 +256,12 @@ fn check_contract_inner(
                         && graphics_push
                         && stage == ShaderStage::Pixel
                         && required.image_query()
-                        && !manifest.images().is_empty());
+                        && !manifest.images().is_empty()
+                    || words[at + 1] == 63
+                        && graphics_push
+                        && stage == ShaderStage::Pixel
+                        && required.subgroup_arithmetic()
+                        && manifest.lod_feedback_binding() == Some(90));
             if !allowed {
                 return Err(VulkanError::InvalidCompilerContract("SPIR-V capability"));
             }

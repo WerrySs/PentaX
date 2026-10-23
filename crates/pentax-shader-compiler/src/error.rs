@@ -212,6 +212,7 @@ pub enum ProfileError {
     BufferStride,
     BufferIndexStride,
     NativeIndirectInstanceContract,
+    LodFeedbackProfile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

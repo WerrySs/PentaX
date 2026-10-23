@@ -177,6 +177,9 @@ impl<'a> Builder<'a> {
             value if value == CapabilityGroupNonUniform => {
                 self.required_features.subgroup_basic = true
             }
+            value if value == CapabilityGroupNonUniformArithmetic => {
+                self.required_features.subgroup_arithmetic = true
+            }
             value if value == CapabilityGroupNonUniformBallot => {
                 self.required_features.subgroup_ballot = true
             }

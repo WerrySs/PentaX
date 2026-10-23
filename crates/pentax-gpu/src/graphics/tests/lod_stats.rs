@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn lod_stats_packets_refuse_before_an_executable_prefix_is_exposed() {
-    for control in [0, 0x300f_fffc] {
+    for control in [1, 1 << 20] {
         let words = [
             0xc003_3700u32,
             0x100,
@@ -24,9 +24,10 @@ fn lod_stats_packets_refuse_before_an_executable_prefix_is_exposed() {
         }];
         assert!(matches!(
             plan_commands(&[&bytes], GraphicsState::empty(), &Default::default()),
-            Err(Error::Unsupported(
-                "LOD statistics feedback is not supported"
-            ))
+            Err(Error::Packet {
+                reason: "LOD statistics packet fields",
+                ..
+            })
         ));
         assert!(matches!(
             OrderedCommands::prepare(
@@ -35,9 +36,10 @@ fn lod_stats_packets_refuse_before_an_executable_prefix_is_exposed() {
                 GraphicsState::empty(),
                 &Default::default()
             ),
-            Err(Error::Unsupported(
-                "LOD statistics feedback is not supported"
-            ))
+            Err(Error::Packet {
+                reason: "LOD statistics packet fields",
+                ..
+            })
         ));
     }
 }

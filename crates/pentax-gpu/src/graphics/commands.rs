@@ -71,6 +71,7 @@ pub enum Action {
     IndirectDraw(super::IndirectDraw),
     LiveDraw,
     WaitFlip(crate::WaitFlip),
+    LodStats(crate::lod_stats_request::Request),
     Flip(Flip),
     Memory(usize),
 }
@@ -312,11 +313,6 @@ fn plan(
                 .ok_or(Error::Limit("command packets"))?;
             work(&mut usage, limits, 1)?;
             let header = Header::new(word(at));
-            if header.packet_type() == 3 && header.opcode() == 0x8e {
-                return Err(Error::Unsupported(
-                    "LOD statistics feedback is not supported",
-                ));
-            }
             let fail = |reason| Error::Packet {
                 buffer: buffer_index,
                 dword: at,
@@ -354,6 +350,28 @@ fn plan(
                 .checked_add(length)
                 .filter(|n| *n <= bytes.len() / 4)
                 .ok_or(fail("truncated packet"))?;
+            if header.opcode() == 0x8e {
+                if length != 5 || header.raw() != crate::lod_stats_request::HEADER {
+                    return Err(fail("LOD statistics packet header"));
+                }
+                let request =
+                    crate::lod_stats_request::Request::decode(std::array::from_fn(|index| {
+                        word(at + index)
+                    }))
+                    .map_err(|_| fail("LOD statistics packet fields"))?;
+                if actions.len() >= action_count {
+                    return Err(Error::Limit("command actions"));
+                }
+                work(&mut usage, limits, size_of::<Action>() as u64)?;
+                usage.write_bytes = usage
+                    .write_bytes
+                    .checked_add(request.completion_bytes())
+                    .ok_or(Error::Limit("command write bytes"))?;
+                actions.push(Action::LodStats(request));
+                fresh_draw = false;
+                at = end;
+                continue;
+            }
             if crate::context_state::packet_words(header.raw()).is_some() {
                 let operation =
                     crate::context_state::decode(&bytes[at * 4..end * 4]).map_err(fail)?;

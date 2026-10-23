@@ -95,6 +95,7 @@ impl GraphicsCompletion {
 
 #[derive(Debug)]
 pub struct Report {
+    lod_counters: Option<pentax_gpu::lod_stats::Counters>,
     pub preparation: Usage,
     pub gpu: GpuUsage,
     pub written_bytes: usize,
@@ -110,6 +111,9 @@ pub(super) struct CurrentDraw<'borrow, 'owner> {
     report: Report,
 }
 impl<'borrow, 'owner> CurrentDraw<'borrow, 'owner> {
+    pub(super) fn take_lod_counters(&mut self) -> Option<pentax_gpu::lod_stats::Counters> {
+        self.report.lod_counters.take()
+    }
     pub(super) fn written_bytes(&self) -> usize {
         self.report.written_bytes
     }
@@ -147,6 +151,30 @@ pub(super) fn execute_draw_current<'borrow, 'owner>(
     Ok(CurrentDraw { memory, report })
 }
 
+pub(super) fn execute_draw_current_with_lod<'borrow, 'owner>(
+    memory: &'borrow mut PausedNativeMemory<'owner>,
+    draw: &Draw,
+    limits: &Limits,
+    gpu_limits: &GpuLimits,
+    command_ranges: &[CommandRange],
+    initial: Option<&pentax_gpu::lod_stats::Counters>,
+    admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
+) -> Result<CurrentDraw<'borrow, 'owner>, Error> {
+    if initial.is_none() {
+        return execute_draw_current(memory, draw, limits, gpu_limits, command_ranges, admit);
+    }
+    let report = execute_draw_admitted_with_lod(
+        memory,
+        draw,
+        limits,
+        gpu_limits,
+        command_ranges,
+        initial,
+        admit,
+    )?;
+    Ok(CurrentDraw { memory, report })
+}
+
 /// No Vulkan call happens until the entire destination and its disjointness
 /// from retained command/shader/index and stage-buffer sources are admitted. The exclusive pause lasts across
 /// preparation, execution, fence and all-or-nothing guest publication.
@@ -177,10 +205,31 @@ pub(super) fn execute_draw_admitted(
     command_ranges: &[CommandRange],
     admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
 ) -> Result<Report, Error> {
-    let prepared = graphics::prepare_draw_with_target(
+    execute_draw_admitted_with_lod(
+        paused,
+        draw,
+        limits,
+        gpu_limits,
+        command_ranges,
+        None,
+        admit,
+    )
+}
+
+pub(super) fn execute_draw_admitted_with_lod(
+    paused: &mut PausedNativeMemory<'_>,
+    draw: &Draw,
+    limits: &Limits,
+    gpu_limits: &GpuLimits,
+    command_ranges: &[CommandRange],
+    initial: Option<&pentax_gpu::lod_stats::Counters>,
+    admit: impl FnOnce(Usage, u64, bool) -> Result<(), Error>,
+) -> Result<Report, Error> {
+    let prepared = graphics::prepare_draw_with_target_and_lod(
         draw,
         &super::Memory(paused),
         limits,
+        initial.is_some(),
         |snapshot, geometry, remaining| {
             let mut work = 0;
             let bytes = detile_32(
@@ -243,12 +292,22 @@ pub(super) fn execute_draw_admitted(
             sum.checked_add(texture.pixels().len() as u64)
         })
         .ok_or(Error::Limit)?;
+    let counter_transfer_bytes = if prepared.pixel().manifest().lod_feedback_binding().is_some() {
+        (pentax_gpu::lod_stats::COUNTER_BYTES as u64)
+            .checked_mul(2)
+            .ok_or(Error::Limit)?
+    } else {
+        0
+    };
     let resource_upload_bytes = [prepared.vertex_buffer(), prepared.pixel_buffer()]
         .into_iter()
         .flatten()
-        .try_fold(texture_upload_bytes, |bytes, resource| {
-            bytes.checked_add(resource.bytes().len() as u64)
-        })
+        .try_fold(
+            texture_upload_bytes
+                .checked_add(counter_transfer_bytes)
+                .ok_or(Error::Limit)?,
+            |bytes, resource| bytes.checked_add(resource.bytes().len() as u64),
+        )
         .ok_or(Error::Limit)?;
     if (geometry.tight_bytes() as u64)
         .checked_mul(2)
@@ -328,8 +387,14 @@ pub(super) fn execute_draw_admitted(
         })
         .map_err(|_| Error::Limit)?;
     admit(preparation, work, true)?;
-    let completed = pentax_platform::vulkan::run_graphics(&prepared, &execution_limits)
-        .map_err(Error::Vulkan)?;
+    let completed = match initial {
+        Some(counters) => {
+            pentax_platform::vulkan::run_graphics_with_lod(&prepared, &execution_limits, counters)
+        }
+        None => pentax_platform::vulkan::run_graphics(&prepared, &execution_limits),
+    }
+    .map_err(Error::Vulkan)?;
+    let lod_counters = completed.lod_counters().cloned();
     if completed.bytes().len() != geometry.tight_bytes() {
         return Err(Error::Limit);
     }
@@ -369,6 +434,7 @@ pub(super) fn execute_draw_admitted(
         )
         .map_err(Error::Memory)?;
     Ok(Report {
+        lod_counters,
         preparation,
         gpu: completed.usage(),
         written_bytes: geometry.guest_bytes(),

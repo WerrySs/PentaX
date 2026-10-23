@@ -84,6 +84,18 @@ impl ShaderAnalysis {
         image_descriptions: &[crate::ImageDescription],
         sampler_descriptions: &[crate::SamplerDescription],
     ) -> Result<CompiledShader, CompileError> {
+        self.finish_with_lod_feedback(descriptions, image_descriptions, sampler_descriptions, &[])
+    }
+
+    /// Continue the previously selected feedback mode with actual enabled T#
+    /// counter metadata. This cannot enable feedback after DCE has already run.
+    pub fn finish_with_lod_feedback(
+        self,
+        descriptions: &[BufferDescription],
+        image_descriptions: &[crate::ImageDescription],
+        sampler_descriptions: &[crate::SamplerDescription],
+        counters: &[crate::LodCounterDescription],
+    ) -> Result<CompiledShader, CompileError> {
         let Self {
             ir,
             profile,
@@ -111,6 +123,15 @@ impl ShaderAnalysis {
         budget.charge_usize(image_descriptions.len() + sampler_descriptions.len())?;
         images.extend_from_slice(image_descriptions);
         samplers.extend_from_slice(sampler_descriptions);
+        let mut lod_counters = Vec::new();
+        budget.reserve(
+            &mut lod_counters,
+            counters.len(),
+            crate::profile::MAX_IMAGES,
+            LimitKind::SourceTable,
+        )?;
+        budget.charge_usize(counters.len())?;
+        lod_counters.extend_from_slice(counters);
         let mut buffers = Vec::new();
         budget.reserve(
             &mut buffers,
@@ -123,6 +144,7 @@ impl ShaderAnalysis {
         let profile = profile
             .with_buffers(buffers)
             .and_then(|profile| profile.with_images(images, samplers))
+            .and_then(|profile| profile.with_lod_counters(lod_counters))
             .map_err(CompileError::Profile)?;
         crate::finish(ir, &profile, budget, undefined)
     }
@@ -140,6 +162,7 @@ pub fn analyze(
     if !profile.common().buffers.is_empty()
         || !profile.common().images.is_empty()
         || !profile.common().samplers.is_empty()
+        || !profile.common().lod_counters.is_empty()
     {
         return Err(CompileError::Profile(ProfileError::PredeclaredBuffers));
     }

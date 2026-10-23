@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Original bounded shader programs, not extracted guest or upstream fixtures.
+mod lod_feedback;
+
 use super::*;
 
 fn pixel() -> Profile {
@@ -61,7 +63,10 @@ fn staged(words: &[u32]) -> Result<CompiledShader, CompileError> {
     let analysis = analyze(&program, pixel(), &limits)?;
     analysis.finish_with_images(
         &[],
-        &[ImageDescription { user_sgpr: 0 }],
+        &[ImageDescription {
+            user_sgpr: 0,
+            min_lod_u4_8: 0,
+        }],
         &[SamplerDescription { user_sgpr: 8 }],
     )
 }
@@ -92,7 +97,10 @@ fn original_textured_pixel_shader_emits_real_samples_and_separate_exact_bindings
             let module = analysis
                 .finish_with_images(
                     &[],
-                    &[ImageDescription { user_sgpr: 0 }],
+                    &[ImageDescription {
+                        user_sgpr: 0,
+                        min_lod_u4_8: 0,
+                    }],
                     &[SamplerDescription { user_sgpr: 8 }],
                 )
                 .unwrap();
@@ -100,6 +108,7 @@ fn original_textured_pixel_shader_emits_real_samples_and_separate_exact_bindings
                 module.manifest().images(),
                 [ImageElement {
                     user_sgpr: 0,
+                    min_lod_u4_8: 0,
                     profile_index: 0,
                     binding: 58,
                     first_use_pc: 20,
@@ -109,6 +118,7 @@ fn original_textured_pixel_shader_emits_real_samples_and_separate_exact_bindings
                 module.manifest().samplers(),
                 [SamplerElement {
                     user_sgpr: 8,
+                    image_user_sgpr: 0,
                     profile_index: 0,
                     binding: 74,
                     first_use_pc: 20,
@@ -137,7 +147,10 @@ fn original_textured_pixel_shader_emits_real_samples_and_separate_exact_bindings
                 &program,
                 &pixel()
                     .with_images(
-                        vec![ImageDescription { user_sgpr: 0 }],
+                        vec![ImageDescription {
+                            user_sgpr: 0,
+                            min_lod_u4_8: 0,
+                        }],
                         vec![SamplerDescription { user_sgpr: 8 }],
                     )
                     .unwrap(),
@@ -192,7 +205,14 @@ fn image_descriptor_provenance_and_exact_specialization_refuse_missing_unused_an
     assert!(matches!(
         analyze(&program, pixel(), &Limits::default())
             .unwrap()
-            .finish_with_images(&[], &[ImageDescription { user_sgpr: 0 }], &[]),
+            .finish_with_images(
+                &[],
+                &[ImageDescription {
+                    user_sgpr: 0,
+                    min_lod_u4_8: 0
+                }],
+                &[]
+            ),
         Err(CompileError::Resource(ResourceError {
             kind: ResourceErrorKind::MissingSampler { user_sgpr: 8 },
             ..
@@ -204,8 +224,14 @@ fn image_descriptor_provenance_and_exact_specialization_refuse_missing_unused_an
             .finish_with_images(
                 &[],
                 &[
-                    ImageDescription { user_sgpr: 0 },
-                    ImageDescription { user_sgpr: 4 }
+                    ImageDescription {
+                        user_sgpr: 0,
+                        min_lod_u4_8: 0
+                    },
+                    ImageDescription {
+                        user_sgpr: 4,
+                        min_lod_u4_8: 0
+                    }
                 ],
                 &[SamplerDescription { user_sgpr: 8 }]
             ),
@@ -280,10 +306,10 @@ fn image_modes_profiles_and_compiler_limits_fail_without_approximate_sampling() 
     let StageDescription::Pixel(pixel_desc) = &mut profile else {
         unreachable!()
     };
-    pixel_desc
-        .common
-        .images
-        .push(ImageDescription { user_sgpr: 12 }); // requires s12..s19
+    pixel_desc.common.images.push(ImageDescription {
+        user_sgpr: 12,
+        min_lod_u4_8: 0,
+    }); // requires s12..s19
     assert!(matches!(
         Profile::new(profile),
         Err(ProfileError::ResourceRegister)
@@ -299,7 +325,10 @@ fn image_modes_profiles_and_compiler_limits_fail_without_approximate_sampling() 
             .unwrap()
             .finish_with_images(
                 &[],
-                &[ImageDescription { user_sgpr: 0 }],
+                &[ImageDescription {
+                    user_sgpr: 0,
+                    min_lod_u4_8: 0
+                }],
                 &[SamplerDescription { user_sgpr: 8 }]
             ),
         Err(CompileError::LimitExceeded { .. })

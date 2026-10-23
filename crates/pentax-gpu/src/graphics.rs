@@ -31,7 +31,7 @@ pub use commands::{
 };
 pub use linkage::{ShaderInterfaces, validate_shader_interfaces};
 pub use prepare::prepare_draw;
-pub use prepare::prepare_draw_with_target;
+pub use prepare::{prepare_draw_with_target, prepare_draw_with_target_and_lod};
 pub use state::GraphicsState;
 pub use textures::{PreparedSampler, PreparedTexture, UploadedMip};
 

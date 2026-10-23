@@ -695,3 +695,13 @@ https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3
 Existing copyright and license terms above apply. Original PentaX integration
 captures both stack scalars before a genuine allocator callback. No upstream
 report renderer, shader feedback implementation or report data is included.
+
+LOD report completion publication follows the public Jetsku/KytyPS5 revision
+b719d67ce6bcfd21d402bd415f3e4f68e4793534 renderer contracts:
+  src/graphics/host_gpu/renderer/lodStats.cpp: first reset, empty probes and completion publication
+  src/graphics/host_gpu/renderer/lodStatsReport.h: bounded counter and report formats
+https://github.com/Jetsku/KytyPS5/tree/b719d67ce6bcfd21d402bd415f3e4f68e4793534/src/graphics/host_gpu/renderer
+Existing upstream copyright and license grants retained above continue to apply.
+The original Rust receiver binds snapshots to their paused owner, validates
+physical command exclusions and output quotas, and publishes only after actual
+GPU completion. Counter reset requires the real GPU reset readback.

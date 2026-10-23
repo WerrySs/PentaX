@@ -16,6 +16,7 @@ pub(super) struct SampledBindings<'d, 'r> {
     pub image_bindings: &'r [u32],
     pub samplers: &'r [Sampler<'d>],
     pub sampler_bindings: &'r [u32],
+    pub lod_feedback: Option<&'r Buffer<'d>>,
 }
 impl SampledBindings<'_, '_> {
     pub const fn empty() -> Self {
@@ -24,6 +25,7 @@ impl SampledBindings<'_, '_> {
             image_bindings: &[],
             samplers: &[],
             sampler_bindings: &[],
+            lod_feedback: None,
         }
     }
 }
@@ -219,10 +221,11 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         sampled: SampledBindings<'d, 'r>,
         budget: &mut Budget,
     ) -> Result<(), VulkanError> {
+        let storage_count = count + usize::from(sampled.lod_feedback.is_some());
         let mut sizes = [vk::DescriptorPoolSize::default(); 3];
         let mut pool_count = 0;
         for (kind, length) in [
-            (vk::DescriptorType::STORAGE_BUFFER, count),
+            (vk::DescriptorType::STORAGE_BUFFER, storage_count),
             (vk::DescriptorType::SAMPLED_IMAGE, sampled.images.len()),
             (vk::DescriptorType::SAMPLER, sampled.samplers.len()),
         ] {
@@ -259,8 +262,8 @@ impl<'d, 'r> Pipeline<'d, 'r> {
             .result(),
             "vkAllocateDescriptorSets(graphics)",
         )?;
-        let mut buffers_info = [vk::DescriptorBufferInfo::default(); 2];
-        let mut buffer_bindings = [0; 2];
+        let mut buffers_info = [vk::DescriptorBufferInfo::default(); 3];
+        let mut buffer_bindings = [0; 3];
         let mut used = 0;
         for (stage, buffer) in buffers.into_iter().enumerate() {
             if let Some(buffer) = buffer {
@@ -271,6 +274,12 @@ impl<'d, 'r> Pipeline<'d, 'r> {
                 used += 1;
             }
         }
+        if let Some(buffer) = sampled.lod_feedback {
+            buffers_info[used] = vk::DescriptorBufferInfo::default()
+                .buffer(buffer.raw)
+                .range(pentax_gpu::lod_stats::COUNTER_BYTES as u64);
+            buffer_bindings[used] = 90;
+        }
         let mut image_info = [vk::DescriptorImageInfo::default(); 32];
         for (index, image) in sampled.images.iter().enumerate() {
             image_info[index] = vk::DescriptorImageInfo::default()
@@ -280,9 +289,9 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         for (index, sampler) in sampled.samplers.iter().enumerate() {
             image_info[16 + index] = vk::DescriptorImageInfo::default().sampler(sampler.raw);
         }
-        let mut writes = [vk::WriteDescriptorSet::default(); 34];
+        let mut writes = [vk::WriteDescriptorSet::default(); 35];
         let mut written = 0;
-        for index in 0..count {
+        for index in 0..storage_count {
             writes[written] = vk::WriteDescriptorSet::default()
                 .dst_set(self.set)
                 .dst_binding(buffer_bindings[index])
@@ -391,6 +400,10 @@ impl<'d, 'r> Pipeline<'d, 'r> {
             || sampled.samplers.len() > 16
             || sampled.images.len() != sampled.image_bindings.len()
             || sampled.samplers.len() != sampled.sampler_bindings.len()
+            || pixel.manifest().lod_feedback_binding() != sampled.lod_feedback.map(|_| 90)
+            || sampled
+                .lod_feedback
+                .is_some_and(|buffer| buffer.length() != pentax_gpu::lod_stats::COUNTER_BYTES)
             || sampled.images.len() != pixel.manifest().images().len()
             || sampled.samplers.len() != pixel.manifest().samplers().len()
             || pixel
@@ -418,7 +431,7 @@ impl<'d, 'r> Pipeline<'d, 'r> {
                 sampled,
             },
         );
-        let mut bindings = [vk::DescriptorSetLayoutBinding::default(); 34];
+        let mut bindings = [vk::DescriptorSetLayoutBinding::default(); 35];
         let mut count = 0;
         for (index, shader) in [vertex, pixel].into_iter().enumerate() {
             let binding = shader.manifest().buffer_binding();
@@ -449,6 +462,14 @@ impl<'d, 'r> Pipeline<'d, 'r> {
             }
         }
         let buffer_count = count;
+        if sampled.lod_feedback.is_some() {
+            bindings[count] = vk::DescriptorSetLayoutBinding::default()
+                .binding(90)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+            count += 1;
+        }
         for (kind, numbers) in [
             (vk::DescriptorType::SAMPLED_IMAGE, sampled.image_bindings),
             (vk::DescriptorType::SAMPLER, sampled.sampler_bindings),
@@ -647,6 +668,9 @@ impl Drop for Pipeline<'_, '_> {
                 }
                 for sampler in sampled.samplers {
                     let _ = sampler.raw;
+                }
+                if let Some(buffer) = sampled.lod_feedback {
+                    let _ = buffer.raw;
                 }
                 let _ = image.raw;
                 for buffer in buffers.into_iter().flatten() {

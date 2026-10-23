@@ -297,3 +297,16 @@ https://github.com/Jetsku/KytyPS5/tree/b719d67ce6bcfd21d402bd415f3e4f68e4793534/
 Existing upstream copyright/license grants retained above continue to apply.
 PentaX's bounded checked metadata, owned uploads, exclusions and fixtures are
 original Rust integrations; no commercial image, shader or report data is included.
+
+The LOD feedback bridge and actual GPU reset/readback integration are original
+bounded Rust additions. Counter collection semantics and layout are referenced
+only from PUBLIC Jetsku/KytyPS5 revision b719d67ce6bcfd21d402bd415f3e4f68e4793534,
+src/graphics/host_gpu/renderer/lodStats.cpp, lodStatsReport.h and
+src/graphics/shader/recompiler/backend/spirv/spirvEmitterImage.cpp. One qualifying subgroup is counted
+per dynamic sample operation; this is not a pixel counter. Vulkan sampler
+clamping/filter semantics are pinned to KhronosGroup/Vulkan-Docs revision
+a8b088a3fae12c8575407ea90c7c09bd653db923, chapters/textures.adoc.
+https://github.com/Jetsku/KytyPS5/tree/b719d67ce6bcfd21d402bd415f3e4f68e4793534/src/graphics
+https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/chapters/textures.adoc
+Existing copyright and GPL-2.0-only notices are retained. No commercial payload,
+replacement sample result or precomputed statistics report is included.

@@ -102,5 +102,19 @@ Descriptor provenance tracking, finite separate image/sampler bindings, immutabl
 staged specialization and all image fixture programs are original PentaX code.
 The two added SPIR-V enumerants follow the Khronos SPIRV-Headers grammar:
 https://github.com/KhronosGroup/SPIRV-Headers/blob/01e0577914a75a2569c846778c2f93aa8e6feddd/include/spirv/unified1/spirv.hpp
-Khronos copyright and MIT permission remain in Khronos-MIT.txt. No GPU counter
-instrumentation or report publication is claimed by this sampling subset.
+Khronos copyright and MIT permission remain in Khronos-MIT.txt. The optional feedback extension follows the same public file's subgroup
+reduction/election and device atomic counter operations. It counts qualifying
+subgroups per dynamic sample instruction, not pixels. Original PentaX changes
+retain sample side effects before DCE, explicitly exclude helper and guest
+EXEC-inactive invocations, validate exact counter metadata, and expose finite
+storage/feature requirements. Report publication and device completion remain
+backend responsibilities.
+
+The restricted per-image sampler-pair minimum-LOD policy follows the actual
+LOD-selection and minification/magnification-filter ordering in the public
+Khronos Vulkan specification, revision a8b088a3fae12c8575407ea90c7c09bd653db923:
+https://github.com/KhronosGroup/Vulkan-Docs/blob/a8b088a3fae12c8575407ea90c7c09bd653db923/chapters/textures.adoc
+The helper-invocation exclusion follows the public Vulkan shader rules:
+https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-helper-invocations
+These references support the original bounded policy; no specification prose
+or third-party shader fixture has been copied into the implementation/tests.

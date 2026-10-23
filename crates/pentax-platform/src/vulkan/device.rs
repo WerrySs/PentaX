@@ -59,12 +59,44 @@ fn check_index_value(full: bool, limit: u32, maximum: u32) -> Result<(), VulkanE
     Ok(())
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct DeviceRequirements {
+    pub subgroup_stages: vk::ShaderStageFlags,
+    pub ballot_stages: vk::ShaderStageFlags,
+    pub arithmetic_stages: vk::ShaderStageFlags,
+    pub fragment_stores_and_atomics: bool,
+}
+
 impl Device {
     pub fn open(
         subgroup_stages: vk::ShaderStageFlags,
         ballot_stages: vk::ShaderStageFlags,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
+        Self::open_required(
+            DeviceRequirements {
+                subgroup_stages,
+                ballot_stages,
+                ..Default::default()
+            },
+            budget,
+        )
+    }
+    pub fn open_required(
+        requirements: DeviceRequirements,
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
+        let DeviceRequirements {
+            subgroup_stages,
+            ballot_stages,
+            arithmetic_stages,
+            fragment_stores_and_atomics,
+        } = requirements;
+        if !subgroup_stages.contains(ballot_stages | arithmetic_stages) {
+            return Err(VulkanError::InvalidCompilerContract(
+                "subgroup requirement stages",
+            ));
+        }
         // Use the OS system directory, never PATH, current directory, guest data
         // or an environment-supplied loader location.
         let mut directory = [0_u16; 512];
@@ -163,9 +195,21 @@ impl Device {
             }
             budget.work(1)?;
             // SAFETY: Fixed core feature output for this retained physical
-            // device. Only a supported fullDrawIndexUint32 bit may be enabled.
+            // device. Only queried fullDrawIndexUint32 and explicitly requested,
+            // supported fragmentStoresAndAtomics bits may be enabled.
             let supported = unsafe { instance.raw.get_physical_device_features(physical) };
             let full_draw_index_uint32 = supported.full_draw_index_uint32 != vk::FALSE;
+            if fragment_stores_and_atomics && supported.fragment_stores_and_atomics == vk::FALSE {
+                continue;
+            }
+            if !arithmetic_stages.is_empty()
+                && (!subgroup.supported_stages.contains(arithmetic_stages)
+                    || !subgroup
+                        .supported_operations
+                        .contains(vk::SubgroupFeatureFlags::ARITHMETIC))
+            {
+                continue;
+            }
             if !subgroup_stages.is_empty()
                 && (subgroup.subgroup_size != 32
                     || !subgroup.supported_stages.contains(subgroup_stages)
@@ -233,15 +277,16 @@ impl Device {
         let queues = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(family)
             .queue_priorities(&priorities)];
-        let features =
-            vk::PhysicalDeviceFeatures::default().full_draw_index_uint32(full_draw_index_uint32);
+        let features = vk::PhysicalDeviceFeatures::default()
+            .full_draw_index_uint32(full_draw_index_uint32)
+            .fragment_stores_and_atomics(fragment_stores_and_atomics);
         let info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queues)
             .enabled_features(&features);
         budget.object()?;
         // SAFETY: Selected nonempty queue family and one queue. The only
-        // optional feature is the just-queried fullDrawIndexUint32 support;
-        // all other features/extensions remain disabled. Borrows remain live.
+        // optional features are the just-queried index capability and explicitly
+        // requested fragment storage atomics. Other features remain disabled.
         let raw = result(
             unsafe { instance.raw.create_device(physical, &info, None) },
             "vkCreateDevice",

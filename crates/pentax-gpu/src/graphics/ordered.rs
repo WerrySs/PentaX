@@ -20,6 +20,7 @@ pub enum OrderedStep {
     Array,
     IndirectDraw,
     WaitFlip(crate::WaitFlip),
+    LodStats(crate::lod_stats_request::Request),
     Draw(Draw),
     Memory(usize),
     Flip(Flip),
@@ -280,6 +281,15 @@ impl OrderedCommands {
                     })
                 }
                 _ => {}
+            }
+            if header.raw() == crate::lod_stats_request::HEADER {
+                let Some(Action::LodStats(request)) = self.plan.actions().get(self.action) else {
+                    return Err(Error::Unsupported(
+                        "ordered LOD statistics action alignment",
+                    ));
+                };
+                self.action += 1;
+                return Ok(Some(OrderedStep::LodStats(*request)));
             }
             if header.raw() == 0xc005_1018 {
                 let Some(Action::WaitFlip(wait)) = self.plan.actions().get(self.action) else {
@@ -542,7 +552,10 @@ mod tests {
                     assert_eq!(draw.instance_count(), 2);
                     assert_eq!(draw.vertex_count(), if draws == 1 { 3 } else { 5 });
                 }
-                OrderedStep::Flip(_) | OrderedStep::IndirectDraw | OrderedStep::WaitFlip(_) => {
+                OrderedStep::Flip(_)
+                | OrderedStep::IndirectDraw
+                | OrderedStep::WaitFlip(_)
+                | OrderedStep::LodStats(_) => {
                     panic!("no original flip/indirect draw")
                 }
             }

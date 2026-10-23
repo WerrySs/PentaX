@@ -20,6 +20,8 @@ mod device;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod graphics;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+mod lod_stats;
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod pipeline;
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod programs;
@@ -70,6 +72,7 @@ pub fn run_compute(
 pub struct GraphicsReadback {
     bytes: Vec<u8>,
     usage: GpuUsage,
+    lod_counters: Option<pentax_gpu::lod_stats::Counters>,
 }
 impl fmt::Debug for GraphicsReadback {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -80,6 +83,10 @@ impl fmt::Debug for GraphicsReadback {
     }
 }
 impl GraphicsReadback {
+    /// Present only when this call read actual counter words after its GPU fence.
+    pub fn lod_counters(&self) -> Option<&pentax_gpu::lod_stats::Counters> {
+        self.lod_counters.as_ref()
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -92,7 +99,8 @@ impl GraphicsReadback {
 /// shaders and return fenced pixels. An indexed product uploads its actual
 /// U16/U32 snapshot and uses a triangle-list indexed draw with no restart or
 /// base-vertex offset. Optional read-only VS/PS raw buffers use the exact owned
-/// snapshots and stage manifest bindings, with no writable graphics resources.
+/// snapshots and stage manifest bindings. The initialized-LOD entry additionally
+/// admits only the exact manifest counter buffer.
 /// This does not present a window or accept a tiled surface. Keep the original
 /// guest owner paused through writeback.
 pub fn run_graphics(
@@ -106,6 +114,38 @@ pub fn run_graphics(
     #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
     {
         let _ = (prepared, limits);
+        Err(VulkanError::UnsupportedHost)
+    }
+}
+
+/// Continue an explicitly initialized logical counter interval through an actual
+/// instrumented draw. Initial words are data, not completion or guest authority.
+pub fn run_graphics_with_lod(
+    prepared: &pentax_gpu::graphics::PreparedDraw,
+    limits: &GpuLimits,
+    initial: &pentax_gpu::lod_stats::Counters,
+) -> Result<GraphicsReadback, VulkanError> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        graphics::run_with_lod(prepared, *limits, Some(initial))
+    }
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+    {
+        let _ = (prepared, limits, initial);
+        Err(VulkanError::UnsupportedHost)
+    }
+}
+
+/// Initialize both counter planes with real GPU fills and fenced readback.
+/// This never writes a guest report or supplies a report-ready marker.
+pub fn run_lod_reset(limits: &GpuLimits) -> Result<pentax_gpu::lod_stats::Counters, VulkanError> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        lod_stats::reset(*limits)
+    }
+    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+    {
+        let _ = limits;
         Err(VulkanError::UnsupportedHost)
     }
 }
