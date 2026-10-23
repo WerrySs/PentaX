@@ -88,8 +88,10 @@ fn selected_wait_packets_are_sealed_exactly_and_consume_static_and_live_actions_
 
 #[test]
 fn wait_action_capacity_and_fresh_draw_authority_are_admitted_before_any_executable_prefix() {
-    let mut limits = CommandLimits::default();
-    limits.max_draws = 1;
+    let limits = CommandLimits {
+        max_draws: 1,
+        ..Default::default()
+    };
     let words = [
         0xc003_3700,
         0x100,
