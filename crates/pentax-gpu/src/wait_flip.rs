@@ -24,7 +24,8 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<WaitFlip, &'static str> {
     if bytes.len() < 28 {
         return Err("truncated wait-flip packet");
     }
-    let word = |index| u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap());
+    let word =
+        |index: usize| u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap());
     if word(0) != 0xc005_1018 || (3..7).any(|index| word(index) != 0) {
         return Err("wait-flip packet profile");
     }
