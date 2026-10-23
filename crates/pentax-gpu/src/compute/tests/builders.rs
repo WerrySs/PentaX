@@ -22,7 +22,36 @@ fn builder_wave32_dispatch_preserves_state_products_and_rejects_other_modes_befo
         assert_eq!(actual.input(), old.input());
         assert_eq!(actual.push_data(), old.push_data());
         assert_eq!(actual.usage().invocations, 16);
-        for mode in [0x41u32, 0xa041, 0x8061, 0x8049] {
+        // The matching source builder mode without CS_W32_EN is genuine
+        // wave64 and now follows the real compiler/resource path as well.
+        input[end - 4..].copy_from_slice(&0x41u32.to_le_bytes());
+        let wide_memory = source();
+        let wide = prepare(&input, &wide_memory, &Default::default()).unwrap();
+        assert_eq!(wide.groups(), old.groups());
+        assert_eq!(wide.input(), old.input());
+        assert_eq!(wide.push_data(), old.push_data());
+        assert_eq!(
+            wide.shader().manifest().workgroup_size(),
+            old.shader().manifest().workgroup_size()
+        );
+        assert_eq!(wide.shader().manifest().required_subgroup_size(), None);
+        assert!(
+            !wide
+                .shader()
+                .manifest()
+                .required_features()
+                .subgroup_basic()
+        );
+        assert!(
+            !wide
+                .shader()
+                .manifest()
+                .required_features()
+                .subgroup_ballot()
+        );
+        assert_eq!(wide.usage().invocations, 16);
+        assert!(wide_memory.reads.get() > 0);
+        for mode in [0xa041u32, 0x8061, 0x8049] {
             input[end - 4..].copy_from_slice(&mode.to_le_bytes());
             let memory = source();
             assert!(matches!(

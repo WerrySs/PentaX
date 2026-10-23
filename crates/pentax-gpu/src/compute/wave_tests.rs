@@ -30,18 +30,17 @@ impl Memory for Source {
     }
 }
 fn source(dynamic_exec: bool) -> Source {
-    let mut code = Vec::new();
+    // Define both vector destinations while every lane is active. Masked
+    // vector writes preserve their old destination on inactive lanes.
+    let mut code = vec![
+        (0x25 << 25) | (1 << 17) | 137,
+        (0x1a << 25) | (2 << 17) | 130,
+    ];
     if dynamic_exec {
         // S_MOV_B64 EXEC, s[4:5]: both halves are real user-data inputs.
         code.push(0xbefe_0404);
     }
-    code.extend([
-        (0x25 << 25) | (1 << 17) | 137,
-        (0x1a << 25) | (2 << 17) | 130,
-        0xe070_1000,
-        (128 << 24) | (1 << 8) | 2,
-        0xbf81_0000,
-    ]);
+    code.extend([0xe070_1000, (128 << 24) | (1 << 8) | 2, 0xbf81_0000]);
     Source {
         code,
         reads: Cell::new(0),
