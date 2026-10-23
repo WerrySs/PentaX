@@ -128,6 +128,7 @@ catalogue!(
     AgcDcbPushMarker,
     AgcAcbPopMarker,
     AgcDcbPopMarker,
+    AgcDcbContextStateOp,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

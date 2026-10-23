@@ -16,8 +16,8 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"VideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 245);
-    assert_eq!(metadata.link().symbols().len(), 246);
+    assert_eq!(provider.function_count(), 247);
+    assert_eq!(metadata.link().symbols().len(), 248);
     for (index, nid) in [
         "HXzjK9yI30k",
         "-Ozn0F1AFRg",

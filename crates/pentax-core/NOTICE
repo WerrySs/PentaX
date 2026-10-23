@@ -582,3 +582,14 @@ continue to apply. PentaX changes2026 provide bounded live-owner length capture,
 real grow continuations, source-ordered zero/copy publication, exact append-only
 bindings and original memory/context consumers. No annotation text is logged;
 source memory is never treated as an ambient host string.
+The bounded DCB ContextStateOp encoder additionally adapts public KytyPS5/KytyPS5
+revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: CommandBuffer::ReserveDW/AllocateDW, AgcDcbContextStateOp
+  src/libs/libAgcDriver.cpp: exact canonical NID and signature
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L1556
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. PentaX changes2026 preserve bounded fragmented reservation,
+actual grow continuations, current-owner cursor/zero/header publication and
+partial-prefix failures. Only the exact observed paired alias is appended;
+GetSize and an unestablished ACB counterpart are not introduced. All new
+command, ownership and refusal fixtures are original.

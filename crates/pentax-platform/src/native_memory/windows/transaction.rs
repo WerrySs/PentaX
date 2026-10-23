@@ -52,11 +52,17 @@ impl PausedNativeMemory<'_> {
             .filter(|v| *v <= maximum)
             .ok_or(NativeMemoryError::BudgetExceeded)?;
         self.owner.check(left.address, left.size, None)?;
-        self.preflight_alias_rhs(right, rp)?;
+        let rhs_private = self.preflight_alias_rhs(right, rp)?;
         // The full mapped checks and original conservative charge precede every
         // shortcut. Any virtual overlap necessarily shares actual backing bytes.
         if left.address < right_end && right.address < left_end {
             return Err(NativeMemoryError::Overlap);
+        }
+        // Exact private RHS pages have private virtual coordinates, disjoint
+        // from shared physical coordinates and from nonoverlapping private LEFT.
+        // The owner-local classification is revoked before every mapping attempt.
+        if rhs_private {
+            return Ok(work);
         }
         let (first, end) = if lp <= rp {
             (left_first, left_end)
@@ -93,29 +99,45 @@ impl PausedNativeMemory<'_> {
         }
         Ok(work)
     }
-    fn preflight_alias_rhs(&self, span: NativeRange, pages: u64) -> Result<(), NativeMemoryError> {
+    fn preflight_alias_rhs(
+        &self,
+        span: NativeRange,
+        pages: u64,
+    ) -> Result<bool, NativeMemoryError> {
         // The caller already checked both extents and the ORIGINAL complete
         // work budget, then the complete current LEFT mapping in that order.
-        // Every hit still checks liveness; only exact positive full-span mapped
-        // coverage survives, and every mapping/rights/revoke attempt clears it.
+        // Every hit checks liveness; only exact mapped coverage and all-private
+        // classification survive. Every mapping/rights/revoke attempt clears both.
         self.owner.live()?;
         let proofs = self.owner.alias_rhs_preflight.get();
-        if pages >= 2 && proofs.contains(&Some(span)) {
-            return Ok(());
+        if pages >= 2 {
+            for proof in proofs.into_iter().flatten() {
+                if proof.span == span {
+                    return Ok(proof.all_private);
+                }
+            }
         }
         #[cfg(test)]
         self.owner
             .alias_rhs_preflight_scans
             .set(self.owner.alias_rhs_preflight_scans.get().saturating_add(1));
         self.owner.check(span.address, span.size, None)?;
-        if pages >= 2 {
-            self.owner.alias_rhs_preflight.set([Some(span), proofs[0]]);
+        if pages < 2 {
+            return Ok(false);
         }
-        // At most two exact-key visits are added only when RHS has >=2pages.
-        // Existing linear allowance has at least that slack even after BOTH
-        // full checks, failed private classification and Cartesian fallback:
-        // 3*(lp+rp)-(2*lp+rp+min(lp,rp)) >= 2. No work is refunded or added.
-        Ok(())
+        let end = range(span.address, span.size)?;
+        let first = span.address / NATIVE_GUEST_PAGE * NATIVE_GUEST_PAGE;
+        let all_private = (first..end)
+            .step_by(NATIVE_GUEST_PAGE as usize)
+            .all(|page| matches!(self.owner.region(page).kind, RegionKind::Private));
+        self.owner
+            .alias_rhs_preflight
+            .set([Some(AliasRhsPreflight { span, all_private }), proofs[0]]);
+        // Miss worst case: mapped lp+rp, RHS classification rp, old min(lp,rp)
+        // classification, outer coordinates lp, and at most two exact probes.
+        // 2*lp+2*rp+min(lp,rp)+2 <= 3*(lp+rp), because rp>=2.
+        // The original Cartesian lp*rp and +1 remain fully charged; hits cost less.
+        Ok(all_private)
     }
 
     /// Check for repeated physical bytes through self-aliasing. No bytes change
@@ -566,3 +588,7 @@ mod private_disjoint_tests;
 
 #[cfg(test)]
 mod rhs_mapped_tests;
+
+#[cfg(test)]
+#[path = "transaction/rhs_private_tests.rs"]
+mod rhs_private_tests;

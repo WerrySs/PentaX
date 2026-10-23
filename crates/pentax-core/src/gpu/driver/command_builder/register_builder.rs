@@ -267,6 +267,7 @@ impl Driver {
             payload: Vec::new(),
             preflight_work: work + capacity_work,
             registers: Some(state),
+            context: None,
         };
         self.resume_register_group(memory, pending, None)
     }

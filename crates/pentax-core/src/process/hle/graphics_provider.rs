@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 245] = {
+const ENTRIES: [(&str, Function, usize, usize); 247] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 245] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 245];
+    let mut entries = [BASE_ENTRIES[0]; 247];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -185,6 +185,9 @@ const ENTRIES: [(&str, Function, usize, usize); 245] = {
         entries[238 + i * 2] = (nid, function, 2, 2);
         i += 1;
     }
+    let (nid, function) = crate::gpu::driver::CONTEXT_EXPORTS[0];
+    entries[245] = (nid, function, 1, 1);
+    entries[246] = (nid, function, 2, 2);
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -388,7 +391,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 245);
+        assert_eq!(provider.function_count(), 247);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -475,7 +478,7 @@ mod reset_queue_tests {
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 245);
+        assert_eq!(provider.function_count(), 247);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -502,7 +505,7 @@ mod memory_sync_tests {
     #[test]
     fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 245);
+        assert_eq!(provider.function_count(), 247);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -529,7 +532,7 @@ mod marker_binding_tests {
     #[test]
     fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 245);
+        assert_eq!(provider.function_count(), 247);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -544,5 +547,36 @@ mod marker_binding_tests {
                 assert_eq!(marker.function, function);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod context_binding_tests {
+    use super::*;
+    #[test]
+    fn context_operation_appends_exact_canonical_and_observed_pair_without_moving_old_markers() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 247);
+        assert_eq!(
+            ENTRIES[244],
+            ("H7uZqCoNuWk", Function::AgcDcbPopMarker, 2, 2)
+        );
+        for (ordinal, pair) in [(245, 1), (246, 2)] {
+            assert_eq!(
+                ENTRIES[ordinal],
+                ("qj7QZpgr9Uw", Function::AgcDcbContextStateOp, pair, pair)
+            );
+            let marker = provider.markers().nth(ordinal).unwrap();
+            assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+            assert_eq!(marker.function, Function::AgcDcbContextStateOp);
+        }
+        assert_eq!(
+            ENTRIES
+                .iter()
+                .filter(|entry| entry.0 == "qj7QZpgr9Uw")
+                .count(),
+            2
+        );
+        assert!(!ENTRIES.iter().any(|entry| entry.0 == "H6vHS5cidSA"));
     }
 }

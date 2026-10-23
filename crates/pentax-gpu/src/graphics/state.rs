@@ -10,6 +10,8 @@ use std::fmt;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GraphicsState {
     context: [Option<u32>; 0x400],
+    saved_context: [Option<u32>; 0x400],
+    context_pushed: bool,
     sh: [Option<u32>; 0x100],
     primitive: Option<u32>,
     index_offset: Option<u32>,
@@ -28,6 +30,7 @@ impl fmt::Debug for GraphicsState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GraphicsState")
             .field("known_context", &self.context.iter().flatten().count())
+            .field("context_pushed", &self.context_pushed)
             .field("known_sh", &self.sh.iter().flatten().count())
             .field("known_primitive", &self.primitive.is_some())
             .field("known_index_offset", &self.index_offset.is_some())
@@ -43,6 +46,8 @@ impl GraphicsState {
     pub const fn empty() -> Self {
         Self {
             context: [None; 0x400],
+            saved_context: [None; 0x400],
+            context_pushed: false,
             sh: [None; 0x100],
             primitive: None,
             index_offset: None,
@@ -71,6 +76,34 @@ impl GraphicsState {
                 self.index_count = Some(0);
             }
         }
+    }
+    pub(super) fn context_operation(
+        &mut self,
+        operation: crate::context_state::Operation,
+    ) -> Result<(), Error> {
+        use crate::context_state::Operation;
+        match operation {
+            Operation::Clear => self.context = [None; 0x400],
+            Operation::Push | Operation::PushClear => {
+                if self.context_pushed {
+                    return Err(Error::Unsupported("context already pushed"));
+                }
+                self.saved_context = self.context;
+                self.context_pushed = true;
+                if operation == Operation::PushClear {
+                    self.context = [None; 0x400];
+                }
+            }
+            Operation::Pop => {
+                if !self.context_pushed {
+                    return Err(Error::Unsupported("context not pushed"));
+                }
+                self.context = self.saved_context;
+                self.saved_context = [None; 0x400];
+                self.context_pushed = false;
+            }
+        }
+        Ok(())
     }
     pub(super) fn get(&self, space: RegisterSpace, register: u32) -> Result<u32, Error> {
         let value = match space {

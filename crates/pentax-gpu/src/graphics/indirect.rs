@@ -483,6 +483,10 @@ fn packet_words(bytes: &[u8]) -> Result<usize, &'static str> {
     if header.raw() == 0x8000_0000 {
         return Ok(1);
     }
+    if let Some(words) = crate::context_state::packet_words(header.raw()) {
+        crate::context_state::decode(bytes)?;
+        return Ok(words);
+    }
     if crate::queue_reset::is_header(header.raw()) {
         if bytes.len() < 8 {
             return Err("truncated queue reset packet");

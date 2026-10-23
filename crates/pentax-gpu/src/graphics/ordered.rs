@@ -207,6 +207,16 @@ impl OrderedCommands {
                 return Ok(Some(OrderedStep::Array));
             }
             let word = |index| self.program.word(packet, index);
+            if crate::context_state::packet_words(header.raw()).is_some() {
+                let mut bytes = [0u8; 20];
+                for index in 0..packet.words {
+                    bytes[index * 4..index * 4 + 4].copy_from_slice(&word(index).to_le_bytes());
+                }
+                let operation = crate::context_state::decode(&bytes[..packet.words * 4])
+                    .map_err(Error::Unsupported)?;
+                self.state.context_operation(operation)?;
+                continue;
+            }
             if crate::queue_reset::is_header(header.raw()) {
                 let reset = crate::queue_reset::decode(header.raw(), word(1))
                     .map_err(Error::Unsupported)?;

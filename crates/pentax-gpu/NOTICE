@@ -215,3 +215,14 @@ continue to apply. PentaX changes2026 replace unbounded diagnostic string reads
 with sealed extent-only ordered annotations under existing admission limits.
 There is no invented GPU mutation, marker stack, synchronization or completion.
 All annotation, capture and refusal fixtures are original.
+The single saved-context operation additionally adapts public KytyPS5/KytyPS5
+revision 7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/commandProcessor.h: ContextStateOperation
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp: CpOpContextState
+  src/graphics/guest_gpu/graphicsRun.cpp: ApplyContextStateOperation
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp#L217
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 preserve context-only knownness,
+checked one-level save/restore, source-position replay, conservative unknown
+reset fields, exact producer framing and existing host/work admission. These
+operations invalidate draw eligibility and imply no physical GPU completion.

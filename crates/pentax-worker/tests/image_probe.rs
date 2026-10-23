@@ -1611,3 +1611,6 @@ mod agc_markers;
 
 #[path = "image_probe/f16c_conversions.rs"]
 mod f16c_conversions;
+
+#[path = "image_probe/agc_context_state_op.rs"]
+mod agc_context_state_op;

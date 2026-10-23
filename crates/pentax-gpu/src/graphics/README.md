@@ -400,3 +400,20 @@ no host string is read, and no GPU state, cache, fence or event is fabricated.
 Annotations preserve only existing draw eligibility; a prior write still
 invalidates it. The separate single-flat compute API remains explicitly outside
 this ordered annotation profile.
+Context-state commands retain one saved context bank in the owned graphics
+processor history. Clear resets the current known context while preserving the
+saved bank; Push saves it; Pop restores it and releases the saved slot;
+PushClear saves then clears. Nested Push and unmatched Pop refuse. SH, UCONFIG,
+index and instance state are outside that bank. A full processor reset releases
+the saved slot, while DCB context reset preserves it. Unestablished raw reset
+fields remain unknown and required values still refuse until written.
+
+Only the producer's exact tagged first3/5-DWORD packet, operation and zero
+padding are admitted. Fragmented following R_ZERO packets retain their existing
+NOP framing. Static, live-array and captured nested paths apply the operation
+at its actual source position, preserving earlier draw snapshots. Every context
+operation requires a fresh later draw before flip. Inline saved-state storage
+and copies remain charged through the actual state/draw sizes and replay work.
+Original consumers exercise owned cross-submission history, real shader/target
+preparation, live array updates, precise failures and closed packet grammar;
+they are distinct from physical GPU presentation evidence.

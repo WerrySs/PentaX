@@ -6,6 +6,8 @@
 use super::*;
 use pentax_platform::native_memory::NativeOwnerId;
 
+#[path = "command_builder/context_builder.rs"]
+mod context_builder;
 #[path = "command_builder/register_builder.rs"]
 mod register_builder;
 
@@ -108,12 +110,16 @@ pub(crate) const MARKER_EXPORTS: [(&str, Function); 4] = [
     ("H7uZqCoNuWk", Function::AgcDcbPopMarker),
 ];
 
+pub(crate) const CONTEXT_EXPORTS: [(&str, Function); 1] =
+    [("qj7QZpgr9Uw", Function::AgcDcbContextStateOp)];
+
 pub(crate) fn supports(function: Function) -> bool {
     EXPORTS
         .iter()
         .chain(RESET_EXPORTS.iter())
         .chain(SYNC_EXPORTS.iter())
         .chain(MARKER_EXPORTS.iter())
+        .chain(CONTEXT_EXPORTS.iter())
         .any(|(_, found)| *found == function)
 }
 
@@ -171,6 +177,7 @@ pub(crate) struct PendingCommandBuilder {
     payload: Vec<u8>,
     preflight_work: u64,
     registers: Option<register_builder::RegisterBuildState>,
+    context: Option<context_builder::ContextBuildState>,
 }
 impl std::fmt::Debug for PendingCommandBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -820,6 +827,9 @@ impl Driver {
             256,
             self.limits.max_preparation_work,
         )?;
+        if function == Function::AgcDcbContextStateOp {
+            return self.begin_context_operation(memory, args);
+        }
         if let Some(value) = size(function, &args) {
             return Ok(CommandBuilderAction::Returned(value));
         }
@@ -957,6 +967,7 @@ impl Driver {
             payload,
             preflight_work: work,
             registers: None,
+            context: None,
         };
         if u64::from(packet.allocate) <= count {
             let value = self.publish_command(memory, pending, up)?;
@@ -986,6 +997,9 @@ impl Driver {
         }
         if pending.owner != memory.owner_id() {
             return Err(Failure::Memory);
+        }
+        if pending.context.is_some() {
+            return self.resume_context_operation(memory, pending, Some(returned));
         }
         if pending.registers.is_some() {
             return self.resume_register_group(memory, pending, Some(returned));

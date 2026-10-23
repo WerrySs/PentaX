@@ -596,3 +596,6 @@ mod memory_sync_tests;
 
 #[path = "tests/marker_tests.rs"]
 mod marker_tests;
+
+#[path = "tests/context_tests.rs"]
+mod context_tests;

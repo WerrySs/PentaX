@@ -291,6 +291,8 @@ pub fn plan_commands(
             };
             let length = if header.raw() == 0x8000_0000 {
                 1
+            } else if let Some(words) = crate::context_state::packet_words(header.raw()) {
+                words
             } else if crate::queue_reset::is_header(header.raw()) {
                 2
             } else if let Some(words) = crate::memory_sync::packet_words(header.raw()) {
@@ -317,6 +319,15 @@ pub fn plan_commands(
                 .checked_add(length)
                 .filter(|n| *n <= bytes.len() / 4)
                 .ok_or(fail("truncated packet"))?;
+            if crate::context_state::packet_words(header.raw()).is_some() {
+                let operation =
+                    crate::context_state::decode(&bytes[at * 4..end * 4]).map_err(fail)?;
+                work(&mut usage, limits, size_of::<GraphicsState>() as u64)?;
+                state.context_operation(operation)?;
+                fresh_draw = false;
+                at = end;
+                continue;
+            }
             if crate::queue_reset::is_header(header.raw()) {
                 let reset = crate::queue_reset::decode(header.raw(), word(at + 1)).map_err(fail)?;
                 work(&mut usage, limits, size_of::<GraphicsState>() as u64)?;

@@ -954,3 +954,12 @@ captured and live ordered plans. Their binary payload is never interpreted as a
 host C string or logged. They do not change modeled GPU state, synchronize work,
 signal events or create readiness; they retain only an already current draw's
 eligibility. This source support makes no claim about a commercial game frame.
+The DCB ContextStateOp builder preserves each source reservation and fragmented
+allocation, including Pop's first packet before ReserveDW(22). A real grow
+callback can move the current descriptor; the first actual packet address is
+retained independently. Each allocated segment publishes its cursor, a checked
+whole-segment zero, then its header/operation. Allocation failure returns null
+with earlier prefixes retained; late memory failure makes the driver
+nonreplayable. Encoding alone does not change the owned graphics context.
+Submitted context history saves only the current CONTEXT bank and uses existing
+owner, packet, host/work and target preparation checks.

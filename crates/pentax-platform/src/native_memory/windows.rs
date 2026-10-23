@@ -20,6 +20,12 @@ mod names;
 use names::NameEntry;
 
 #[derive(Debug, Clone, Copy)]
+struct AliasRhsPreflight {
+    span: NativeRange,
+    all_private: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct Page {
     address: u64,
     permissions: NativePermissions,
@@ -56,11 +62,11 @@ pub struct NativeAddressSpace {
     // These owner-local proofs contain no payload or execution authority and
     // share the existing before-mutation invalidation point with stack proofs.
     provider_preflight: Cell<[Option<NativeRange>; 2]>,
-    // Two exact positive MAPPED-only RHS spans for physical disjointness.
-    // No rights, payload, source identity or alias result is retained. One-page
+    // Two exact positive mapped RHS spans and their all-private classification.
+    // No rights, payload, source identity or shared coordinates are retained. One-page
     // spans are checked normally so transient return/data slots cannot evict
     // the repeated large protected code intervals. Mutation clears both first.
-    alias_rhs_preflight: Cell<[Option<NativeRange>; 2]>,
+    alias_rhs_preflight: Cell<[Option<AliasRhsPreflight>; 2]>,
     names: Vec<NameEntry>,
     name_work: u64,
     next_mapping_lifetime: u64,

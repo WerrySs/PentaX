@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod compute;
+mod context_state;
 mod error;
 pub mod graphics;
 mod inspect;
