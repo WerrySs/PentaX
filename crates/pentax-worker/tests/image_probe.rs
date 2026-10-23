@@ -1617,3 +1617,6 @@ mod agc_context_state_op;
 
 #[path = "image_probe/agc_prim_state.rs"]
 mod agc_prim_state;
+
+#[path = "image_probe/agc_packet_payload.rs"]
+mod agc_packet_payload;

@@ -978,3 +978,14 @@ leaves staged prefixes unpublished. Distinct virtual physical aliases are refuse
 explicitly. Successful output arrays remain CPU data until actual register
 encoding/submission; original consumers carry them through real register builders
 and original shader/target preparation without claiming hardware execution.
+
+`AgcGetDataPacketPayloadAddress` computes the source-defined packet address as
+plain guest data. Its nonzero low32 type branch does not access the command;
+type zero reads exactly the current four-byte header before one checked eight-
+byte output, including overlapping input/output. Unknown packet tags are not
+filtered by this metadata helper. Unmapped returned pointers confer no access
+or GPU authority. Null output, arithmetic overflow, permissions and existing
+work/write limits remain typed refusals with atomic output. Only its canonical
+identity and observed paired alias are registered; the unobserved Range helper
+remains unavailable. Original fixtures cover current headers, same-address and
+physical aliases, exact page edges and output/budget refusal boundaries.

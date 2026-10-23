@@ -31,6 +31,8 @@ pub use function_profile::FunctionProfile;
 mod graphics;
 #[path = "driver/interrupts.rs"]
 mod interrupts;
+#[path = "driver/packet_metadata.rs"]
+mod packet_metadata;
 #[path = "driver/presentation.rs"]
 mod presentation;
 #[path = "driver/register_execution.rs"]
@@ -155,6 +157,7 @@ pub enum Function {
     AgcDcbPopMarker,
     AgcDcbContextStateOp,
     AgcCreatePrimState,
+    AgcGetDataPacketPayloadAddress,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -521,6 +524,9 @@ impl Driver {
                 &mut self.usage.preparation_work,
                 maximum,
             );
+        }
+        if function == Function::AgcGetDataPacketPayloadAddress {
+            return self.packet_payload_address(memory, args);
         }
         if function == Function::AgcCreatePrimState {
             let maximum = self.shader_call_maximum()?;

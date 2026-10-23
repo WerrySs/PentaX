@@ -130,6 +130,7 @@ catalogue!(
     AgcDcbPopMarker,
     AgcDcbContextStateOp,
     AgcCreatePrimState,
+    AgcGetDataPacketPayloadAddress,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

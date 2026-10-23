@@ -608,3 +608,14 @@ alias refusal using the existing shader Editor. All literal, pointer-alias,
 refusal and real register/shader preparation fixtures are original. The helper
 computes caller-owned register pairs without mapping a shader or executing GPU
 work. The unobserved UpdatePrimState export remains unavailable.
+
+The checked packet payload-address helper additionally adapts public KytyPS5/
+KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/libs/agc.cpp: AgcGetDataPacketPayloadAddress
+  src/libs/libAgcDriver.cpp: exact canonical NID and signature
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp#L1439
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 preserve source branch ordering,
+low32 int arguments and current four-byte header reads, with bounded checked
+arithmetic and atomic current-owner output. Returned addresses remain plain
+guest data. All alias, boundary and refusal consumers are original.

@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 249] = {
+const ENTRIES: [(&str, Function, usize, usize); 251] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 249] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 249];
+    let mut entries = [BASE_ENTRIES[0]; 251];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -190,6 +190,18 @@ const ENTRIES: [(&str, Function, usize, usize); 249] = {
     entries[246] = (nid, function, 2, 2);
     entries[247] = ("D9sr1xGUriE", Function::AgcCreatePrimState, 1, 1);
     entries[248] = ("D9sr1xGUriE", Function::AgcCreatePrimState, 2, 2);
+    entries[249] = (
+        "V++UgBtQhn0",
+        Function::AgcGetDataPacketPayloadAddress,
+        1,
+        1,
+    );
+    entries[250] = (
+        "V++UgBtQhn0",
+        Function::AgcGetDataPacketPayloadAddress,
+        2,
+        2,
+    );
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -393,7 +405,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -480,7 +492,7 @@ mod reset_queue_tests {
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -507,7 +519,7 @@ mod memory_sync_tests {
     #[test]
     fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -534,7 +546,7 @@ mod marker_binding_tests {
     #[test]
     fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -558,7 +570,7 @@ mod context_binding_tests {
     #[test]
     fn context_operation_appends_exact_canonical_and_observed_pair_without_moving_old_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(
             ENTRIES[244],
             ("H7uZqCoNuWk", Function::AgcDcbPopMarker, 2, 2)
@@ -589,7 +601,7 @@ mod primitive_binding_tests {
     #[test]
     fn primitive_creation_appends_only_exact_canonical_and_observed_pairs_after_context_state() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 249);
+        assert_eq!(provider.function_count(), 251);
         assert_eq!(
             ENTRIES[246],
             ("qj7QZpgr9Uw", Function::AgcDcbContextStateOp, 2, 2)
@@ -611,5 +623,41 @@ mod primitive_binding_tests {
             2
         );
         assert!(!ENTRIES.iter().any(|entry| entry.0 == "Y3ymLfZ1384"));
+    }
+}
+
+#[cfg(test)]
+mod packet_payload_binding_tests {
+    use super::*;
+    #[test]
+    fn packet_payload_address_appends_only_exact_pairs_and_preserves_primitive_markers() {
+        let provider = build_graphics_provider(PAGE_SIZE).unwrap();
+        assert_eq!(provider.function_count(), 251);
+        assert_eq!(
+            ENTRIES[248],
+            ("D9sr1xGUriE", Function::AgcCreatePrimState, 2, 2)
+        );
+        for (ordinal, pair) in [(249, 1), (250, 2)] {
+            assert_eq!(
+                ENTRIES[ordinal],
+                (
+                    "V++UgBtQhn0",
+                    Function::AgcGetDataPacketPayloadAddress,
+                    pair,
+                    pair
+                )
+            );
+            let marker = provider.markers().nth(ordinal).unwrap();
+            assert_eq!(marker.id(), BASE + ordinal as u32 + 1);
+            assert_eq!(marker.function, Function::AgcGetDataPacketPayloadAddress);
+        }
+        assert_eq!(
+            ENTRIES
+                .iter()
+                .filter(|entry| entry.0 == "V++UgBtQhn0")
+                .count(),
+            2
+        );
+        assert!(!ENTRIES.iter().any(|entry| entry.0 == "s+VGAMDQ0AQ"));
     }
 }
