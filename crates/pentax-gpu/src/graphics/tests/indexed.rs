@@ -229,3 +229,63 @@ fn indexed_source_alias_restart_and_resource_refusals_leave_inputs_unchanged() {
     }
     assert_eq!(memory.source.target, original);
 }
+
+#[test]
+fn index_size_0600_bit14_is_ignored_only_within_exact_static_and_live_index_grammar() {
+    for kind in [0u32, 1] {
+        for policy in [0, 0x40, 0x80, 0xc0] {
+            for flag in [0, 0x4000] {
+                let data = bytes(&[0xc0017a00, 0x20000243, 0x400 | kind | policy | flag]);
+                let planned =
+                    plan_commands(&[&data], GraphicsState::empty(), &Default::default()).unwrap();
+                assert_eq!(
+                    planned.final_state().index_type,
+                    Some(if kind == 0 {
+                        IndexType::U16
+                    } else {
+                        IndexType::U32
+                    })
+                );
+                let roots = [CommandRange {
+                    address: 0x4000,
+                    size: data.len() as u64,
+                }];
+                let mut ordered = OrderedCommands::prepare(
+                    &[&data],
+                    &roots,
+                    GraphicsState::empty(),
+                    &Default::default(),
+                )
+                .unwrap();
+                assert!(ordered.next_step().unwrap().is_none());
+                assert_eq!(ordered.final_state().unwrap(), planned.final_state());
+            }
+        }
+    }
+    for (header, selector, value) in [
+        (0xc0017a00, 0x20000243, 0x4402),
+        (0xc0017a00, 0x20000243, 0x4403),
+        (0xc0017a00, 0x20000243, 0x4000),
+        (0xc0017a00, 0x20000243, 0x2400),
+        (0xc0017a00, 0x20000243, 0x8400),
+        (0xc0017a00, 0x20000243, 0x4500),
+        (0xc0017a00, 0x243, 0x4400),
+        (0xc0017a04, 0x20000243, 0x4400),
+    ] {
+        let data = bytes(&[header, selector, value]);
+        let roots = [CommandRange {
+            address: 0x4000,
+            size: data.len() as u64,
+        }];
+        assert!(plan_commands(&[&data], GraphicsState::empty(), &Default::default()).is_err());
+        assert!(
+            OrderedCommands::prepare(
+                &[&data],
+                &roots,
+                GraphicsState::empty(),
+                &Default::default()
+            )
+            .is_err()
+        );
+    }
+}

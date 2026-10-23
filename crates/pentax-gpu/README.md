@@ -335,3 +335,10 @@ capacity are admitted before effects. Captured array ranges participate in
 later physical write exclusions. A late failure preserves prior effects and
 makes the driver terminal. New array/compute-IB combinations remain unsupported;
 streams without arrays retain the existing static planners and IB behavior.
+
+The exact versioned SetIndexSize packet additionally admits producer bit14.
+The pinned receiver ignores this field and the existing producer policy bits;
+only the low2 index type selects the existing U16/U32 upload path. Type2/3,
+unknown bits, altered header/selector and a missing mandatory bit remain typed
+refusals. Static admission and source-ordered replay retain the same index
+state and current owned index-buffer checks; no cache effect is inferred.

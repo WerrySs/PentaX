@@ -158,6 +158,7 @@ pub enum Function {
     AgcDcbContextStateOp,
     AgcCreatePrimState,
     AgcGetDataPacketPayloadAddress,
+    AgcDcbSetIndexSize0600,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.

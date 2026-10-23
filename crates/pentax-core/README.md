@@ -989,3 +989,13 @@ work/write limits remain typed refusals with atomic output. Only its canonical
 identity and observed paired alias are registered; the unobserved Range helper
 remains unavailable. Original fixtures cover current headers, same-address and
 physical aliases, exact page edges and output/budget refusal boundaries.
+
+The exact `AgcDcbSetIndexSize_0600` four-argument variant is registered under its
+canonical and observed paired identities. It reuses the existing real three-
+DWORD allocator/grow path, retains the low2/low2/low1 argument masks, and emits
+the source bit14 alongside the established index-size packet. Null buffers and
+allocation failure return zero; actual cursor/header publication and late
+memory failures retain the existing ordered failure boundary. Earlier export
+rows and the original index-size builder remain unchanged. Original consumers
+take the actual packet through owned indexed shader/resource preparation;
+no physical GPU result or commercial image is claimed by this helper.

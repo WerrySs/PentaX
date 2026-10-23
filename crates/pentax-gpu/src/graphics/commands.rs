@@ -474,9 +474,10 @@ pub fn plan_commands(
                 0x2f if length == 2 => state.instances = Some(word(at + 1)),
                 0x7a if header.raw() == 0xc001_7a00 => {
                     let value = word(at + 2);
-                    // Exact indexed register grammar emitted by SetIndexSize.
-                    // Cache policy affects residency, not the immutable upload.
-                    if word(at + 1) != 0x2000_0243 || value & !0x4c3 != 0 || value & 0x400 == 0 {
+                    // Exact SetIndexSize and _0600 producer grammar. The
+                    // pinned receiver uses only low2 type bits; producer policy
+                    // bits and bit14 imply no additional cache or state effect.
+                    if word(at + 1) != 0x2000_0243 || value & !0x44c3 != 0 || value & 0x400 == 0 {
                         return Err(fail("indexed register profile"));
                     }
                     state.index_type = Some(match value & 3 {

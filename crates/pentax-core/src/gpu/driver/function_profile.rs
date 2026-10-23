@@ -131,6 +131,7 @@ catalogue!(
     AgcDcbContextStateOp,
     AgcCreatePrimState,
     AgcGetDataPacketPayloadAddress,
+    AgcDcbSetIndexSize0600,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

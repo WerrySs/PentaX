@@ -241,3 +241,14 @@ source-proven zero reset defaults and active-bit masks, and explicitly refuse
 unsupported grouping/user-VGPR/output modes in the existing flat draw profile.
 No geometry assembly, shader resource authority or physical completion is
 inferred from primitive metadata.
+
+The versioned index-size packet boundary additionally follows public
+KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+  src/graphics/guest_gpu/command_processor/pm4Handlers.cpp: HwUcSetIndexType
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp#L1183
+Copyright (c) 2021 InoriRus; GPL-2.0-only and the retained original Kyty MIT grant
+continue to apply. Original PentaX changes2026 admit only the additional bit14
+emitted by the reviewed _0600 producer. The receiver uses only low2 type bits;
+ignored producer fields imply no invented cache or resource effect. Exact
+header/selector/mandatory bit and supported U16/U32 boundaries remain checked.
+Static and ordered-state consumers are original.

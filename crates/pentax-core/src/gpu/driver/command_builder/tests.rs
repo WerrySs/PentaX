@@ -599,3 +599,6 @@ mod marker_tests;
 
 #[path = "tests/context_tests.rs"]
 mod context_tests;
+
+#[path = "tests/index_size_0600.rs"]
+mod index_size_0600;

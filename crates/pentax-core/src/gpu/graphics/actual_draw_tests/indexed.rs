@@ -317,3 +317,75 @@ fn actual_indexed_u16_u32_draws_observe_changed_indices_and_preserve_tiled_load_
         }
     }
 }
+
+#[test]
+fn actual_0600_encoder_selects_owned_index_width_for_real_shader_and_index_preparation() {
+    use crate::gpu::driver::{CommandBuilderAction, Driver, Function};
+    for (kind, index_type) in [
+        (0, pentax_gpu::graphics::IndexType::U16),
+        (1, pentax_gpu::graphics::IndexType::U32),
+    ] {
+        let (mut owner, base) = owner();
+        let mut memory = owner.pause().unwrap();
+        let index = base + 0x8000;
+        let command = base + 0x6000;
+        let buffer = base + 0x100;
+        let indices = if kind == 0 {
+            [0u16, 1, 2]
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>()
+        } else {
+            [0u32, 1, 2]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        };
+        memory.write(index, &indices).unwrap();
+        for flag in [0, 1] {
+            let mut descriptor = [0; 56];
+            descriptor[16..24].copy_from_slice(&command.to_le_bytes());
+            descriptor[24..32].copy_from_slice(&(command + 12).to_le_bytes());
+            memory.write(buffer, &descriptor).unwrap();
+            let mut driver = Driver::new(Default::default());
+            assert!(
+                matches!(driver.begin_command_builder(&mut memory,Function::AgcDcbSetIndexSize0600,[buffer,kind,3,flag,0,0],None).unwrap(),CommandBuilderAction::Returned(actual) if actual==command)
+            );
+            let mut words = commands(base + 0x4000, base + 0x5000, base + 0x10000);
+            let first = words.iter().position(|word| *word == 0xc0012d00).unwrap();
+            words.truncate(first);
+            set(&mut words, 0x79, 0x24b, &[0]);
+            let mut encoded = bytes(&words);
+            encoded.extend(read(&memory, command, 12));
+            encoded.extend(bytes(&[
+                0xc0042700,
+                3,
+                index as u32,
+                (index >> 32) as u32,
+                3,
+                0,
+            ]));
+            let plan = plan_commands(
+                &[&encoded],
+                GraphicsState::empty(),
+                &CommandLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(plan.draws().len(), 1);
+            let prepared = pentax_gpu::graphics::prepare_draw(
+                &plan.draws()[0],
+                &crate::gpu::Memory(&memory),
+                &Default::default(),
+            )
+            .unwrap();
+            let payload = prepared.indices().unwrap();
+            assert_eq!(payload.index_type(), index_type);
+            assert_eq!(payload.bytes(), indices);
+            assert_eq!(prepared.vertex().spirv()[0], 0x07230203);
+            assert_eq!(prepared.pixel().spirv()[0], 0x07230203);
+            assert_eq!(driver.usage().draws, 0);
+            assert_eq!(read(&memory, index, indices.len()), indices);
+            assert_eq!(read(&memory, base + 0x10000, 65536), [0x9b; 65536]);
+        }
+    }
+}

@@ -114,13 +114,14 @@ pub(crate) const CONTEXT_EXPORTS: [(&str, Function); 1] =
     [("qj7QZpgr9Uw", Function::AgcDcbContextStateOp)];
 
 pub(crate) fn supports(function: Function) -> bool {
-    EXPORTS
-        .iter()
-        .chain(RESET_EXPORTS.iter())
-        .chain(SYNC_EXPORTS.iter())
-        .chain(MARKER_EXPORTS.iter())
-        .chain(CONTEXT_EXPORTS.iter())
-        .any(|(_, found)| *found == function)
+    function == Function::AgcDcbSetIndexSize0600
+        || EXPORTS
+            .iter()
+            .chain(RESET_EXPORTS.iter())
+            .chain(SYNC_EXPORTS.iter())
+            .chain(MARKER_EXPORTS.iter())
+            .chain(CONTEXT_EXPORTS.iter())
+            .any(|(_, found)| *found == function)
 }
 
 const INVALID_PACKET: u64 = 0x8a6c_000c;
@@ -249,6 +250,7 @@ fn allocation_failure(function: Function) -> Result<u64, Failure> {
     match function {
         AgcCbNop
         | AgcCbDispatch
+        | AgcDcbSetIndexSize0600
         | AgcDcbSetNumInstances
         | AgcDcbWriteData
         | AgcAcbWriteData
@@ -371,6 +373,11 @@ fn packet(function: Function, args: [u64; 12]) -> Result<Option<Packet>, Failure
             pm4(3, 0x7a, 0),
             0x2000_0243,
             0x400 | (a[1] & 3) | ((a[2] & 3) << 6),
+        ]),
+        AgcDcbSetIndexSize0600 => Packet::fixed(&[
+            0xc001_7a00,
+            0x2000_0243,
+            0x400 | (a[1] & 3) | ((a[2] & 3) << 6) | ((a[3] & 1) << 14),
         ]),
         AgcDcbSetIndexBuffer => {
             if args[1] & 1 != 0 {
@@ -644,6 +651,7 @@ fn null_result(function: Function, args: &[u64; 6]) -> Option<Result<u64, Failur
     Some(match function {
         AgcCbNop
         | AgcCbDispatch
+        | AgcDcbSetIndexSize0600
         | AgcDcbSetNumInstances
         | AgcDcbWriteData
         | AgcAcbWriteData
