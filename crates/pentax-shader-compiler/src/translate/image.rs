@@ -14,7 +14,9 @@ use pentax_shader::{ImageDimension, ImageSampleFlags as F, Opcode, OperandKind, 
 impl Translator<'_> {
     fn image_handle(&mut self, base: Opnd, image: bool) -> Result<Value, CompileError> {
         let count = if image { 8 } else { 4 };
-        if base.kind != OperandKind::Sgpr || base.reg % 4 != 0 || u32::from(base.reg) + count > 106
+        if base.kind != OperandKind::Sgpr
+            || !base.reg.is_multiple_of(4)
+            || u32::from(base.reg) + count > 106
         {
             return Err(self.unsupported(UnsupportedReason::DynamicDescriptor));
         }
