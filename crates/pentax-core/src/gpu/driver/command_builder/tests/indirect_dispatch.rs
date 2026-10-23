@@ -276,12 +276,15 @@ fn emitted_dispatches_keep_live_dimension_permissions_and_distinct_receiver_prof
             .into_parts();
     assert!(product.is_none());
     assert_eq!(usage.work, 12);
-    // The same admitted packet resolves new dimensions, never saved values.
+    // New nonzero live dimensions enter shader preparation. This empty state
+    // has no START register, so the first exact refusal proves the fresh read.
     memory.write(dimensions, &bytes(&[1, 2, 3])).unwrap();
-    assert!(matches!(
-        compute::prepare_dispatch(dispatch, &crate::gpu::Memory(&memory), &Default::default()),
-        Err(compute::Error::Unsupported(_))
-    ));
+    let nonzero =
+        compute::prepare_dispatch(dispatch, &crate::gpu::Memory(&memory), &Default::default());
+    assert!(
+        matches!(&nonzero, Err(compute::Error::MissingRegister(0x204))),
+        "{nonzero:?}"
+    );
     // Encoder masks are not compute-profile promotion: mode0x41 is refused
     // before touching an otherwise invalid dimensions pointer.
     let encoded = build(
