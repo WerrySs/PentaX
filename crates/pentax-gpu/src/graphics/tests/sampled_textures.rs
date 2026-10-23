@@ -160,7 +160,7 @@ fn sampled_draw_refuses_unimplemented_image_clamps_feedback_aliases_and_unreadab
 fn sampled_draw_specializes_image_minimum_lod_without_changing_source_sampler_or_texel_filter() {
     let memory = Textured::new();
     let mut image = descriptor();
-    image[1] |= 0x100; // Absolute T# MIN_LOD1, base level0.
+    image[1] |= 0x1_0000; // Absolute T# MIN_LOD1, base level0.
     let commands = textured_plan(image);
     let draw = prepare_draw(&commands.draws()[0], &memory, &Limits::default()).unwrap();
     assert_eq!(draw.pixel().manifest().images()[0].min_lod_u4_8, 256);
@@ -176,7 +176,7 @@ fn sampled_draw_specializes_image_minimum_lod_without_changing_source_sampler_or
 fn sampled_draw_feedback_manifest_retains_absolute_descriptor_threshold_and_real_counter_binding() {
     let memory = Textured::new();
     let mut image = descriptor();
-    image[1] |= 0x100;
+    image[1] |= 0x1_0000;
     image[5] |= 1 << 25;
     image[6] = 17;
     let commands = textured_plan(image);

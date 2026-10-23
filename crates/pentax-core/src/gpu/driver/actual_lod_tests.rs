@@ -195,7 +195,7 @@ fn sampled_commands(base: u64, texture: u64, target: u64, lod: f32) -> Vec<u32> 
         0x0c,
         &[
             (texture >> 8) as u32,
-            0xc380_0100 | ((texture >> 40) as u32 & 0xff),
+            0xc381_0000 | ((texture >> 40) as u32 & 0xff),
             0x0000_c000,
             0x9001_0fac,
             0,
