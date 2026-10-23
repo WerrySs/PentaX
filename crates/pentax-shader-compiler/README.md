@@ -271,3 +271,32 @@ cross-lane communication or shared-memory semantics. Original compiler tests
 consume decoded shaders and emitted scalar SPIR-V data flow, including lanes
 31/32/63, TG_SIZE input sharing and multidimensional workgroups. They are not
 physical GPU execution evidence; that belongs to separate checked fixtures.
+
+
+Bounded compute LDS
+-------------------
+
+Compute descriptions carry the CP allocation as `shared_memory_bytes`: a
+multiple of512, at most65536 bytes per workgroup. The manifest preserves this
+allocation through staged buffer specialization. Device admission must check
+the actual shared-memory limit before creating or executing the pipeline.
+
+The initial LDS subset comprises DS_READ_B32, DS_WRITE_B32 and their paired
+B32/ST64 forms. These use a real per-workgroup u32 array, byte offsets, EXEC
+gating and per-word bounds checks. Out-of-allocation reads return zero and
+writes are discarded; initial contents inside the allocation are undefined.
+The pinned public dword emitter discards the low two address bits. Paired
+reads snapshot their address before destination writes. Coincident paired
+write offsets retain the first source value, as in the public translator.
+
+Only straight-line compute control flow is admitted for this subset. A
+conservative unconditional Workgroup control/memory barrier follows each DS
+instruction outside conditional EXEC accesses, and the guest S_BARRIER
+retains its actual Workgroup barrier. This supports shared storage across
+physical subgroups without a DS-only native64 requirement. Unsynchronized
+conflicting guest accesses have no defined result promised here. Actual
+ballots/AnyLane still require the existing exact native subgroup contract.
+GDS, atomics, other DS widths and LDS in branching/looping control flow remain
+explicit typed refusals. CPU contract tests inspect original decoded shaders,
+post-SSA data dependencies and actual emitted storage/barrier operations;
+they do not establish device execution or a commercial rendered frame.

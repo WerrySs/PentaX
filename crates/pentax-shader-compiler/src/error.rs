@@ -96,6 +96,8 @@ pub enum UnsupportedReason {
     BufferAtomic,
     FlatOrGlobalMemory,
     LocalDataShare,
+    SharedMemoryAllocation,
+    SharedMemoryControlFlow,
     GlobalDataShare,
     ImageOperation,
     ImageMode,
@@ -153,7 +155,11 @@ impl UnsupportedReason {
             Self::BufferStatusReturn => "TFE/LWE fetch status is not ported",
             Self::BufferAtomic => "buffer atomics are not ported",
             Self::FlatOrGlobalMemory => "FLAT/GLOBAL/SCRATCH memory (BDA) is not ported",
-            Self::LocalDataShare => "LDS (DS) operations are not ported",
+            Self::LocalDataShare => "this LDS operation or stage is not ported",
+            Self::SharedMemoryAllocation => "LDS requires a nonzero checked compute allocation",
+            Self::SharedMemoryControlFlow => {
+                "LDS synchronization requires straight-line compute control flow"
+            }
             Self::GlobalDataShare => "GDS operations are not ported",
             Self::ImageOperation => "this MIMG image operation is not ported",
             Self::ImageMode => "image mode requires an unsupported dimension, operand or stage",
@@ -195,6 +201,7 @@ pub enum ProfileError {
     PushDataStart,
     WorkgroupSize,
     ComputeThreadIds,
+    SharedMemorySize,
     ComputeWorkgroupRegisters,
     PixelInputCount,
     PixelInputLocation,

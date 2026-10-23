@@ -23,6 +23,7 @@ fn accepted_scalar_vector_and_alias_programs_validate() {
         workgroup_register: 32,
         tg_size: false,
         float_mode: 0xc0,
+        shared_memory_bytes: 0,
     }))
     .unwrap();
     let limits = Limits::default();

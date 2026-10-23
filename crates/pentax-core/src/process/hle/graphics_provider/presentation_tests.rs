@@ -16,8 +16,8 @@ fn presentation_exports_append_exact_typed_canonical_rows_without_moving_old_mar
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"VideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 279);
-    assert_eq!(metadata.link().symbols().len(), 280);
+    assert_eq!(provider.function_count(), 283);
+    assert_eq!(metadata.link().symbols().len(), 284);
     for (index, nid) in [
         "HXzjK9yI30k",
         "-Ozn0F1AFRg",
@@ -107,8 +107,8 @@ fn paired_video_aliases_preserve_old_markers_and_exact_versioned_descriptors() {
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"libSceVideoOut");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 279);
-    assert_eq!(metadata.link().symbols().len(), 280);
+    assert_eq!(provider.function_count(), 283);
+    assert_eq!(metadata.link().symbols().len(), 284);
     for (index, (old, nid, function)) in [
         (117, "zgXifHT9ErY", Function::VideoIsFlipPending),
         (108, "HXzjK9yI30k", Function::VideoAddFlipEvent),
@@ -168,8 +168,8 @@ fn submit_acb_alias_keeps_prior_markers_and_fits_the_exact_provider_bound() {
     assert_eq!((module.version_major(), module.version_minor()), (1, 1));
     assert_eq!(library.name().as_bytes(), b"libSceAgcDriver");
     assert_eq!(library.version(), 1);
-    assert_eq!(provider.function_count(), 279);
-    assert_eq!(metadata.link().symbols().len(), 280);
+    assert_eq!(provider.function_count(), 283);
+    assert_eq!(metadata.link().symbols().len(), 284);
     assert_eq!(ENTRIES[2], ("gSRnr79F8tQ", Function::Acb, 0, 0));
     assert_eq!(ENTRIES[278], ("gSRnr79F8tQ", Function::Acb, 6, 6));
     assert_eq!(
@@ -193,7 +193,7 @@ fn submit_acb_alias_keeps_prior_markers_and_fits_the_exact_provider_bound() {
     // This actual catalogue exactly fills the admitted one-page metadata span.
     assert_eq!(
         (NAME_BYTES, DYNAMIC_AT, STRINGS_AT, SYMBOLS_AT),
-        (87, 4736, 5056, 9664)
+        (68, 4720, 176, 9568)
     );
     assert_eq!(
         SYMBOLS_AT + metadata.link().symbols().len() * 24,

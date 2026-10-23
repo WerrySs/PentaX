@@ -251,3 +251,135 @@ fn compute_submission_returns_one_real_token_and_background_progress_preserves_c
     )
     .unwrap();
 }
+
+#[test]
+fn direct_dcb_returns_one_real_token_and_background_progress_preserves_cpu_and_sealed_prefix() {
+    let input = original_input(0);
+    with_native_image_session(
+        &[&input],
+        &NativeImageLimits::default(),
+        |session, layout| {
+            let scratch = layout.entry.stack.address + 0x2000;
+            let marker = *session
+                .plan
+                .factory
+                .markers()
+                .iter()
+                .find(|m| m.registration.service == Service::MapFlexible)
+                .unwrap();
+            assert_eq!(
+                session
+                    .kernel_stop(KernelServiceStop {
+                        syscall_pc: session.plan.entry(marker) + 5,
+                        service_id: marker.service_id.into(),
+                        args: CallArgs([scratch, 0x10000, 0x33, 0, 0, 0]),
+                    })
+                    .unwrap(),
+                0
+            );
+            let mut pointer = [0; 8];
+            session
+                .pause()
+                .unwrap()
+                .read(scratch, &mut pointer)
+                .unwrap();
+            let base = u64::from_le_bytes(pointer);
+            let prefix = base + 0x3000;
+            let gate = base + 0x3010;
+            let output = base + 0x3020;
+            words(session, prefix, &[0, 0x1357_9bdf]);
+            words(session, gate, &[0, 0x2468_ace0]);
+            words(session, output, &[0, 0xa5a5_5a5a]);
+            let stream = [
+                0xc003_3700,
+                0x100,
+                prefix as u32,
+                (prefix >> 32) as u32,
+                17,
+                0xc005_3c00,
+                0x13,
+                gate as u32,
+                (gate >> 32) as u32,
+                7,
+                u32::MAX,
+                0,
+                0xc004_4000,
+                0x101,
+                prefix as u32,
+                (prefix >> 32) as u32,
+                output as u32,
+                (output >> 32) as u32,
+            ];
+            words(session, base + 0x1000, &stream);
+            write(session, base + 0x200, &(base + 0x1000).to_le_bytes());
+            words(session, base + 0x208, &[stream.len() as u32, 0]);
+            let request = request(
+                session,
+                driver::Function::Dcb,
+                [base + 0x200, u64::MAX, 0, 0, 0, 0],
+                None,
+            );
+            let proof = session
+                .prepare_native_source(&BlockLimits::default())
+                .unwrap();
+            let (mut engine, token) = stopped(session, &proof, request, layout.entry);
+            let before = *engine.state();
+            let calls = session.graphics_usage().calls;
+            let action = session
+                .service_action(&proof, native_request(token))
+                .unwrap();
+            assert!(matches!(action, NativeServiceAction::Returned(0)));
+            assert_eq!(*engine.state(), before);
+            // The worker completes this submitting CPU exactly once. No GPU wait
+            // ticket replaces it or retains its original native callback token.
+            engine.complete_syscall(token, 0).unwrap();
+            let completed = *engine.state();
+            assert!(engine.validate_pending_syscall(token).is_err());
+            assert_eq!(session.graphics_usage().calls, calls + 1);
+            let captured = session.graphics_usage().command_bytes;
+            let mut prefix_seen = false;
+            for _ in 0..64 {
+                assert!(session.pump_direct_graphics().unwrap());
+                assert_eq!(*engine.state(), completed);
+                if read(session, prefix) == 17 {
+                    prefix_seen = true;
+                    break;
+                }
+            }
+            assert!(
+                prefix_seen,
+                "actual WRITE prefix did not progress while gate remained zero"
+            );
+            assert_eq!(read(session, output), 0);
+            // Corrupting the caller's root must not replace the admitted closure.
+            // Changing the committed prefix detects replay when the wait resumes.
+            words(session, base + 0x1000, &[0x8000_0000; 18]);
+            words(session, prefix, &[99]);
+            words(session, gate, &[7]);
+            let mut finished = false;
+            for _ in 0..64 {
+                let pending = session.pump_direct_graphics().unwrap();
+                assert_eq!(*engine.state(), completed);
+                if !pending {
+                    finished = true;
+                    break;
+                }
+            }
+            assert!(
+                finished,
+                "real current gate store did not release the retained wait"
+            );
+            assert_eq!(read(session, prefix), 99);
+            assert_eq!(read(session, output), 99);
+            assert_eq!(read(session, prefix + 4), 0x1357_9bdf);
+            assert_eq!(read(session, gate + 4), 0x2468_ace0);
+            assert_eq!(read(session, output + 4), 0xa5a5_5a5a);
+            assert_eq!(session.graphics_usage().command_bytes, captured);
+            assert_eq!(session.graphics_usage().calls, calls + 1);
+            assert!(!session.pump_direct_graphics().unwrap());
+            assert!(!session.revoke_graphics_continuations_on_teardown().unwrap());
+            Ok::<_, ()>(())
+        },
+    )
+    .unwrap();
+}

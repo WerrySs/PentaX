@@ -30,26 +30,53 @@ mod resources;
 
 /// Fenced readback from a checked guest-command compiler product. Debug keeps
 /// guest bytes private; only explicit callers can inspect the returned payload.
-pub struct ComputeReadback {
+pub struct ComputeBufferReadback {
+    resource_index: usize,
     bytes: Vec<u8>,
+}
+impl ComputeBufferReadback {
+    pub fn resource_index(&self) -> usize {
+        self.resource_index
+    }
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+pub struct ComputeReadback {
+    resource_count: usize,
+    buffers: Vec<ComputeBufferReadback>,
     usage: GpuUsage,
 }
 impl std::fmt::Debug for ComputeReadback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComputeReadback")
-            .field("bytes", &self.bytes.len())
+            .field("resources", &self.resource_count)
+            .field("outputs", &self.buffers.len())
             .field("usage", &self.usage)
             .finish()
     }
 }
 impl ComputeReadback {
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+    pub fn resource_count(&self) -> usize {
+        self.resource_count
+    }
+    pub fn outputs(&self) -> &[ComputeBufferReadback] {
+        &self.buffers
+    }
+    /// Exact legacy single-output view, never a successful fabricated empty payload.
+    pub fn bytes(&self) -> Option<&[u8]> {
+        if let [buffer] = self.buffers.as_slice() {
+            (self.resource_count == 1 && buffer.resource_index == 0)
+                .then_some(buffer.bytes.as_slice())
+        } else {
+            None
+        }
     }
     pub fn usage(&self) -> GpuUsage {
         self.usage
     }
 }
+
 /// Execute a bounded prepared compute product, never caller-supplied SPIR-V.
 /// Keep the guest paused until the readback is committed on its original owner.
 pub fn run_compute(
@@ -64,6 +91,30 @@ pub fn run_compute(
     {
         let _ = (prepared, limits);
         Err(VulkanError::UnsupportedHost)
+    }
+}
+
+#[cfg(test)]
+mod compute_readback_tests {
+    use super::*;
+
+    #[test]
+    fn single_output_of_a_multi_resource_dispatch_is_not_a_legacy_single_buffer() {
+        let mut result = ComputeReadback {
+            resource_count: 2,
+            buffers: vec![ComputeBufferReadback {
+                resource_index: 0,
+                bytes: vec![1, 2, 3, 4],
+            }],
+            usage: GpuUsage::default(),
+        };
+        assert_eq!(result.resource_count(), 2);
+        assert_eq!(result.outputs()[0].resource_index(), 0);
+        assert_eq!(result.bytes(), None);
+        result.resource_count = 1;
+        assert_eq!(result.bytes(), Some(&[1, 2, 3, 4][..]));
+        result.buffers.clear();
+        assert_eq!(result.bytes(), None); // A read-only dispatch has no fabricated output.
     }
 }
 

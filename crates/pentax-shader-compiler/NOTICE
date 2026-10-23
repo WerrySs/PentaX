@@ -136,3 +136,19 @@ The mapping is limited to independent lane identity and EXEC-bit selection;
 native ballots and other cross-lane operations retain their existing exact
 subgroup contract. No specification prose or third-party shader/test data was
 copied into this implementation or its original tests.
+
+
+Compute LDS dword lowering
+--------------------------
+The LDS frontend and SPIR-V storage/access helpers adapt the public KytyPS5
+GPL-2.0-only recompiler (original copyright/terms above), revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/frontend/translate/Memory.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterMemory.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterMemoryHelpers.cpp
+Allocation units follow the public LLVM19 AMDGPU CP-register documentation:
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/llvm/docs/AMDGPUUsage.rst
+AMD's RDNA2 ISA reference documents LDS and workgroup synchronization:
+https://docs.amd.com/v/u/en-US/rdna2-shader-instruction-set-architecture
+The bounded uniform-control policy and original test programs are PentaX
+modifications; no proprietary shader or specification prose is copied.

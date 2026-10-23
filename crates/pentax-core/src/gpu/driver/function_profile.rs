@@ -142,6 +142,7 @@ catalogue!(
     AgcDcbDrawIndexIndirect,
     AgcDcbWaitUntilSafeForRendering,
     AgcDcbGetLodStats,
+    Dcb,
 );
 
 /// Historical admitted calls, including normal rejected return values. This

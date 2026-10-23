@@ -321,6 +321,7 @@ fn manifest_of(
         inputs,
         outputs,
         workgroup_size: profile.compute().map(|cs| cs.workgroup_size),
+        shared_memory_bytes: profile.compute().map_or(0, |cs| cs.shared_memory_bytes),
         required_subgroup_size: if uses_subgroup || !layout.lod_counters.is_empty() {
             profile.common().subgroup.map(|s| s.size)
         } else {

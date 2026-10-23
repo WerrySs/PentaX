@@ -92,6 +92,12 @@ impl Translator<'_> {
             | O::SBufferLoadDwordx8
             | O::SBufferLoadDwordx16 => self.s_buffer_load(),
             O::ImageSample | O::ImageGetLod => self.image_sample(),
+            O::DsReadB32
+            | O::DsRead2B32
+            | O::DsRead2st64B32
+            | O::DsWriteB32
+            | O::DsWrite2B32
+            | O::DsWrite2st64B32 => self.shared_memory(),
             O::SMemrealtime => Err(self.unsupported(U::RealtimeClock)),
             O::BufferLoadDword
             | O::BufferLoadDwordx2

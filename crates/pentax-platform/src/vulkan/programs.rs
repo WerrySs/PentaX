@@ -212,6 +212,11 @@ fn check_contract_inner(
             "stage/resources/subgroup",
         ));
     }
+    if stage != ShaderStage::Compute && manifest.shared_memory_bytes() != 0 {
+        return Err(VulkanError::InvalidCompilerContract(
+            "graphics Workgroup storage",
+        ));
+    }
     let size = manifest.required_subgroup_size();
     let supported_size = size == Some(32) || stage == ShaderStage::Compute && size == Some(64);
     if (required.subgroup_basic() || required.subgroup_ballot()) && !supported_size
@@ -227,12 +232,12 @@ fn check_contract_inner(
                 .start_dword
                 .checked_add(push.user_sgprs.len() as u32)
                 .is_none_or(|end| end > 32)
-            || push.memory_offset_count > 1
+            || push.memory_offset_count > if stage == ShaderStage::Compute { 4 } else { 1 }
             || (push.memory_offset_count != 0
                 && push
                     .start_dword
                     .checked_add(push.memory_offset_dword)
-                    .and_then(|v| v.checked_add(1))
+                    .and_then(|v| v.checked_add(push.memory_offset_count.div_ceil(4)))
                     .is_none_or(|v| v > 32)))
     {
         return Err(VulkanError::InvalidCompilerContract("push data"));
@@ -342,6 +347,7 @@ pub(super) fn prepare(
                     workgroup_register: 16,
                     tg_size: false,
                     float_mode: 0xc0,
+                    shared_memory_bytes: 0,
                 }),
                 ShaderStage::Compute,
                 budget,
@@ -482,6 +488,7 @@ mod tests {
                     workgroup_register: 6,
                     tg_size: false,
                     float_mode: 0xc0,
+                    shared_memory_bytes: 0,
                 }),
                 ShaderStage::Compute,
                 &mut budget,
@@ -541,6 +548,7 @@ mod tests {
                 workgroup_register: 6,
                 tg_size: false,
                 float_mode: 0xc0,
+                shared_memory_bytes: 0,
             }),
             ShaderStage::Compute,
             &mut budget,

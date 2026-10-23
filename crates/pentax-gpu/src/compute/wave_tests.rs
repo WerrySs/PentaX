@@ -9,11 +9,13 @@ const DATA: u64 = 0x20000;
 struct Source {
     code: Vec<u32>,
     reads: Cell<usize>,
+    data_reads: Cell<usize>,
 }
 impl Memory for Source {
     fn read(&self, address: u64, output: &mut [u8]) -> Result<(), MemoryError> {
         self.reads.set(self.reads.get() + 1);
         if address == DATA {
+            self.data_reads.set(self.data_reads.get() + 1);
             output.fill(0xa5);
             return Ok(());
         }
@@ -44,6 +46,7 @@ fn source(dynamic_exec: bool) -> Source {
     Source {
         code,
         reads: Cell::new(0),
+        data_reads: Cell::new(0),
     }
 }
 fn state() -> ComputeState {
@@ -88,7 +91,7 @@ fn both_wave_widths_compile_all_active_guest_shaders_without_inventing_subgroup_
         let prepared = prepared.unwrap();
         assert_eq!(prepared.groups(), [1, 1, 1]);
         assert_eq!(usage.invocations, 64);
-        assert_eq!(prepared.input(), &[0xa5; 256]);
+        assert_eq!(prepared.input().unwrap(), &[0xa5; 256]);
         assert_eq!(
             prepared.shader().manifest().workgroup_size(),
             Some([64, 1, 1])
@@ -161,7 +164,7 @@ fn live_exec_halves_use_portable_compute64_lanes_and_keep_native_wave32() {
 }
 
 #[test]
-fn wave64_keeps_resource_descriptor_mode_and_invocation_refusals_before_memory_reads() {
+fn wave64_keeps_register_guards_before_fetch_and_descriptors_before_payload_reads() {
     let original = state();
     for (register, value, reason) in [
         (0x228, 1, "compute resource configuration"),
@@ -181,7 +184,12 @@ fn wave64_keeps_resource_descriptor_mode_and_invocation_refusals_before_memory_r
             matches!(prepare_dispatch(&dispatch, &memory, &Limits::default()),
             Err(Error::Unsupported(actual)) if actual == reason)
         );
-        assert_eq!(memory.reads.get(), 0);
+        if register == 0x243 {
+            assert!(memory.reads.get() > 0); // Shader discovery legitimately comes first.
+            assert_eq!(memory.data_reads.get(), 0);
+        } else {
+            assert_eq!(memory.reads.get(), 0);
+        }
     }
     let memory = source(false);
     let dispatch = Dispatch {

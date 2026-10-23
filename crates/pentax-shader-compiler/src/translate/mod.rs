@@ -12,6 +12,7 @@
 mod image;
 mod memory;
 mod scalar;
+mod shared;
 mod vector;
 
 use pentax_shader::{Export, Family, Instruction, MemoryAccess, Opcode, OperandKind, ShaderStage};
@@ -805,6 +806,18 @@ pub(crate) fn translate_program(
 ) -> Result<Ir, CompileError> {
     let program = cfg.program();
     let stage = program.stage();
+    // Until scalar-control uniformity is proved, no LDS synchronization is
+    // inserted into divergent or looping guest control flow.
+    for instruction in program.instructions() {
+        budget.charge(1)?;
+        if instruction.family() == Family::Ds && cfg.block_count() != 1 {
+            return Err(CompileError::unsupported(
+                instruction.byte_offset(),
+                Some(instruction.opcode()),
+                UnsupportedReason::SharedMemoryControlFlow,
+            ));
+        }
+    }
     let mut ir = Ir::new();
     let limits = budget.limits;
     let block_count = cfg

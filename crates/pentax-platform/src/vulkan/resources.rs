@@ -135,6 +135,14 @@ impl<'d> Buffer<'d> {
 
     pub fn read_completed(&self, budget: &mut Budget) -> Result<Vec<u8>, VulkanError> {
         let mut bytes = budget.buffer(self.length)?;
+        self.read_completed_into(&mut bytes)?;
+        Ok(bytes)
+    }
+    /// Caller has completed the producer fence; destination was admitted before effects.
+    pub fn read_completed_into(&self, bytes: &mut [u8]) -> Result<(), VulkanError> {
+        if bytes.len() != self.length {
+            return Err(VulkanError::UnexpectedReadback);
+        }
         let mapped = self.mapped()?;
         if !self.coherent {
             let ranges = [vk::MappedMemoryRange::default()
@@ -147,11 +155,11 @@ impl<'d> Buffer<'d> {
             result(code, "vkInvalidateMappedMemoryRanges")?;
         }
         // SAFETY: The same retained allocation remains mapped until Mapped drops;
-        // fixed buffer length fits it, output is a distinct fully sized Vec.
+        // fixed buffer length fits it; output is a distinct fully sized Rust slice.
         unsafe {
             std::ptr::copy_nonoverlapping(mapped.pointer.as_ptr(), bytes.as_mut_ptr(), bytes.len())
         };
-        Ok(bytes)
+        Ok(())
     }
 }
 impl Drop for Buffer<'_> {

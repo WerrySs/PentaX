@@ -478,11 +478,43 @@ upload without granting shader reads. Fenced results and ordered command writes
 use a separate GPU-write transaction on the same paused owner with unchanged
 complete-span, overlap, alias and resource checks. CPU stepping stays paused until
 writeback completes. Physical aliases observe those actual bytes immediately on
-resume. Unsupported cache flags, asynchronous execution and broader draw/resource modes
-remain separate limitations; GPU permission is no substitute for those features.
+resume. Supported CPU submission is decoupled from retained queue execution; individual
+Vulkan jobs still complete their fences before checked writeback. Unsupported
+cache flags and broader draw/resource modes remain separate limitations; GPU
+permission is no substitute for those features.
 
 Original native graphics consumers explicitly request a CPU/GPU shared mapping,
 copy their original command/shader/data templates into it, submit actual Vulkan
 jobs, and branch on the results. The original PM4 fixture additionally runs with
 GPU-only source pages and GPU-write-only output storage, verifying CPU denial,
 GPU read denial and preservation of untouched output bytes.
+
+
+### Direct draw submission and compute resources
+
+The direct DCB service takes one packet pointer and targets graphics queue zero.
+It is distinct from the context-plus-packet CommandBuffer ABI. Accepted direct
+submissions retain their original root and indirect command closure, then activate
+in FIFO order against retired graphics state. Cooperative worker turns retain
+false memory-wait positions and inspect the live predicate without replaying a
+completed prefix. An accepted CPU return does not establish GPU completion or a
+presented frame. Legacy CPU-owned graphics continuations retain their own tokens.
+
+Compute specialization discovers actual live direct user-SGPR descriptors through
+the compiler analysis before reading descriptor values. The admitted profile has
+zero to four buffers in the retained sixteen-word user bank. Zero resources do
+not fabricate a descriptor. Nonzero resources use one storage-buffer descriptor
+array in manifest order. Current-owner backing, access, physical aliases, command
+exclusions and aggregate limits are checked before upload; all fenced output
+buffers publish through one checked write transaction. Descriptor-table and
+sampled compute resources remain explicit unsupported cases.
+
+The LDS profile derives per-workgroup storage from the command processor's
+512-byte allocation units, bounded by both the shader profile and actual Vulkan
+device limits. Six B32 DS read/write forms use real Workgroup storage with
+EXEC-conditional accesses and unconditional completion barriers. Guest control
+flow is restricted to a single block until convergence is proved. This path can
+preserve logical Wave64 across native32 subgroups without granting native64
+ballot or shuffle support. GDS, LDS atomics and other DS widths remain unsupported.
+Original physical tests check actual output values and guards; source inspection
+and compilation alone do not establish physical correctness or game rendering.

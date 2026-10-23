@@ -181,6 +181,7 @@ pub enum Function {
     AgcDcbDrawIndexIndirect,
     AgcDcbWaitUntilSafeForRendering,
     AgcDcbGetLodStats,
+    Dcb,
 }
 
 /// Source frame boundary bookkeeping, independent of presentation or FPS.
@@ -312,6 +313,8 @@ pub(crate) struct Driver {
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
     graphics_execution: Option<graphics::GraphicsExecution>,
     graphics_admissions: Vec<graphics::GraphicsAdmission>,
+    graphics_async_ticket: Option<GraphicsTicket>,
+    graphics_async_pending: usize,
     graphics_phase: graphics::GraphicsPhase,
     poisoned: bool,
     frame: FrameState,
@@ -418,6 +421,8 @@ impl Driver {
             graphics_owner: None,
             graphics_execution: None,
             graphics_admissions: Vec::new(),
+            graphics_async_ticket: None,
+            graphics_async_pending: 0,
             graphics_phase: graphics::GraphicsPhase::Idle,
             poisoned: false,
             frame: FrameState::default(),
@@ -788,6 +793,23 @@ impl Driver {
             self.frame.reset_before_graphics = true;
             return Ok(0);
         }
+        if function == Function::Dcb {
+            // Direct DCB has one Packet pointer and no queue-context argument.
+            // The public source treats a null Packet as fatal, not EINVAL.
+            if args[0] == 0 {
+                return Err(Failure::Memory);
+            }
+            let range = packet_range(memory, args[0])?;
+            // GuestGpu::Submit drops an empty span before queue admission or
+            // command-address authority. No host vector is needed for one root.
+            if range.size == 0 {
+                return Ok(0);
+            }
+            if range.address == 0 {
+                return Err(Failure::Memory);
+            }
+            return self.queue_direct_graphics(memory, &[range]);
+        }
         if let Some(value) = null_result(function, args) {
             return Ok(value);
         }
@@ -993,13 +1015,7 @@ impl Driver {
             return Err(Failure::Limit);
         }
         if let Some(packet) = packet {
-            let mut raw = [0; 16];
-            memory.read(packet, &mut raw).map_err(|_| Failure::Memory)?;
-            // flags/reserved are ignored by this pinned submit path.
-            ranges.push(NativeRange {
-                address: u64::from_le_bytes(raw[..8].try_into().unwrap()),
-                size: u64::from(u32::from_le_bytes(raw[8..12].try_into().unwrap())) * 4,
-            });
+            ranges.push(packet_range(memory, packet)?);
         } else if let Some((addresses, sizes, count)) = arrays {
             for index in 0..u64::from(count) {
                 let mut address = [0; 8];
@@ -1049,6 +1065,15 @@ impl Driver {
     }
 }
 
+fn packet_range(memory: &PausedNativeMemory<'_>, packet: u64) -> Result<NativeRange, Failure> {
+    let mut raw = [0; 16];
+    memory.read(packet, &mut raw).map_err(|_| Failure::Memory)?;
+    // Source Packet flags and reserved bytes do not select a processor queue.
+    Ok(NativeRange {
+        address: u64::from_le_bytes(raw[..8].try_into().unwrap()),
+        size: u64::from(u32::from_le_bytes(raw[8..12].try_into().unwrap())) * 4,
+    })
+}
 fn context_queue(memory: &PausedNativeMemory<'_>, context: u64) -> Result<u32, Failure> {
     let mut raw = [0; 4];
     memory

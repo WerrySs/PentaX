@@ -381,6 +381,28 @@ fn display_clock(
 }
 
 impl PreparedNativeKernelStartup<'_, '_> {
+    /// Progress only already accepted direct DCB submissions. No submitting
+    /// CPU token is resumed or replaced; selected flips still require real ack.
+    pub fn pump_direct_graphics(&mut self) -> Result<bool, KernelStartupError> {
+        if self
+            .graphics
+            .as_ref()
+            .is_none_or(|driver| driver.pending_direct_graphics() == 0)
+        {
+            return Ok(false);
+        }
+        let mut paused = self.hle.pause().map_err(KernelStartupError::Hle)?;
+        let driver = self
+            .graphics
+            .as_mut()
+            .ok_or(KernelStartupError::InvalidProvider(
+                "missing direct graphics state",
+            ))?;
+        driver
+            .pump_direct_graphics(&mut paused, Some(&mut self.kernel), Some(graphics_clock))
+            .map_err(KernelStartupError::Graphics)
+    }
+
     /// Run one finite turn of already-admitted asynchronous compute work.
     /// False means no submissions remain, not that a sampled wait was satisfied.
     /// The zero-pending path takes no pause, kernel call or new service token.
@@ -823,7 +845,7 @@ mod tests {
         let input = original_input(0);
         with_native_image_session(&[&input], &NativeImageLimits::default(), |session, _| {
             let binding = session.plan.graphics.unwrap();
-            assert_eq!(binding.factory.function_count(), 279);
+            assert_eq!(binding.factory.function_count(), 283);
             let open = binding
                 .factory
                 .markers()

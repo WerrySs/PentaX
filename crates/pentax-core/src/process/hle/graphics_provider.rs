@@ -19,7 +19,7 @@ const BASE_ENTRIES: [(&str, Function, usize, usize); 6] = [
     ("h9z6+0hEydk", Function::SuspendPoint, 1, 1),
     ("h9z6+0hEydk", Function::SuspendPoint, 2, 2),
 ];
-const ENTRIES: [(&str, Function, usize, usize); 279] = {
+const ENTRIES: [(&str, Function, usize, usize); 283] = {
     let video = [
         ("Up36PTk687E", Function::VideoOpen),
         ("uquVH4-Du78", Function::VideoClose),
@@ -32,7 +32,7 @@ const ENTRIES: [(&str, Function, usize, usize); 279] = {
         ("PjS5uASwcV8", Function::VideoSetBufferAttribute2),
         ("MBlv8YWoyOk", Function::VideoAddBufferAttributeOption),
     ];
-    let mut entries = [BASE_ENTRIES[0]; 279];
+    let mut entries = [BASE_ENTRIES[0]; 283];
     let mut i = 0;
     while i < BASE_ENTRIES.len() {
         entries[i] = BASE_ENTRIES[i];
@@ -248,6 +248,11 @@ const ENTRIES: [(&str, Function, usize, usize); 279] = {
     entries[277] = ("pv9CI5VC+R0", Function::VideoAdjustColor, 4, 4);
     // Exact same-ABI paired driver spelling; all prior278 markers stay fixed.
     entries[278] = ("gSRnr79F8tQ", Function::Acb, 6, 6);
+    // The public direct Packet ABI is distinct from context + Packet submits.
+    entries[279] = ("UglJIZjGssM", Function::Dcb, 0, 0);
+    entries[280] = ("UglJIZjGssM", Function::Dcb, 6, 6);
+    entries[281] = ("AhGvpITrf4M", Function::Dcb, 0, 0);
+    entries[282] = ("AhGvpITrf4M", Function::Dcb, 6, 6);
     entries
 };
 const BASE: u32 = 0x5058_4700;
@@ -264,26 +269,29 @@ const NAMES: [&str; 7] = [
     "libSceAgcDriver",
 ];
 const DYNAMIC_COUNT: u64 = 5 + 2 * NAMES.len() as u64 + 1;
-const NAME_BYTES: usize = {
-    let mut bytes = 1;
-    let mut i = 0;
-    while i < NAMES.len() {
-        bytes += NAMES[i].len() + 1;
-        i += 1;
-    }
-    bytes
-};
+// The two short driver/video names are suffixes of existing complete names.
+// Only these exact bounded names are interned; no caller controls offsets.
+const NAME_BYTES: usize = 68;
+const NAMESPACE_BYTES: &[u8] =
+    b"\0Graphics5Driver\0Graphics5\0libSceAgc\0libSceVideoOut\0libSceAgcDriver\0";
+const NAME_OFFSETS: [usize; 7] = [1, 17, 27, 43, 37, 58, 52];
 const fn align_metadata(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & !(alignment - 1)
 }
 // Derive disjoint metadata from the fixed catalogue; appending exact exports
 // never relocates existing marker IDs/RVAs or bypasses the image-size bound.
-const DYNAMIC_AT: usize = align_metadata(0x100 + ENTRIES.len() * 16, 64);
-const STRINGS_AT: usize = align_metadata(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16, 64);
-const SYMBOLS_AT: usize = align_metadata(STRINGS_AT + NAME_BYTES + ENTRIES.len() * 16, 64);
+const OLD_MARKERS: usize = 279;
+const STRINGS_AT: usize = 64 + 2 * 56;
+const DYNAMIC_AT: usize = align_metadata(0x100 + OLD_MARKERS * 16, 8);
+const NIDS_AT: usize = align_metadata(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16, 8);
+const SYMBOLS_AT: usize = align_metadata(NIDS_AT + ENTRIES.len() * 16, 8);
 const _: () = {
-    assert!(0x100 + ENTRIES.len() * 16 <= DYNAMIC_AT);
-    assert!(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16 <= STRINGS_AT);
+    assert!(NAMESPACE_BYTES.len() == NAME_BYTES);
+    assert!(STRINGS_AT + NAME_BYTES <= 0x100);
+    assert!(ENTRIES.len() - OLD_MARKERS == 4);
+    assert!(0x100 + OLD_MARKERS * 16 <= DYNAMIC_AT);
+    assert!(DYNAMIC_AT + DYNAMIC_COUNT as usize * 16 <= NIDS_AT);
+    assert!(NIDS_AT + ENTRIES.len() * 16 <= SYMBOLS_AT);
     assert!(SYMBOLS_AT + (ENTRIES.len() + 1) * 24 <= IMAGE_BYTES);
 };
 
@@ -294,7 +302,13 @@ pub(crate) struct GraphicsMarker {
 }
 impl GraphicsMarker {
     pub fn rva(self) -> u64 {
-        0x100 + (self.symbol as u64 - 1) * 16
+        if self.symbol <= OLD_MARKERS {
+            0x100 + (self.symbol as u64 - 1) * 16
+        } else {
+            // Four new eight-byte stubs occupy only the unused second halves
+            // of old slots 0..3. Every previous marker byte and RVA is retained.
+            0x108 + (self.symbol as u64 - OLD_MARKERS as u64 - 1) * 16
+        }
     }
     pub fn id(self) -> u32 {
         BASE + self.symbol as u32
@@ -373,13 +387,9 @@ pub fn build_graphics_provider(
             8,
         ],
     );
-    let mut name_at = 1;
-    let mut name_offsets = [0; NAMES.len()];
-    for (index, name) in NAMES.iter().enumerate() {
-        name_offsets[index] = name_at as u64;
-        put(&mut image, STRINGS_AT + name_at, name.as_bytes());
-        name_at += name.len() + 1;
-    }
+    put(&mut image, STRINGS_AT, NAMESPACE_BYTES);
+    let name_offsets = NAME_OFFSETS.map(|offset| offset as u64);
+    let mut name_at = NIDS_AT - STRINGS_AT;
     if STRINGS_AT + name_at + ENTRIES.len() * 16 > SYMBOLS_AT {
         return Err(KernelProviderError::InvalidCatalogue);
     }
@@ -451,7 +461,7 @@ mod flip_tests {
     #[test]
     fn appended_flip_markers_keep_prior_ordinals_scopes_and_fixed_image_bound() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(provider.image().len(), PAGE_SIZE as usize);
         let old_last = provider.markers().nth(105).unwrap();
         assert_eq!((old_last.id(), old_last.rva()), (0x5058_476a, 0x790));
@@ -533,12 +543,16 @@ mod flip_tests {
 mod presentation_tests;
 
 #[cfg(test)]
+#[path = "graphics_provider/direct_dcb_tests.rs"]
+mod direct_dcb_tests;
+
+#[cfg(test)]
 mod reset_queue_tests {
     use super::*;
     #[test]
     fn reset_bindings_append_only_two_verified_pairs_after_all_old_graphics_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[224],
             ("pv9CI5VC+R0", Function::VideoAdjustColor, 3, 3)
@@ -565,7 +579,7 @@ mod memory_sync_tests {
     #[test]
     fn four_sync_roles_append_only_verified_pairs_after_all_reset_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -592,7 +606,7 @@ mod marker_binding_tests {
     #[test]
     fn four_marker_roles_append_only_verified_pairs_after_reset_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[228],
             ("TRO721eVt4g", Function::AgcDcbResetQueue, 2, 2)
@@ -616,7 +630,7 @@ mod context_binding_tests {
     #[test]
     fn context_operation_appends_exact_canonical_and_observed_pair_without_moving_old_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[244],
             ("H7uZqCoNuWk", Function::AgcDcbPopMarker, 2, 2)
@@ -647,7 +661,7 @@ mod primitive_binding_tests {
     #[test]
     fn primitive_creation_appends_only_exact_canonical_and_observed_pairs_after_context_state() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[246],
             ("qj7QZpgr9Uw", Function::AgcDcbContextStateOp, 2, 2)
@@ -678,7 +692,7 @@ mod packet_payload_binding_tests {
     #[test]
     fn packet_payload_address_appends_only_exact_pairs_and_preserves_primitive_markers() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[248],
             ("D9sr1xGUriE", Function::AgcCreatePrimState, 2, 2)
@@ -714,7 +728,7 @@ mod index_size_0600_binding_tests {
     #[test]
     fn index_size_0600_appends_exact_pairs_without_moving_old_builder_or_payload_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[250],
             (
@@ -753,7 +767,7 @@ mod transfer_binding_tests {
     #[test]
     fn four_transfer_roles_append_after_253_immutable_rows_in_exact_verified_pairs() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[252],
             ("-KRzWekV120", Function::AgcDcbSetIndexSize0600, 2, 2)
@@ -778,7 +792,7 @@ mod indirect_dispatch_binding_tests {
     #[test]
     fn three_indirect_producers_append_after_261_rows_in_only_verified_pairs() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(ENTRIES[260], ("WmAc2MEj6Io", Function::AgcDcbDmaData, 2, 2));
         for (index, (nid, function)) in [
             ("j3EtxFkSIhQ", Function::AgcAcbDispatchIndirect),
@@ -808,7 +822,7 @@ mod indexed_indirect_binding_tests {
     #[test]
     fn indexed_indirect_appends_only_exact_pairs_after_all_indirect_dispatch_rows() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         assert_eq!(
             ENTRIES[266],
             ("RmaJwLtc8rY", Function::AgcDcbSetBaseIndirectArgs, 2, 2)
@@ -831,7 +845,7 @@ mod indexed_indirect_binding_tests {
     #[test]
     fn wait_safe_appends_exact_scoped_producer_without_replacing_existing_ordinals() {
         let provider = build_graphics_provider(16384).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         for (at, scope) in [(269, 1), (270, 2)] {
             assert_eq!(
                 ENTRIES[at],
@@ -860,7 +874,7 @@ mod indexed_indirect_binding_tests {
     #[test]
     fn lod_stats_appends_only_exact_paired_producer_after_all_existing_ordinals() {
         let provider = build_graphics_provider(PAGE_SIZE).unwrap();
-        assert_eq!(provider.function_count(), 279);
+        assert_eq!(provider.function_count(), 283);
         for (at, scope) in [(271, 1), (272, 2)] {
             assert_eq!(
                 ENTRIES[at],

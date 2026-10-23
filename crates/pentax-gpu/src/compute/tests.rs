@@ -67,8 +67,8 @@ fn prepared_compute_uses_actual_registers_shader_and_buffer_without_mutating_sou
         prepared.shader().manifest().workgroup_size(),
         Some([16, 1, 1])
     );
-    assert_eq!(prepared.buffer_address(), DATA);
-    assert_eq!(prepared.input(), &[0xa5; 64]);
+    assert_eq!(prepared.buffer_address(), Some(DATA));
+    assert_eq!(prepared.input().unwrap(), &[0xa5; 64]);
     let layout = prepared.shader().manifest().push_data().unwrap();
     let seed = layout.user_sgprs.iter().position(|r| *r == 4).unwrap();
     let at = (layout.start_dword as usize + seed) * 4;

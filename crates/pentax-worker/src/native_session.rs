@@ -1068,6 +1068,7 @@ fn execute_epoch<'plan, 'image>(
             // even when this CPU spins without imports or the thread quantum
             // has not expired. Driver admission bounds every turn's work.
             let compute_pending = session.pump_compute_queues()?;
+            let graphics_pending = session.pump_direct_graphics()?;
             let runnable = state.scheduling.rotate(
                 session,
                 proof,
@@ -1075,7 +1076,7 @@ fn execute_epoch<'plan, 'image>(
                 &mut state.frames,
                 &mut progress.phase,
                 external,
-                compute_pending,
+                compute_pending || graphics_pending,
                 limits.interactive,
             )?;
             progress.dispatch = engine.usage();

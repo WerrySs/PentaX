@@ -223,6 +223,8 @@ pub struct ComputeDescription {
     pub tg_size: bool,
     /// Source `float_mode` (bit 4 clear flushes f32 compare inputs).
     pub float_mode: u8,
+    /// CP LDS allocation in bytes, in 512-byte units, at most 64 KiB per group.
+    pub shared_memory_bytes: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -397,6 +399,11 @@ impl Profile {
                 validate_common(&compute.common)?;
                 if compute.common.lod_feedback {
                     return Err(ProfileError::LodFeedbackProfile);
+                }
+                if compute.shared_memory_bytes > 65_536
+                    || !compute.shared_memory_bytes.is_multiple_of(512)
+                {
+                    return Err(ProfileError::SharedMemorySize);
                 }
                 let [x, y, z] = compute.workgroup_size;
                 let total = u64::from(x)

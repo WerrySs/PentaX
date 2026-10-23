@@ -1653,3 +1653,6 @@ mod compute_scheduling_hints;
 
 #[path = "image_probe/compute_queue_wait.rs"]
 mod compute_queue_wait;
+
+#[path = "image_probe/agc_direct_dcb.rs"]
+mod agc_direct_dcb;

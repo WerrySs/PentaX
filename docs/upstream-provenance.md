@@ -1904,3 +1904,27 @@ concurrent hardware execution or a rendered commercial frame.
 Primary sources: [ACB submit](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp),
 [queue execution, cursor and wait predicates](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp),
 and [retained PM4 execution state](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/commandProcessor.h).
+
+
+### Direct DCB submission and Workgroup storage
+
+The public KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 defines direct
+`AgcDriverSubmitDcb`/`AGRSubmitDcb` as one packet pointer, with graphics queue zero
+and an enqueue return separate from GPU completion. PentaX preserves this ABI
+separately from its context-plus-packet CommandBuffer service. Scoped provider
+exports and original immutable command capture do not imply unrestricted aliases
+or generic support for other submit variants.
+
+The same public revision's shader frontend and SPIR-V memory emitter inform the
+six admitted B32 DS operations, paired offsets and checked Workgroup accesses.
+PentaX adds bounded allocation, explicit unsupported forms, straight-line control
+flow admission and uniform completion barriers. Required upstream attribution
+and detailed source references are retained in the shader compiler NOTICE.
+The direct-buffer discovery/host execution bridge and native/GPU consumers are
+original Rust work over the existing compiler manifest and owner memory APIs.
+
+Primary sources: [direct DCB ABI](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp),
+[scoped registrations](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/libAgcDriver.cpp),
+[DS translation](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/frontend/translate/Memory.cpp),
+and [Workgroup emission](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterMemory.cpp).

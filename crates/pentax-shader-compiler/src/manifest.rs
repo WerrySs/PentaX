@@ -193,11 +193,17 @@ pub struct Manifest {
     pub(crate) inputs: Vec<InputInterface>,
     pub(crate) outputs: Vec<OutputInterface>,
     pub(crate) workgroup_size: Option<[u32; 3]>,
+    pub(crate) shared_memory_bytes: u32,
     pub(crate) required_subgroup_size: Option<u32>,
     pub(crate) undefined_register_reads: u32,
 }
 
 impl Manifest {
+    /// Exact per-workgroup Workgroup storage allocation; not guest-memory authority.
+    pub fn shared_memory_bytes(&self) -> u32 {
+        self.shared_memory_bytes
+    }
+
     /// Exact storage-buffer binding for 514 u32 counter words, descriptor set zero.
     pub fn lod_feedback_binding(&self) -> Option<u32> {
         self.lod_feedback_binding

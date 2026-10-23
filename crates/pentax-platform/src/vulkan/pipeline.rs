@@ -31,7 +31,7 @@ impl SampledBindings<'_, '_> {
 }
 
 enum Resource<'d, 'r> {
-    Buffer(&'r Buffer<'d>),
+    Compute(&'r [Buffer<'d>]),
     Graphics {
         image: &'r Image<'d>,
         buffers: [Option<&'r Buffer<'d>>; 2],
@@ -130,64 +130,107 @@ impl<'d, 'r> Pipeline<'d, 'r> {
         buffer: &'r Buffer<'d>,
         budget: &mut Budget,
     ) -> Result<Self, VulkanError> {
-        let mut out = Self::empty(device, Resource::Buffer(buffer));
-        let binding =
-            shader
-                .manifest()
-                .buffer_binding()
-                .ok_or(VulkanError::InvalidCompilerContract(
-                    "missing buffer binding",
-                ))?;
-        if shader.manifest().buffers().len() != 1 || !buffer.length().is_multiple_of(4) {
+        Self::compute_many(device, shader, std::slice::from_ref(buffer), budget)
+    }
+    pub fn compute_many(
+        device: &'d Device,
+        shader: &CompiledShader,
+        buffers: &'r [Buffer<'d>],
+        budget: &mut Budget,
+    ) -> Result<Self, VulkanError> {
+        let mut out = Self::empty(device, Resource::Compute(buffers));
+        let count = buffers.len();
+        if count != shader.manifest().buffers().len()
+            || count > 4
+            || buffers
+                .iter()
+                .any(|buffer| !buffer.length().is_multiple_of(4))
+        {
             return Err(VulkanError::InvalidCompilerContract(
-                "buffer descriptor count/extent",
+                "compute descriptor count/extent",
             ));
         }
-        let bindings = [vk::DescriptorSetLayoutBinding::default()
-            .binding(binding)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::COMPUTE)];
-        out.layouts(&bindings, vk::ShaderStageFlags::COMPUTE, budget)?;
-        budget.object()?;
-        let sizes = [vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::STORAGE_BUFFER)
-            .descriptor_count(1)];
-        let info = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(1)
-            .pool_sizes(&sizes);
-        // SAFETY: One bounded storage-buffer descriptor/set, unique owned pool.
-        out.pool = result(
-            unsafe { device.raw.create_descriptor_pool(&info, None) },
-            "vkCreateDescriptorPool",
-        )?;
-        budget.object()?;
-        let layouts = [out.set_layout];
-        let info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(out.pool)
-            .set_layouts(&layouts);
-        // SAFETY: The pool has capacity for this exact single layout/output slot.
-        let code = unsafe {
-            (device.raw.fp_v1_0().allocate_descriptor_sets)(
-                device.raw.handle(),
-                &info,
-                &mut out.set,
-            )
-        };
-        result(code.result(), "vkAllocateDescriptorSets")?;
-        let buffers = [vk::DescriptorBufferInfo::default()
-            .buffer(buffer.raw)
-            .offset(0)
-            .range(buffer.length() as u64)];
-        let writes = [vk::WriteDescriptorSet::default()
-            .dst_set(out.set)
-            .dst_binding(binding)
-            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-            .buffer_info(&buffers)];
-        budget.work(1)?;
-        // SAFETY: Exact manifest binding, one fully allocated buffer, no pending
-        // descriptor use. The Pipeline retains a borrow of that actual buffer.
-        unsafe { device.raw.update_descriptor_sets(&writes, &[]) };
+        if count == 0 {
+            if shader.manifest().buffer_binding().is_some() {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "empty compute binding",
+                ));
+            }
+            let push = [vk::PushConstantRange::default()
+                .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                .offset(0)
+                .size(128)];
+            let info = vk::PipelineLayoutCreateInfo::default().push_constant_ranges(&push);
+            budget.object()?;
+            // SAFETY: No shader descriptors exist; this layout has no sets,
+            // only the checked core128-byte push range. No dummy set/pool exists.
+            let raw = unsafe { device.raw.create_pipeline_layout(&info, None) };
+            out.layout = result(raw, "vkCreatePipelineLayout")?;
+        } else {
+            let binding =
+                shader
+                    .manifest()
+                    .buffer_binding()
+                    .ok_or(VulkanError::InvalidCompilerContract(
+                        "missing buffer array binding",
+                    ))?;
+            let host = device.properties.limits;
+            if count as u32 > host.max_per_stage_descriptor_storage_buffers
+                || count as u32 > host.max_descriptor_set_storage_buffers
+                || count as u32 > host.max_per_stage_resources
+            {
+                return Err(VulkanError::Unsupported(
+                    "compute storage descriptor limits",
+                ));
+            }
+            let bindings = [vk::DescriptorSetLayoutBinding::default()
+                .binding(binding)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(count as u32)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE)];
+            out.layouts(&bindings, vk::ShaderStageFlags::COMPUTE, budget)?;
+            budget.object()?;
+            let sizes = [vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(count as u32)];
+            let info = vk::DescriptorPoolCreateInfo::default()
+                .max_sets(1)
+                .pool_sizes(&sizes);
+            // SAFETY: One bounded array/set with capacity for every real element.
+            let raw = unsafe { device.raw.create_descriptor_pool(&info, None) };
+            out.pool = result(raw, "vkCreateDescriptorPool")?;
+            budget.object()?;
+            let layouts = [out.set_layout];
+            let info = vk::DescriptorSetAllocateInfo::default()
+                .descriptor_pool(out.pool)
+                .set_layouts(&layouts);
+            // SAFETY: The owned pool and layout cover this exact output slot.
+            let code = unsafe {
+                (device.raw.fp_v1_0().allocate_descriptor_sets)(
+                    device.raw.handle(),
+                    &info,
+                    &mut out.set,
+                )
+            };
+            result(code.result(), "vkAllocateDescriptorSets")?;
+            let mut infos = [vk::DescriptorBufferInfo::default(); 4];
+            for (info, buffer) in infos.iter_mut().zip(buffers) {
+                *info = vk::DescriptorBufferInfo::default()
+                    .buffer(buffer.raw)
+                    .offset(0)
+                    .range(buffer.length() as u64);
+            }
+            let writes = [vk::WriteDescriptorSet::default()
+                .dst_set(out.set)
+                .dst_binding(binding)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&infos[..count])];
+            budget.work(count as u64)?;
+            // SAFETY: Compiler array order, complete live allocated resources,
+            // no pending use; Pipeline retains the actual entire buffer slice.
+            unsafe { device.raw.update_descriptor_sets(&writes, &[]) };
+        }
         let module = Shader::new(device, shader, budget)?;
         let stage = vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::COMPUTE)
@@ -655,8 +698,10 @@ impl Drop for Pipeline<'_, '_> {
         // Keep explicit reads of retained resources: their borrows are the
         // authority for the descriptor/framebuffer handles, not their integers.
         match self.resource {
-            Resource::Buffer(buffer) => {
-                let _ = buffer.raw;
+            Resource::Compute(buffers) => {
+                for buffer in buffers {
+                    let _ = buffer.raw;
+                }
             }
             Resource::Graphics {
                 image,

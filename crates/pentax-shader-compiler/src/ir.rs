@@ -253,6 +253,9 @@ ops! {
     ImageSampleLodFeedback: F32x4(Resource, Resource, F32x2, F32, U1);
     ImageQueryLod: F32x2(Resource, Resource, F32x2);
     ReadConstBuffer: U32(Resource, U32);
+    LoadSharedU32: U32(U32, U1);
+    StoreSharedU32: Void(U32, U32, U1);
+    SharedCompletion: Void();
     LoadBufferU32: U32(Resource, U32, U32, U32, U1);
     LoadBufferU32x2: U32x2(Resource, U32, U32, U32, U1);
     LoadBufferU32x3: U32x3(Resource, U32, U32, U32, U1);
@@ -291,6 +294,8 @@ impl Op {
                 | Op::StoreBufferU32x3
                 | Op::StoreBufferU32x4
                 | Op::SetAttribute
+                | Op::StoreSharedU32
+                | Op::SharedCompletion
                 | Op::StoreCompletion
                 | Op::Barrier
         )

@@ -11,14 +11,14 @@ pub use crate::memory_sync::{Synchronization, SynchronizationKind};
 pub use crate::memory_transfer::Transfer;
 use pentax_shader::ShaderStage;
 use pentax_shader_compiler::{
-    BufferAccess, BufferDescription, CommonDescription, CompiledShader, ComputeDescription,
-    Limits as CompilerLimits, Profile, ShaderProgram, StageDescription, SubgroupProfile, WaveSize,
-    compile,
+    CommonDescription, CompiledShader, ComputeDescription, Limits as CompilerLimits, ShaderProgram,
+    SubgroupProfile, WaveSize,
 };
 use std::fmt;
 
 mod commands;
 mod ordered;
+pub mod resources;
 pub use commands::{
     Command, CommandLimits, CommandPlan, CommandRange, CommandUsage, Dispatch, MemoryAction,
     MemoryWait, MemoryWrite, Release, plan_commands,
@@ -35,6 +35,15 @@ pub enum MemoryError {
 /// Reads from one actual exclusively retained source; this trait exposes no pointers.
 pub trait Memory {
     fn read(&self, address: u64, output: &mut [u8]) -> Result<(), MemoryError>;
+    /// Admit every descriptor span before any resource payload is fetched.
+    /// Native adapters enforce current owner, access and physical exclusions.
+    fn preflight_buffers(
+        &self,
+        _buffers: &[resources::BufferSpan],
+        _work: u64,
+    ) -> Result<u64, Error> {
+        Ok(0)
+    }
     /// Preserve initial buffer contents while admitting compiler-derived GPU
     /// access. Native adapters must enforce both read and write requirements.
     fn snapshot_buffer(
@@ -105,16 +114,37 @@ pub struct Usage {
 /// This is data, not an authority to access a live guest or arbitrary SPIR-V.
 pub struct PreparedCompute {
     shader: CompiledShader,
-    input: Vec<u8>,
+    buffers: Vec<PreparedBuffer>,
     push: [u8; 128],
     groups: [u32; 3],
-    address: u64,
     usage: Usage,
+}
+/// One actual manifest descriptor-array element and owned preserved input.
+/// Construction is private; addresses never confer guest-memory authority.
+pub struct PreparedBuffer {
+    address: u64,
+    input: Vec<u8>,
+    read: bool,
+    written: bool,
+}
+impl PreparedBuffer {
+    pub fn address(&self) -> u64 {
+        self.address
+    }
+    pub fn input(&self) -> &[u8] {
+        &self.input
+    }
+    pub fn read(&self) -> bool {
+        self.read
+    }
+    pub fn written(&self) -> bool {
+        self.written
+    }
 }
 impl fmt::Debug for PreparedCompute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PreparedCompute")
-            .field("buffer_bytes", &self.input.len())
+            .field("buffers", &self.buffers.len())
             .field("groups", &self.groups)
             .field("usage", &self.usage)
             .finish_non_exhaustive()
@@ -124,8 +154,16 @@ impl PreparedCompute {
     pub fn shader(&self) -> &CompiledShader {
         &self.shader
     }
-    pub fn input(&self) -> &[u8] {
-        &self.input
+    pub fn buffers(&self) -> &[PreparedBuffer] {
+        &self.buffers
+    }
+    /// Checked legacy single-resource view; zero/multiple resources return None.
+    pub fn input(&self) -> Option<&[u8]> {
+        if let [buffer] = self.buffers.as_slice() {
+            Some(buffer.input())
+        } else {
+            None
+        }
     }
     pub fn push_data(&self) -> &[u8; 128] {
         &self.push
@@ -133,14 +171,38 @@ impl PreparedCompute {
     pub fn groups(&self) -> [u32; 3] {
         self.groups
     }
-    pub fn buffer_address(&self) -> u64 {
-        self.address
+    pub fn buffer_address(&self) -> Option<u64> {
+        if let [buffer] = self.buffers.as_slice() {
+            Some(buffer.address)
+        } else {
+            None
+        }
     }
     pub fn usage(&self) -> Usage {
         self.usage
     }
     pub fn writes_buffer(&self) -> bool {
-        self.shader.manifest().buffers()[0].written
+        self.buffers.iter().any(|buffer| buffer.written)
+    }
+    pub fn retained_host_bytes(&self) -> Result<usize, Error> {
+        let mut bytes = self
+            .shader
+            .retained_host_bytes()
+            .checked_add(std::mem::size_of::<Self>())
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    self.buffers
+                        .capacity()
+                        .checked_mul(std::mem::size_of::<PreparedBuffer>())?,
+                )
+            })
+            .ok_or(Error::Limit("retained compute bytes"))?;
+        for buffer in &self.buffers {
+            bytes = bytes
+                .checked_add(buffer.input.capacity())
+                .ok_or(Error::Limit("retained compute bytes"))?;
+        }
+        Ok(bytes)
     }
 }
 
@@ -474,12 +536,19 @@ fn prepare_state(
     budget.usage.invocations = invocations;
     let r1 = regs.get(0x212)?;
     let r2 = regs.get(0x213)?;
-    if r1 & !0x3f != 0x2c_0000 || r2 & !0x1fbe != 0 || regs.get(0x228)? != 0 {
+    if r1 & !0x3f != 0x2c_0000 || r2 & !(0x1fbe | 0x00ff_8000) != 0 || regs.get(0x228)? != 0 {
         return Err(Error::Unsupported("compute resource configuration"));
+    }
+    // Public GFX10.3 COMPUTE_PGM_RSRC2.LDS_SIZE is a nine-bit count of
+    // 512-byte allocation units. All other scratch/trap/exception bits keep
+    // the existing refusal; the compiler owns the admitted LDS operations.
+    let shared_memory_bytes = ((r2 >> 15) & 0x1ff) * 512;
+    if shared_memory_bytes > 65_536 {
+        return Err(Error::Unsupported("compute LDS allocation"));
     }
     let user_count = ((r2 >> 1) & 31) as u8;
     let tid = ((r2 >> 11) & 3) as u8;
-    if !(4..=16).contains(&user_count) || tid > 2 {
+    if user_count > 16 || tid > 2 {
         return Err(Error::Unsupported("compute initial registers"));
     }
     let lo = regs.get(0x20c)?;
@@ -488,29 +557,6 @@ fn prepare_state(
         return Err(Error::Unsupported("shader address high bits"));
     }
     let code_address = (u64::from(lo) << 8) | (u64::from(hi) << 40);
-    let descriptor = [
-        regs.get(0x240)?,
-        regs.get(0x241)?,
-        regs.get(0x242)?,
-        regs.get(0x243)?,
-    ];
-    if descriptor[1] & 0xffff_0000 != 0 || descriptor[3] != 0 {
-        return Err(Error::Unsupported("raw unswizzled buffer descriptor"));
-    }
-    let address = u64::from(descriptor[0]) | (u64::from(descriptor[1]) << 32);
-    let length = descriptor[2] as usize;
-    if length == 0
-        || !length.is_multiple_of(4)
-        || !address.is_multiple_of(4)
-        || address
-            .checked_add(length as u64)
-            .is_none_or(|n| n > 1 << 47)
-    {
-        return Err(Error::Unsupported("buffer extent"));
-    }
-    if length > limits.max_buffer_bytes {
-        return Err(Error::Limit("buffer bytes"));
-    }
     if limits.compiler_phase_bytes == 0 || limits.compiler_phase_work == 0 {
         return Err(Error::Limit("compiler budget"));
     }
@@ -558,20 +604,7 @@ fn prepare_state(
         size: wave_size.lanes(),
     });
     common.user_sgpr_count = user_count;
-    budget.host(std::mem::size_of::<BufferDescription>())?;
-    common
-        .buffers
-        .try_reserve_exact(1)
-        .map_err(|_| Error::Allocation)?;
-    budget.host((common.buffers.capacity() - 1) * std::mem::size_of::<BufferDescription>())?;
-    common.buffers.push(BufferDescription {
-        user_sgpr: 0,
-        stride: 0,
-        swizzle: false,
-        index_stride: 0,
-        access: BufferAccess::ReadWrite,
-    });
-    let profile = Profile::new(StageDescription::Compute(ComputeDescription {
+    let description = ComputeDescription {
         common,
         workgroup_size: local,
         thread_ids: tid + 1,
@@ -579,18 +612,41 @@ fn prepare_state(
         workgroup_register: user_count,
         tg_size: r2 & 0x400 != 0,
         float_mode: 0xc0,
-    }))
-    .map_err(|_| Error::Compile)?;
-    let compiled = compile(&program, &profile, &compiler).map_err(|_| Error::Compile)?;
+        shared_memory_bytes,
+    };
+    let resource_limits = Limits {
+        max_host_bytes: limits
+            .max_host_bytes
+            .checked_sub(budget.usage.host_bytes)
+            .ok_or(Error::Limit("resource host bytes"))?,
+        max_work: limits
+            .max_work
+            .checked_sub(budget.usage.work)
+            .ok_or(Error::Limit("resource work"))?,
+        ..*limits
+    };
+    let map_error = |error| match error {
+        resources::Error::Compiler(_) => Error::Compile,
+        resources::Error::Register(error) => error,
+        resources::Error::Unsupported("compute raw unswizzled buffer descriptor") => {
+            Error::Unsupported("raw unswizzled buffer descriptor")
+        }
+        resources::Error::Unsupported("compute direct buffer extent") => {
+            Error::Unsupported("buffer extent")
+        }
+        resources::Error::Unsupported(reason) => Error::Unsupported(reason),
+        resources::Error::Limit(reason) => Error::Limit(reason),
+        resources::Error::Allocation => Error::Allocation,
+    };
+    let discovery = resources::discover_reserved(&program, description, &regs, &resource_limits)
+        .map_err(map_error)?;
+    let (compiled, spans, resource_usage) = discovery.finish().map_err(map_error)?.into_parts();
+    budget.host(resource_usage.host_bytes)?;
+    budget.work(resource_usage.work)?;
     let manifest = compiled.manifest();
-    if manifest.buffers().len() != 1
-        || manifest.buffers()[0].user_sgpr != 0
-        || manifest.buffers()[0].coherent
-        || manifest.shader_data_binding().is_some()
-        || manifest.undefined_register_reads() != 0
-    {
-        return Err(Error::Unsupported("compute resource manifest"));
-    }
+    let preflight =
+        memory.preflight_buffers(&spans, limits.max_work.saturating_sub(budget.usage.work))?;
+    budget.work(preflight)?;
     let mut push = [0; 128];
     if let Some(layout) = manifest.push_data() {
         for (index, reg) in layout.user_sgprs.iter().enumerate() {
@@ -602,34 +658,60 @@ fn prepare_state(
                 .ok_or(Error::Unsupported("compute push layout"))?;
             push[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         }
-        // The single storage binding is uploaded from its exact guest base;
-        // its packed buffer-byte-offset remains explicitly zero.
-        if layout.memory_offset_count != 1 {
+        // Every element of the one descriptor array is uploaded at its exact
+        // guest base; all packed buffer-byte offsets stay explicitly zero.
+        if layout.memory_offset_count as usize != spans.len()
+            || layout
+                .start_dword
+                .checked_add(layout.memory_offset_dword)
+                .and_then(|at| at.checked_add(layout.memory_offset_count.div_ceil(4)))
+                .is_none_or(|end| end > 32)
+        {
             return Err(Error::Unsupported("compute buffer offset layout"));
         }
     }
-    budget.host(length)?;
-    let mut input = Vec::new();
-    input
-        .try_reserve_exact(length)
+    budget.host(
+        spans
+            .len()
+            .checked_mul(std::mem::size_of::<PreparedBuffer>())
+            .ok_or(Error::Limit("resource metadata"))?,
+    )?;
+    let mut buffers = Vec::new();
+    buffers
+        .try_reserve_exact(spans.len())
         .map_err(|_| Error::Allocation)?;
-    budget.host(input.capacity() - length)?;
-    budget.work(length as u64)?;
-    input.resize(length, 0);
-    memory
-        .snapshot_buffer(
-            address,
-            &mut input,
-            manifest.buffers()[0].read,
-            manifest.buffers()[0].written,
-        )
-        .map_err(Error::Memory)?;
+    budget.host((buffers.capacity() - spans.len()) * std::mem::size_of::<PreparedBuffer>())?;
+    // Store in actual compiler descriptor-array order, not register order.
+    for (element, span) in manifest.buffers().iter().zip(&spans) {
+        // Discovery.finish checked exact source first-use order and extent.
+        // Upload order is the compiler array order, never SGPR sorting.
+        if span.requirement().user_sgpr != element.user_sgpr {
+            return Err(Error::Unsupported("compute buffer source order"));
+        }
+        let length = span.byte_count();
+        budget.host(length)?;
+        let mut input = Vec::new();
+        input
+            .try_reserve_exact(length)
+            .map_err(|_| Error::Allocation)?;
+        budget.host(input.capacity() - length)?;
+        budget.work(length as u64)?;
+        input.resize(length, 0);
+        memory
+            .snapshot_buffer(span.address(), &mut input, element.read, element.written)
+            .map_err(Error::Memory)?;
+        buffers.push(PreparedBuffer {
+            address: span.address(),
+            input,
+            read: element.read,
+            written: element.written,
+        });
+    }
     Ok(PreparedCompute {
         shader: compiled,
-        input,
+        buffers,
         push,
         groups,
-        address,
         usage: budget.usage,
     })
 }

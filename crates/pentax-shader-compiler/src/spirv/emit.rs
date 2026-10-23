@@ -27,6 +27,9 @@ use crate::ir::{Builtin, ExportKind, InstId, Ir, NIL, Op, Type, Value};
 use crate::passes::{InputKind, Layout, OutputKind, StageInput};
 use crate::profile::{PIXEL_INPUTS, PUSH_DWORDS, Profile};
 
+#[path = "emit/shared.rs"]
+mod shared;
+
 type R<T> = Result<T, CompileError>;
 
 /// Source `DescriptorBindingKind` values used here, and `NativeBinding`.
@@ -67,6 +70,7 @@ struct Emit<'a, 'b> {
     main_func: u32,
     push_var: u32,
     buffers_var: u32,
+    shared_var: u32,
     image_vars: Vec<u32>,
     sampler_vars: Vec<u32>,
     lod_feedback_var: u32,
@@ -1568,6 +1572,15 @@ impl Emit<'_, '_> {
                 self.op(OpCompositeExtract, ty, &[value, inst.aux])?
             }
             Op::ReadConstBuffer => self.emit_read_const_buffer(id)?,
+            Op::LoadSharedU32 => self.emit_shared_load(id)?,
+            Op::StoreSharedU32 => {
+                self.emit_shared_store(id)?;
+                0
+            }
+            Op::SharedCompletion => {
+                self.shared_completion()?;
+                0
+            }
             Op::LoadBufferU32 => self.emit_buffer_load(id, 1)?,
             Op::LoadBufferU32x2 => self.emit_buffer_load(id, 2)?,
             Op::LoadBufferU32x3 => self.emit_buffer_load(id, 3)?,
@@ -2288,6 +2301,7 @@ pub(crate) fn emit_program(
         main_func: 0,
         push_var: 0,
         buffers_var: 0,
+        shared_var: 0,
         image_vars: Vec::new(),
         sampler_vars: Vec::new(),
         lod_feedback_var: 0,
@@ -2305,6 +2319,7 @@ pub(crate) fn emit_program(
     e.define_inputs(uses_lane, logical_lane)?;
     e.define_outputs()?;
     e.define_descriptors()?;
+    e.define_shared()?;
     e.main_func = e.b.alloc_id()?;
     let entry_label = e.b.alloc_id()?;
     e.b.require_capability(CapabilityShader)?;

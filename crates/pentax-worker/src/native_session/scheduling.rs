@@ -246,7 +246,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
         frames: &mut Vec<(SuspendedInitializer, NativeNestedCall, NativeSessionPhase)>,
         phase: &mut NativeSessionPhase,
         external: Option<super::frame_bridge::ExternalWake>,
-        compute_pending: bool,
+        gpu_pending: bool,
         interactive: bool,
     ) -> Result<bool, NativeSessionError> {
         let blocks = engine.usage().blocks;
@@ -298,7 +298,7 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                         }
                     }
                 }
-                if compute_pending {
+                if gpu_pending {
                     // A retained GPU queue can release an existing CPU wait.
                     // Retry only after the ordinary bounded idle slice, charged
                     // to the existing guest idle budget. This neither returns
@@ -321,11 +321,11 @@ impl<'plan, 'image> Scheduling<'plan, 'image> {
                         charge(
                             &mut self.idle_nanoseconds,
                             sleep.as_nanos() as u64,
-                            // New compute polling always has the existing
+                            // Queued GPU polling always has the existing
                             // finite idle ceiling, including interactive runs.
-                            // Old interactive guest waits without queued compute
+                            // Old interactive guest waits without queued GPU work
                             // retain their existing policy.
-                            if interactive && !compute_pending {
+                            if interactive && !gpu_pending {
                                 u64::MAX
                             } else {
                                 session.plan().limits().kernel.max_sleep_nanoseconds

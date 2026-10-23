@@ -7,6 +7,7 @@ mod images;
 mod interpolation;
 mod logical_wave64;
 mod matrix;
+mod shared_memory;
 use super::*;
 use pentax_shader::ShaderStage;
 
@@ -47,6 +48,7 @@ fn profile(stage: ShaderStage) -> Profile {
                 workgroup_register: 16,
                 tg_size: false,
                 float_mode: 0xc0,
+                shared_memory_bytes: 0,
             })
         }
         _ => unreachable!("original fixture stage"),
