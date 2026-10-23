@@ -307,29 +307,31 @@ fn instruction(p: &mut Code, form: Form, immediate: u8, boundary: bool) {
     }
 }
 fn image(code: &[u8], tail: &[u8]) -> Input {
+    // Runtime mappings use 16 KiB logical pages: keep RX and RW on distinct pages.
+    // End below the next 64 KiB provider placement so cross-end spans stay unmapped.
     let mut bytes = module_bytes(&[], false, None);
-    bytes.resize(0xc000, 0);
+    bytes.resize(0x14000, 0);
     put(&mut bytes, 24, &(ENTRY as u64).to_le_bytes());
     put(&mut bytes, 56, &2_u16.to_le_bytes());
     for offset in [96, 104] {
         put(&mut bytes, offset, &0x9000_u64.to_le_bytes());
     }
-    put(&mut bytes, 112, &0x1000_u64.to_le_bytes());
+    put(&mut bytes, 112, &0x4000_u64.to_le_bytes());
     put(&mut bytes, 120, &1_u32.to_le_bytes());
     put(&mut bytes, 124, &6_u32.to_le_bytes());
     for (offset, value) in [
-        (128, 0xa000_u64),
-        (136, 0xa000),
-        (152, 0x2000),
-        (160, 0x2000),
-        (168, 0x1000),
+        (128, 0x10000_u64),
+        (136, 0x10000),
+        (152, 0x4000),
+        (160, 0x4000),
+        (168, 0x4000),
     ] {
         put(&mut bytes, offset, &value.to_le_bytes());
     }
     assert!(ENTRY as usize + code.len() < 0x9000);
     assert!(tail.len() <= 32);
     put(&mut bytes, ENTRY as usize, code);
-    put(&mut bytes, 0xc000 - tail.len(), tail);
+    put(&mut bytes, 0x14000 - tail.len(), tail);
     create_input(bytes)
 }
 fn start() -> Code {
@@ -494,16 +496,16 @@ fn boundary(form: Form) -> Input {
         )
     };
     p.flags();
-    p.path(0, 0xc000 - form.width() as i32);
+    p.path(0, 0x14000 - form.width() as i32);
     instruction(&mut p, form, 0, true);
     p.check_flags();
     if form.narrow {
         for (index, value) in expected[..form.width() / 8].iter().enumerate() {
-            p.path(0, 0xc000 - form.width() as i32 + index as i32 * 8);
+            p.path(0, 0x14000 - form.width() as i32 + index as i32 * 8);
             p.bytes.extend([0x48, 0x8b, 0]);
             p.expect(0, *value);
         }
-        p.path(0, 0xc000 - form.width() as i32 - 8);
+        p.path(0, 0x14000 - form.width() as i32 - 8);
         p.bytes.extend([0x48, 0x8b, 0]);
         p.expect(0, CANARY);
         p.check_retained(&[(SOURCE, input)]);
@@ -735,7 +737,7 @@ fn native_f16c_conversions_refuse_unmasked_state_bad_memory_and_unadmitted_encod
             };
             // Full8/16B access crosses the actual RW segment end, never a speculative wide load.
             rejected(
-                &fault(form, 0xc000 - form.width() as i32 + 1, 0x1f80),
+                &fault(form, 0x14000 - form.width() as i32 + 1, 0x1f80),
                 "native-dispatch",
                 Some("memory-unmapped"),
                 Some(if narrow { "Vcvtps2ph" } else { "Vcvtph2ps" }),
@@ -744,7 +746,7 @@ fn native_f16c_conversions_refuse_unmasked_state_bad_memory_and_unadmitted_encod
             // LDMXCSR itself refuses the unmasked installation before the F16C or memory access.
             // Platform direct-state fixtures separately exercise F16C InvalidState.
             rejected(
-                &fault(form, 0xc000, 0x0f80),
+                &fault(form, 0x14000, 0x0f80),
                 "native-dispatch",
                 Some("invalid-cpu-state"),
                 Some("Ldmxcsr"),
