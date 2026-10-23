@@ -43,6 +43,8 @@ mod memory_transfer;
 mod packet_metadata;
 #[path = "driver/presentation.rs"]
 mod presentation;
+#[path = "driver/private_compute_failure.rs"]
+mod private_compute_failure;
 #[path = "driver/register_execution.rs"]
 mod register_execution;
 #[path = "driver/video_events.rs"]
@@ -313,6 +315,69 @@ pub(crate) struct Driver {
     defaults: Option<(pentax_platform::native_memory::NativeOwnerId, u64)>,
     shaders: super::shaders::State,
 }
+impl Failure {
+    /// Closed diagnostic categories only; never return nested error payloads.
+    /// Other failures retain their existing caller-specific labels/fallbacks.
+    pub fn preparation_category(&self) -> Option<&'static str> {
+        use compute::Error as Compute;
+        use draw::Error as Graphics;
+        use pentax_platform::vulkan::VulkanError as Vulkan;
+        Some(match self {
+            Self::Preparation(error) => match error {
+                Compute::Memory(_) => "graphics-memory",
+                Compute::Limit(_) => "graphics-budget",
+                Compute::Allocation => "graphics-allocation",
+                Compute::Packet { .. } => "compute-command",
+                Compute::MissingRegister(_) => "compute-register",
+                Compute::Compile => "compute-shader",
+                Compute::Unsupported(reason) => match *reason {
+                    "raw unswizzled buffer descriptor" | "buffer extent" => "compute-descriptor",
+                    "shader address"
+                    | "shader address high bits"
+                    | "unbounded compute shader loop" => "compute-shader-profile",
+                    "command byte alignment" | "command address or alignment" => "compute-command",
+                    _ => "compute-unsupported",
+                },
+            },
+            Self::GraphicsPreparation(error) => match error {
+                Graphics::Memory(_) | Graphics::SourceMemory { .. } => "graphics-memory",
+                Graphics::Limit(_) => "graphics-budget",
+                Graphics::Allocation => "graphics-allocation",
+                Graphics::Packet { .. } | Graphics::SourcePacket { .. } => "graphics-command",
+                Graphics::MissingRegister { .. } => "graphics-register",
+                Graphics::Compile => "graphics-shader-compile",
+                Graphics::Unsupported(reason) => match *reason {
+                    "graphics raw unswizzled buffer descriptor"
+                    | "graphics buffer extent"
+                    | "sampled image descriptor"
+                    | "sampled image sampler"
+                    | "paired image minimum LOD/filter profile" => "graphics-descriptor",
+                    "shader address"
+                    | "shader address high bits"
+                    | "unbounded graphics shader loop"
+                    | "merged/NGG/geometry/tessellation stages"
+                    | "graphics shader resources1"
+                    | "graphics shader scratch/LDS/resources2" => "graphics-shader-profile",
+                    "command byte alignment" => "graphics-command",
+                    _ => "graphics-unsupported",
+                },
+            },
+            Self::Vulkan(error) => match error {
+                Vulkan::UnsupportedHost => "graphics-backend-host",
+                Vulkan::LoaderUnavailable => "graphics-backend-loader",
+                Vulkan::Unsupported(_) => "graphics-backend-profile",
+                Vulkan::Limit(_) => "graphics-budget",
+                Vulkan::Allocation => "graphics-allocation",
+                Vulkan::Compile => "graphics-backend-shader",
+                Vulkan::InvalidCompilerContract(_) => "graphics-backend-contract",
+                Vulkan::Driver { .. } => "graphics-backend-driver",
+                Vulkan::UnexpectedReadback => "graphics-backend-readback",
+            },
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ConsumerBudget {
     max_frame_bytes: usize,
@@ -738,6 +803,31 @@ impl Driver {
     }
 
     fn execute_compute_ranges(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        queue: u32,
+        ranges: Vec<NativeRange>,
+        kernel: Option<&mut pentax_kernel::Kernel>,
+    ) -> Result<u64, Failure> {
+        let root = ranges
+            .iter()
+            .find(|range| range.address != 0 && range.size != 0)
+            .map(|range| compute::CommandRange {
+                address: range.address,
+                size: range.size,
+            });
+        let initial = queue
+            .checked_sub(0x20)
+            .and_then(|index| self.queues.get(index as usize))
+            .copied();
+        let result = self.execute_compute_ranges_inner(memory, queue, ranges, kernel);
+        if let (Err(error), Some(root), Some(initial)) = (&result, root, initial) {
+            private_compute_failure::capture_from_env(memory, root, initial, error);
+        }
+        result
+    }
+
+    fn execute_compute_ranges_inner(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
         queue: u32,

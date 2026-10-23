@@ -4,15 +4,15 @@ use super::*;
 
 #[test]
 fn native_condition_wait_parks_child_and_reacquires_mutex_before_both_wakeups() {
-    condition_wakeups(false);
+    condition_wakeups(false, &[None, Some("Posix"), Some("libScePosix")]);
 }
 
 #[test]
 fn native_condition_observations_distinguish_a_real_barging_acquisition() {
-    condition_wakeups(true);
+    condition_wakeups(true, &[None, Some("Posix"), Some("libScePosix")]);
 }
 
-fn condition_wakeups(barge: bool) {
+pub(super) fn condition_wakeups(barge: bool, libraries: &[Option<&str>]) {
     let imports = [
         "6UgtwV+0zb4",
         "9UK1vLZQft4",
@@ -97,7 +97,7 @@ fn condition_wakeups(barge: bool) {
     rip(&mut child, 0xc00, &[0xff, 0x15], 0xf10);
     child.extend([0xb8, 73, 0, 0, 0, 0x5b, 0xc3]);
     code.extend(child);
-    for library in [None, Some("Posix"), Some("libScePosix")] {
+    for &library in libraries {
         let main = if let Some(library) = library {
             let scoped: Vec<_> = imports
                 .iter()

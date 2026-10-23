@@ -848,3 +848,10 @@ pending ranges, configured guest user identity, exact ordinal/duplicate errors,
 reentrant snapshots and permanently failed admission receipts. No network or
 online sign-in is modeled. Unregister is unavailable: the pinned no-op is not
 sufficient evidence for the A-specific removal ABI and its NID.
+
+The three observed libkernel/library POSIX compatibility bindings reuse the
+existing wrappers identified by public KytyPS5 revision
+f186b35706ddbc3faf5513f326e2335d224802f7, src/libs/libKernel.cpp
+(lines1902,2170-2171,2230) and src/kernel/pthread.cpp(line4294).
+These exact aliases are original PentaX registration metadata; existing GPLv2
+attribution and wrapper implementation limits remain unchanged.

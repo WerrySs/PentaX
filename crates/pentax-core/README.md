@@ -1053,9 +1053,10 @@ fixture are distinct from a rendered game frame or performance result.
 The exact scoped GetLodStats producer encodes five words through the existing
 checked allocator and captures both stack scalars before a real grow callback.
 Its null-buffer and allocation-failure paths retain the source returns.
-Encoding does not publish statistics: submitted LOD packets explicitly refuse
-before an executable plan is exposed. Shader mip feedback, report collection,
-reset and completion publication require a separate execution implementation.
+Encoding itself does not publish statistics. Submitted graphics LOD packets
+use fenced GPU counter snapshots and bounded owner-checked report writes,
+including actual resets. Unsupported compute LOD reception and sampling
+profiles retain explicit refusals.
 
 Five explicit paired `libSceVideoOut` presentation/state aliases reuse the existing checked VideoOut implementations. Canonical exports retain their marker identities; other scopes and versions remain unavailable. Pending flips reflect the owned queue and require actual presentation acknowledgement to complete.
 

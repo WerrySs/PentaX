@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn np_callback_provider_appends_three_exact_rows_without_moving_old_markers() {
     let provider = factory();
-    assert_eq!(provider.registration_count(), 1399);
+    assert_eq!(provider.registration_count(), 1402);
     for (index, marker) in provider.markers()[..1396].iter().enumerate() {
         assert_eq!(
             (marker.symbol, marker.service_id, marker.rva),

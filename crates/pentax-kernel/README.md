@@ -1492,3 +1492,5 @@ An already accepted Join claim returns EINVAL instead of invalidating its
 waiter. Detached threads still run their real entry, cleanup and return path;
 their stacks, TLS, handles and CPU records remain bounded until owner teardown.
 This policy does not claim immediate source-style resource reclamation.
+
+Three exact observed `libkernel/libkernel` imports reuse the existing POSIX nanosleep and condition-wait wrappers. Nanosleep keeps its -1/thread-errno domain, bounded positive duration and explicit unsupported positive-duration/non-null-remainder case. Condition wait keeps direct positive pthread errors without errno mutation and returns only after real mutex reacquisition. These aliases do not establish full sleep support or additional namespaces.

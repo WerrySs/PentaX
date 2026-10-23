@@ -1773,6 +1773,12 @@ const fn with_posix_spelling<const N: usize>() -> [Registration; N] {
         output += 1;
         index += 1;
     }
+    index = 0;
+    while index < OBSERVED_POSIX_REGISTRATIONS.len() {
+        entries[output] = OBSERVED_POSIX_REGISTRATIONS[index];
+        output += 1;
+        index += 1;
+    }
     assert!(output == N);
     entries
 }
@@ -1877,6 +1883,7 @@ pub const REGISTRATIONS: &[Registration] = &with_posix_spelling::<
             + MODULE_UNWIND_REGISTRATIONS.len()
             + PTHREAD_YIELD_REGISTRATIONS.len()
             + NP_CALLBACK_REGISTRATIONS.len()
+            + OBSERVED_POSIX_REGISTRATIONS.len()
     },
 >();
 
@@ -4887,3 +4894,7 @@ const NP_CALLBACK_REGISTRATIONS: [Registration; 3] = {
         },
     ]
 };
+
+#[path = "catalog/observed_posix.rs"]
+mod observed_posix;
+use observed_posix::OBSERVED_POSIX_REGISTRATIONS;

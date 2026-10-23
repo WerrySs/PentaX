@@ -14,7 +14,7 @@ fn privacy_ws1_binds_one_two_argument_got_site_without_moving_previous_markers()
             MODULES.len(),
             LIBRARIES.len()
         ),
-        (1399, 69, 71)
+        (1402, 69, 71)
     );
     assert_eq!(LIBRARIES[69], ("libSceUserServicePlatformPrivacyWs1", 1));
     for (index, marker) in provider.markers()[..1316].iter().enumerate() {

@@ -161,7 +161,9 @@ impl ProbeOutcome {
             KernelStartupError::Graphics(pentax_core::gpu::driver::Failure::Limit) => {
                 "graphics-budget"
             }
-            KernelStartupError::Graphics(_) => "graphics-service",
+            KernelStartupError::Graphics(reason) => {
+                reason.preparation_category().unwrap_or("graphics-service")
+            }
             _ => "runtime-preparation",
         })
     }
@@ -1076,6 +1078,62 @@ mod budget_tests {
             };
             assert_eq!(outcome.error_runtime_failure(), Some(expected));
         }
+    }
+
+    #[test]
+    fn graphics_runtime_categories_distinguish_backend_failures_without_payloads_or_route_changes()
+    {
+        use pentax_core::gpu::driver::Failure as Graphics;
+        use pentax_platform::vulkan::VulkanError;
+        let outcome = |error| ProbeOutcome {
+            result: Err(ProbeError::Admission(NativeImageError::Callback(
+                NativeSessionError::Core(KernelStartupError::Graphics(error)),
+            ))),
+            progress: NativeSessionProgress::default(),
+            unavailable_functions: None,
+        };
+        let first = outcome(Graphics::Vulkan(VulkanError::Driver {
+            operation: "private-operation-a",
+            code: i32::MIN,
+        }));
+        let second = outcome(Graphics::Vulkan(VulkanError::Driver {
+            operation: "private-operation-b",
+            code: i32::MAX,
+        }));
+        let unsupported = outcome(Graphics::Vulkan(VulkanError::Unsupported(
+            "private-operation-a",
+        )));
+        assert_eq!(
+            first.error_runtime_failure(),
+            Some("graphics-backend-driver")
+        );
+        assert_eq!(
+            first.error_runtime_failure(),
+            second.error_runtime_failure()
+        );
+        assert_eq!(
+            unsupported.error_runtime_failure(),
+            Some("graphics-backend-profile")
+        );
+        assert!(first.result.is_err() && second.result.is_err() && unsupported.result.is_err());
+        assert_eq!(first.exit_status(), unsupported.exit_status());
+        // Generic queue/video routes keep their old refusal category.
+        assert_eq!(
+            outcome(Graphics::UnsupportedQueue).error_runtime_failure(),
+            Some("graphics-service")
+        );
+        assert_eq!(
+            outcome(Graphics::UnsupportedVideo).error_runtime_failure(),
+            Some("graphics-service")
+        );
+        assert_eq!(
+            outcome(Graphics::Memory).error_runtime_failure(),
+            Some("graphics-memory")
+        );
+        assert_eq!(
+            outcome(Graphics::Limit).error_runtime_failure(),
+            Some("graphics-budget")
+        );
     }
 
     #[test]

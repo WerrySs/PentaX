@@ -947,3 +947,6 @@ mod present_window;
 
 #[path = "signed_comparisons.rs"]
 mod signed_comparisons;
+
+#[path = "posix_scope_aliases.rs"]
+mod posix_scope_aliases;
