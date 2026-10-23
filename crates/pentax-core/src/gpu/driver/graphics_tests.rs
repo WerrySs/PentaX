@@ -55,7 +55,7 @@ fn context_graphics_retains_one_queue_state_but_explicit_acb_and_done_do_not_inv
         .unwrap();
     let mut memory = owner.pause().unwrap();
     memory.write(base + 4, &0_u32.to_le_bytes()).unwrap();
-    words(&mut memory, base + 0x100, &[0xc000_2f00, 1]); // NUM_INSTANCES
+    words(&mut memory, base + 0x100, &[0xc000_2f00, 7]); // Explicit NUM_INSTANCES
     packet(&mut memory, base + 0x20, base + 0x100, 2);
     let mut driver = Driver::new(Limits::default());
     assert_eq!(
@@ -98,17 +98,20 @@ fn context_graphics_retains_one_queue_state_but_explicit_acb_and_done_do_not_inv
         driver.submit(&mut memory, Function::SuspendPoint, [0; 6]),
         Ok(0)
     );
-    assert!(matches!(
+    // Suspend initializes the trusted processor defaults instead of retaining
+    // the explicit instance count. This zero-count draw never enters Vulkan.
+    assert_eq!(
         driver.submit(
             &mut memory,
             Function::CommandBuffer,
             [base, base + 0x20, 0, 0, 0, 0]
         ),
-        Err(Failure::GraphicsPreparation(draw::Error::Unsupported(
-            "unknown NUM_INSTANCES"
-        )))
-    ));
-    assert!(driver.frame.reset_before_graphics);
+        Ok(0)
+    );
+    assert!(!driver.frame.reset_before_graphics);
+    assert_eq!(driver.graphics, draw::GraphicsState::for_new_processor());
+    assert_eq!(driver.usage.draws, 0);
+    assert_eq!(driver.usage.dispatches, 0);
     assert!(!driver.poisoned);
     assert_eq!(driver.usage.written_bytes, 0);
     // Retained register state is never accepted on a different actual owner.
