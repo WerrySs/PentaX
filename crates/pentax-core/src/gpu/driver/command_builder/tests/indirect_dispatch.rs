@@ -313,13 +313,12 @@ fn emitted_dispatches_keep_live_dimension_permissions_and_distinct_receiver_prof
         0,
     );
     assert!(submit(&mut driver, &mut memory, base, &base_packet).is_err());
-    // The existing graphics profile still rejects SET_BASE and indirect draws.
-    assert!(
-        draw::plan_commands(
-            &[&base_packet],
-            draw::GraphicsState::empty(),
-            &Default::default()
-        )
-        .is_err()
-    );
+    // Graphics SET_BASE now stores metadata without producing a draw.
+    let plan = draw::plan_commands(
+        &[&base_packet],
+        draw::GraphicsState::empty(),
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(plan.actions().is_empty());
 }
