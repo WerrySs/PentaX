@@ -197,6 +197,62 @@ fn existing_local_index_input_is_shared_with_logical_lane_and_tg_size() {
     assert_eq!(builtins(&module, 29).len(), 1);
 }
 
+// collect_info declares LocalInvocationIndex for thread_ids > 0 even when
+// it is unused. Prove the actual mask bit and (for Wave64) mask-half selection
+// consume native subgroup lane SSA, rather than rejecting a valid interface.
+fn native_mask_lane(module: &CompiledShader, wave64: bool) {
+    let subgroup = builtins(module, 41);
+    let local = builtins(module, 29);
+    assert_eq!(subgroup.len(), 1);
+    assert_eq!(local.len(), 1);
+    let ops = instructions(module.spirv());
+    let loads: Vec<_> = ops
+        .iter()
+        .filter_map(|(op, a)| match *op {
+            61 if a[2] == subgroup[0] => Some(a[1]),
+            _ => None,
+        })
+        .collect();
+    assert!(!loads.is_empty());
+    // No load from the separately declared local index means that input cannot
+    // supply a logical AND63 lane path in this original shader.
+    assert!(!ops.iter().any(|(op, a)| *op == 61 && a[2] == local[0]));
+    let constant = |id, expected| {
+        ops.iter()
+            .any(|(op, a)| *op == 43 && a.len() == 3 && a[1] == id && a[2] == expected)
+    };
+    let bits: Vec<_> = ops
+        .iter()
+        .filter_map(|(op, a)| match *op {
+            199 if loads.contains(&a[2]) && constant(a[3], 31) => Some(a[1]),
+            _ => None,
+        })
+        .collect();
+    assert!(!bits.is_empty());
+    assert!(ops.iter().any(|(op, a)| *op == 194 && bits.contains(&a[3])));
+    if wave64 {
+        let halves: Vec<_> = ops
+            .iter()
+            .filter_map(|(op, a)| match *op {
+                176 if loads.contains(&a[2]) && constant(a[3], 32) => Some(a[1]),
+                _ => None,
+            })
+            .collect();
+        assert!(!halves.is_empty());
+        let masks: Vec<_> = ops
+            .iter()
+            .filter_map(|(op, a)| match *op {
+                169 if halves.contains(&a[2]) => Some(a[1]),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            ops.iter()
+                .any(|(op, a)| { *op == 194 && masks.contains(&a[2]) && bits.contains(&a[3]) })
+        );
+    }
+}
+
 #[test]
 fn cross_lane_and_wave32_operations_keep_the_native_subgroup_contract() {
     let words = masked_words(true, 135);
@@ -205,7 +261,7 @@ fn cross_lane_and_wave32_operations_keep_the_native_subgroup_contract() {
     assert!(module.manifest().required_features().subgroup_basic());
     assert!(module.manifest().required_features().subgroup_ballot());
     assert_eq!(builtins(&module, 41).len(), 1);
-    assert!(builtins(&module, 29).is_empty());
+    native_mask_lane(&module, true);
     let limits = Limits::default();
     let program = ShaderProgram::decode(&words, ShaderStage::Compute, &limits).unwrap();
     let no_subgroup = Profile::new(StageDescription::Compute(description(
@@ -226,7 +282,7 @@ fn cross_lane_and_wave32_operations_keep_the_native_subgroup_contract() {
     assert_eq!(module.manifest().required_subgroup_size(), Some(32));
     assert!(module.manifest().required_features().subgroup_basic());
     assert_eq!(builtins(&module, 41).len(), 1);
-    assert!(builtins(&module, 29).is_empty());
+    native_mask_lane(&module, false);
     let program = ShaderProgram::decode(&words, ShaderStage::Compute, &limits).unwrap();
     let no_subgroup = Profile::new(StageDescription::Compute(description(
         WaveSize::Wave32,
