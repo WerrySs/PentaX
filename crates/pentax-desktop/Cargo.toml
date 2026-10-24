@@ -19,7 +19,7 @@ pentax-config.workspace = true
 pentax-core.workspace = true
 pentax-loader.workspace = true
 pentax-platform = { path = "../pentax-platform" }
-sha2 = "=0.10.9"
+sha2 = "=0.11.1"
 same-file = "=1.0.6"
 serde.workspace = true
 toml.workspace = true
