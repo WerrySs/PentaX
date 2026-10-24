@@ -260,6 +260,7 @@ fn graphics_memory_actions_remain_ordered_owned_bounded_and_break_old_flip_autho
         },
         CommandLimits {
             max_draws: 2,
+            max_dispatches: 0,
             ..Default::default()
         },
     ] {

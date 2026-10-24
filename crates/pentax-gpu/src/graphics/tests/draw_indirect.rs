@@ -147,6 +147,7 @@ fn indirect_argument_refusals_and_action_capacity_are_admitted_without_payload_o
     let capped = bytes(&capped);
     let limits = CommandLimits {
         max_draws: 1,
+        max_dispatches: 0,
         ..Default::default()
     };
     assert!(matches!(
