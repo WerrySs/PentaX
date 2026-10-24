@@ -13,6 +13,7 @@ mod image;
 mod memory;
 mod scalar;
 mod shared;
+mod thread_dimensions;
 mod vector;
 
 use pentax_shader::{Export, Family, Instruction, MemoryAccess, Opcode, OperandKind, ShaderStage};
@@ -976,18 +977,26 @@ fn entry_block(
         let value = e.get(Op::GetUserData, reg)?;
         e.set(Op::SetScalarRegister, reg, value)?;
     }
-    // Source initial EXEC: every invocation (no live/helper or dispatch-extent gating).
-    let initial_exec = Value::U1(true);
-    e.set(Op::SetExec, 0, initial_exec)?;
-    let mask = e.emit(Op::Ballot, &[initial_exec])?;
-    let low = e.extract(mask, 0)?;
-    e.set(Op::SetExecLo, 0, low)?;
-    let high = if profile.wave64() {
-        e.extract(mask, 1)?
+    let (initial_exec, mask) = if let Some(cs) = profile.compute()
+        && cs.dispatch_thread_dimensions
+    {
+        thread_dimensions::initial_exec(&mut e, cs)?
     } else {
-        u32v(0)
+        let active = Value::U1(true);
+        let ballot = e.emit(Op::Ballot, &[active])?;
+        let low = e.extract(ballot, 0)?;
+        let high = if profile.wave64() {
+            e.extract(ballot, 1)?
+        } else {
+            u32v(0)
+        };
+        (active, [low, high])
     };
-    e.set(Op::SetExecHi, 0, high)?;
+    // This is an initial value only. Later guest SALU writes to EXEC retain
+    // their actual semantics; padded invocations do not return before barriers.
+    e.set(Op::SetExec, 0, initial_exec)?;
+    e.set(Op::SetExecLo, 0, mask[0])?;
+    e.set(Op::SetExecHi, 0, mask[1])?;
     let builtin = |e: &mut Emitter<'_>, kind: Builtin, component: u32| {
         e.get(Op::GetBuiltin, kind.aux(component))
     };

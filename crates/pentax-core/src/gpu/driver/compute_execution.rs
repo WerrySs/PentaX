@@ -182,8 +182,9 @@ impl Driver {
             compute::Command::Dispatch(dispatch) => dispatch,
         };
         self.with_command_exclusions(commands, 0, |driver, protected| {
-            driver.compute_dispatch(memory, dispatch, protected)
+            driver.compute_dispatch(memory, dispatch, protected, 0)
         })
+        .map(|()| Advance::Step)
     }
 }
 
@@ -787,12 +788,16 @@ impl Driver {
 }
 
 impl Driver {
-    fn compute_dispatch(
+    /// Execute one admitted dispatch at its owning processor's actual cursor.
+    /// A popped graphics execution supplies its locally retained host bytes;
+    /// ACB storage is already present in the shared retained-work ledger.
+    pub(super) fn compute_dispatch(
         &mut self,
         memory: &mut PausedNativeMemory<'_>,
         dispatch: &compute::Dispatch,
         commands: &[compute::CommandRange],
-    ) -> Result<Advance, Failure> {
+        local_held: usize,
+    ) -> Result<(), Failure> {
         let remaining_invocations = self
             .limits
             .max_invocations
@@ -802,6 +807,7 @@ impl Driver {
             .max_host_bytes
             .min(self.graphics_host_ceiling()?)
             .checked_sub(self.graphics_held_bytes()?)
+            .and_then(|n| n.checked_sub(local_held))
             .ok_or(Failure::Limit)?;
         if self.shaders.lookup_work() > 1
             && let Ok(address) = dispatch.shader_address()
@@ -872,6 +878,6 @@ impl Driver {
             .usage
             .written_bytes
             .saturating_add(report.written_bytes as u64);
-        Ok(Advance::Step)
+        Ok(())
     }
 }

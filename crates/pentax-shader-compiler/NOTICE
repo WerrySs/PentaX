@@ -168,3 +168,17 @@ Vulkan Basic Group Operations includes Subgroup control barriers. The original
 StoreCompletion feature declaration reports that actual emitted requirement
 separately from native lane/ballot width requirements:
 https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-group-operations
+
+Original compute thread-dimension and logical EXEC implementation
+---------------------------------------------------------------
+Requested thread extents, initial EXEC and runtime shader-data contracts follow
+the public GPL-2.0-only KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/renderCompute.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/frontend/translate/Translate.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterModule.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/backend/spirv/spirvEmitterFlow.cpp
+AMD RDNA2 documents initial EXEC and later scalar EXEC writes:
+https://docs.amd.com/v/u/en-US/rdna2-shader-instruction-set-architecture
+The bounded per-logical-wave analytical mask, inactive-VGPR proof and synthetic
+test programs are original PentaX code. Existing licenses remain in force;
+no proprietary shader or specification prose is copied.

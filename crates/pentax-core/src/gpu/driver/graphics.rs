@@ -160,6 +160,14 @@ impl Driver {
             usize::try_from(self.limits.max_draws.saturating_sub(self.usage.draws))
                 .unwrap_or(usize::MAX),
         );
+        commands.max_dispatches = commands.max_dispatches.min(
+            usize::try_from(
+                self.limits
+                    .max_dispatches
+                    .saturating_sub(self.usage.dispatches),
+            )
+            .unwrap_or(usize::MAX),
+        );
         commands.max_vertices = commands
             .max_vertices
             .min(self.limits.max_vertices.saturating_sub(self.usage.vertices));
@@ -335,6 +343,14 @@ impl Driver {
             usize::try_from(self.limits.max_draws.saturating_sub(self.usage.draws))
                 .unwrap_or(usize::MAX),
         );
+        commands.max_dispatches = commands.max_dispatches.min(
+            usize::try_from(
+                self.limits
+                    .max_dispatches
+                    .saturating_sub(self.usage.dispatches),
+            )
+            .unwrap_or(usize::MAX),
+        );
         commands.max_vertices = commands
             .max_vertices
             .min(self.limits.max_vertices.saturating_sub(self.usage.vertices));
@@ -366,13 +382,18 @@ impl Driver {
         } else {
             self.graphics
         };
+        let initial_compute = if self.frame.reset_before_graphics {
+            compute::ComputeState::for_new_queue()
+        } else {
+            self.graphics_compute
+        };
         let planned = if captured.contains_arrays() || captured.contains_draw_arguments() {
             captured
-                .prepare_ordered(initial, &commands)
+                .prepare_ordered_with_compute(initial, initial_compute, &commands)
                 .map(GraphicsCommands::Ordered)
         } else {
             captured
-                .plan(initial, &commands)
+                .plan_with_compute(initial, initial_compute, &commands)
                 .map(|plan| GraphicsCommands::Static { plan, action: 0 })
         };
         let plan = match planned {
@@ -729,6 +750,30 @@ impl Driver {
                     cursor = Cursor::Paused(memory);
                     continue;
                 }
+                GraphicsStep::StaticDispatch(index) => {
+                    let memory = cursor.into_pause();
+                    self.graphics_dispatch_turn(
+                        memory,
+                        plan.static_dispatch(index),
+                        plan.command_ranges(sources),
+                        retained,
+                    )?;
+                    // A compute dispatch consumes any previous current draw
+                    // receipt. Only a later real draw can feed a graphics flip.
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
+                GraphicsStep::OrderedDispatch(dispatch) => {
+                    let memory = cursor.into_pause();
+                    self.graphics_dispatch_turn(
+                        memory,
+                        &dispatch,
+                        plan.command_ranges(sources),
+                        retained,
+                    )?;
+                    cursor = Cursor::Paused(memory);
+                    continue;
+                }
                 GraphicsStep::Array => {
                     plan.resolve_array(&super::super::Memory(cursor.paused_memory()))
                         .map_err(Failure::GraphicsPreparation)?;
@@ -994,11 +1039,44 @@ impl Driver {
                 .saturating_add(current.written_bytes() as u64);
             cursor = Cursor::Draw(current);
         }
-        self.graphics = plan.final_state().map_err(Failure::GraphicsPreparation)?;
+        // Read both complete cursors before publishing either processor bank.
+        // Neither bank belongs to an independent asynchronous ACB queue.
+        let graphics = plan.final_state().map_err(Failure::GraphicsPreparation)?;
+        let compute = plan
+            .final_compute_state()
+            .map_err(Failure::GraphicsPreparation)?;
+        self.graphics = graphics;
+        self.graphics_compute = compute;
         self.graphics_owner = Some(owner);
         self.frame.reset_before_graphics = false;
         self.poisoned = false;
         Ok(GraphicsAdvance::Complete(0))
+    }
+
+    fn graphics_dispatch_turn(
+        &mut self,
+        memory: &mut PausedNativeMemory<'_>,
+        dispatch: &compute::Dispatch,
+        sources: &[compute::CommandRange],
+        retained: usize,
+    ) -> Result<(), Failure> {
+        let result = self.with_command_exclusions(sources, retained, |driver, protected| {
+            driver.compute_dispatch(memory, dispatch, protected, retained)
+        });
+        if let Err(error) = &result
+            && let Some(root) = sources.first()
+        {
+            // Reuse the existing opt-in root observer. The source root is a
+            // fresh owned read after failure, not a replacement sealed stream;
+            // the state is this dispatch's actual initial CS snapshot.
+            super::private_compute_failure::capture_from_env(
+                memory,
+                *root,
+                dispatch.diagnostic_state(),
+                error,
+            );
+        }
+        result
     }
 }
 
@@ -1040,6 +1118,9 @@ mod tests;
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
 #[path = "graphics_continuation_tests.rs"]
 mod continuation_tests;
+#[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
+#[path = "graphics_mixed_compute_tests.rs"]
+mod mixed_compute_tests;
 
 // The static variant preserves the existing no-array planner and its complete
 // immutable draw snapshots. Only array streams use source-ordered replay.
@@ -1058,6 +1139,8 @@ enum GraphicsStep {
     Array,
     WaitFlip(pentax_gpu::WaitFlip),
     LodStats(pentax_gpu::lod_stats_request::Request),
+    StaticDispatch(usize),
+    OrderedDispatch(compute::Dispatch),
     IndirectDraw,
     StaticDraw(usize),
     OrderedDraw(draw::Draw),
@@ -1126,10 +1209,22 @@ impl GraphicsCommands {
             _ => unreachable!(),
         }
     }
+    fn static_dispatch(&self, index: usize) -> &compute::Dispatch {
+        match self {
+            Self::Static { plan, .. } => &plan.dispatches()[index],
+            _ => unreachable!(),
+        }
+    }
     fn final_state(&self) -> Result<draw::GraphicsState, draw::Error> {
         match self {
             Self::Static { plan, .. } => Ok(plan.final_state()),
             Self::Ordered(plan) => plan.final_state(),
+        }
+    }
+    fn final_compute_state(&self) -> Result<compute::ComputeState, draw::Error> {
+        match self {
+            Self::Static { plan, .. } => Ok(plan.final_compute_state()),
+            Self::Ordered(plan) => plan.final_compute_state(),
         }
     }
     fn next_step(&mut self) -> Result<Option<GraphicsStep>, draw::Error> {
@@ -1141,6 +1236,7 @@ impl GraphicsCommands {
                 *action += 1;
                 Some(match *next {
                     draw::Action::Draw(index) => GraphicsStep::StaticDraw(index),
+                    draw::Action::Dispatch(index) => GraphicsStep::StaticDispatch(index),
                     draw::Action::IndirectDraw(_) | draw::Action::LiveDraw => {
                         return Err(draw::Error::Unsupported("static live draw action"));
                     }
@@ -1152,6 +1248,7 @@ impl GraphicsCommands {
             }
             Self::Ordered(plan) => plan.next_step()?.map(|next| match next {
                 draw::OrderedStep::Array => GraphicsStep::Array,
+                draw::OrderedStep::Dispatch(dispatch) => GraphicsStep::OrderedDispatch(dispatch),
                 draw::OrderedStep::WaitFlip(wait) => GraphicsStep::WaitFlip(wait),
                 draw::OrderedStep::LodStats(request) => GraphicsStep::LodStats(request),
                 draw::OrderedStep::IndirectDraw => GraphicsStep::IndirectDraw,

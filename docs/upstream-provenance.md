@@ -1947,3 +1947,26 @@ translation and Vulkan subgroup contracts are documented in the shader compiler
 and platform notices; BASIC capability does not establish an exact subgroup width.
 
 Primary source: [graphics processor initialization and reset](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp).
+
+
+### Unified processor dispatch and requested thread extents
+
+The public KytyPS5 revision
+7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 routes compute SH offsets into a
+separate CS context on the graphics processor and executes dispatches in command
+order. Its existing internal-data WAIT grammar remains distinct from ordinary
+UCONFIG writes. PentaX reuses its checked compute executor for inline dispatches
+and preserves separate processor retirement, current-owner checks and quotas.
+
+The same revision separates requested thread extents from rounded group counts,
+reserves three runtime extent words, and initializes EXEC using XYZ bounds. The
+thread-dimension mode belongs to shader specialization while extent values remain
+runtime data. PentaX preserves later EXEC writes and uniform barrier participation;
+logical Wave64 support does not imply a native Wave64 subgroup requirement.
+
+Primary sources: [dispatch conversion and runtime data](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/renderCompute.cpp),
+[initial EXEC translation](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/shader/recompiler/frontend/translate/Translate.cpp),
+and [LLVM AMDGPU field and ordering documentation](https://releases.llvm.org/19.1.0/docs/AMDGPUUsage.html).
+Required attribution and scoped field compatibility details are retained in the
+GPU and shader compiler notices. Original fixtures and bounded host transactions
+are project code; no proprietary shader or command data is included.

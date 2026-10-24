@@ -28,6 +28,7 @@ mod state;
 mod textures;
 pub use commands::{
     Action, CommandLimits, CommandLocation, CommandPlan, CommandUsage, Draw, Flip, plan_commands,
+    plan_commands_with_compute,
 };
 pub use linkage::{ShaderInterfaces, validate_shader_interfaces};
 pub use prepare::prepare_draw;

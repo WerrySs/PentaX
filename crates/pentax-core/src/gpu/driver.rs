@@ -311,6 +311,9 @@ pub(crate) struct Driver {
     command_exclusion_bytes: usize,
     gds: Option<memory_transfer::GdsState>,
     graphics: draw::GraphicsState,
+    // The graphics processor also owns a compute shader bank. It is not one
+    // of the independent ACB queues and retires with this processor's FIFO.
+    graphics_compute: compute::ComputeState,
     lod_stats: Option<lod_stats::LodStatsState>,
     graphics_owner: Option<pentax_platform::native_memory::NativeOwnerId>,
     graphics_execution: Option<graphics::GraphicsExecution>,
@@ -419,6 +422,7 @@ impl Driver {
             command_exclusion_bytes: 0,
             gds: None,
             graphics: draw::GraphicsState::for_new_processor(),
+            graphics_compute: compute::ComputeState::for_new_queue(),
             lod_stats: None,
             graphics_owner: None,
             graphics_execution: None,

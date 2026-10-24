@@ -434,3 +434,5 @@ mod lod_stats;
 mod sampled_textures;
 
 mod lod_receiver;
+
+mod unified_compute;

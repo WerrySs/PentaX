@@ -331,3 +331,24 @@ native lane/ballot size32/64 contracts remain exact. The retained original
 backend fixture/reset wrapper and real fragment LOD feedback explicitly keep
 their qualified native32 contracts. This does not turn a standalone VSCNT
 Subgroup barrier into a logical64 or Workgroup visibility proof.
+
+Compute thread-dimension dispatches have an explicit profile flag and exactly
+three manifest-declared runtime extent words. The caller still owns checked
+rounded group counts, padded invocation budgets and dispatch authority. Initial
+EXEC uses the requested XYZ bounds and X-major logical-wave geometry; Wave64
+builds both words without requiring native64 lane communication. Later guest
+EXEC writes retain their meaning, and padded invocations do not return before
+uniform workgroup barriers. Runtime extents are not shader-cache specialization
+values. Live extent words precede packed buffer offsets and may disappear when
+guest code replaces the initial mask before any use.
+
+The rejecting undefined-register policy has one conservative proof for this
+compute profile: an undefined VGPR value may survive only if all live uses are
+excluded by matching Select and memory predicates. Descriptors, active memory
+reads, branch conditions and lane communication remain strict. Unsupported
+predicate combinations keep their refusal; enabling an initially inactive lane
+and reading a VGPR not defined there is rejected. No VGPR is filled with zero.
+Across loops this proof uses only defined pure synthetic-entry invariants and
+a fixed point over their guarded uses. A changing Phi condition cannot supply
+cross-iteration contradictions. Other looped-tail definedness remains unproved
+and retains its refusal; this is not unrestricted thread-dimension support.

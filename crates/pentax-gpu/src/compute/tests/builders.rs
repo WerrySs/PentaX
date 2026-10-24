@@ -51,7 +51,7 @@ fn builder_wave32_dispatch_preserves_state_products_and_rejects_other_modes_befo
         );
         assert_eq!(wide.usage().invocations, 16);
         assert!(wide_memory.reads.get() > 0);
-        for mode in [0xa041u32, 0x8061, 0x8049] {
+        for mode in [0xa041u32, 0x8069, 0x8049] {
             input[end - 4..].copy_from_slice(&mode.to_le_bytes());
             let memory = source();
             assert!(matches!(

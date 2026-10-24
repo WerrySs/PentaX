@@ -211,6 +211,10 @@ impl PixelDescription {
 #[derive(Clone, Debug)]
 pub struct ComputeDescription {
     pub common: CommonDescription,
+    /// Dispatch XYZ are requested thread extents rather than workgroup counts.
+    /// Actual extents are three runtime shader-data words, never compile-time
+    /// guest values. The caller owns checked padded-dispatch admission.
+    pub dispatch_thread_dimensions: bool,
     /// Source `threads_num` (LocalSize).
     pub workgroup_size: [u32; 3],
     /// Source `thread_ids_num`: VGPRs v0..v2 receiving LocalInvocationId.

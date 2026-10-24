@@ -308,6 +308,7 @@ fn manifest_of(
         required_features,
         stage,
         push_data,
+        dispatch_thread_extent_dword: layout.dispatch_thread_extent_dword,
         shader_data_binding: layout
             .shader_data_binding
             .then(|| spirv::emit::native_binding(stage, spirv::emit::BINDING_SHADER_DATA)),

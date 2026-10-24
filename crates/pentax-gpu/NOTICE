@@ -377,3 +377,33 @@ registers, grant GPU memory access, or identify a commercial failure cause.
 Existing GPL licensing and upstream attribution remain in force.
 https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp
 https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/commandProcessor.h
+
+
+Unified graphics-processor CS routing and ordered dispatch contracts follow
+PUBLIC KytyPS5/KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3:
+CpOpSetShaderReg (pm4Handlers.cpp2391-2425), HwShSetCsRegister and
+HwShSetCsUserSgpr (986-1093), and CommandProcessor::DispatchDirect/Indirect
+(graphicsRun.cpp971-1013). Copyright (c) 2021 InoriRus; GPL-2.0-only retained.
+The bounded Rust separate-CS-state plans and synthetic consumers are original.
+These contracts do not authorize ignoring unknown registers, widening numeric
+or resource profiles, or treating internal AGC metadata as generic UC writes.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp
+
+
+Thread-dimension dispatch ceil geometry and original runtime XYZ follow PUBLIC
+KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 renderCompute.cpp
+DispatchDirect277-347 and pm4.h USE_THREAD_DIMENSIONS. Original bounded Rust
+arithmetic, payload validation and fixtures retain GPL-2.0-only attribution.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/host_gpu/renderer/renderCompute.cpp
+
+Named R1 fields follow AMD-authored gc10.3 register masks in Linuxv6.12 and
+LLVM19 AMDGPUUsage. Public7b HwShSetCsRegister omits legacy SGPRS allocation;
+retaining that raw nibble is an explicit compatibility policy, not an AMD
+statement that arbitrary CP allocation fields are ignored. The fixed normal
+scalar bank and actually initialized USER words are independent. LLVM's
+MEM_ORDERED completion-class distinction is admitted only for the existing
+compute analysis that excludes images/samplers/SAMPLE. Store vscnt ordering
+and peer-visibility barriers remain separately qualified contracts.
+https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/amd/include/asic_reg/gc/gc_10_3_0_sh_mask.h
+https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/llvm/docs/AMDGPUUsage.rst

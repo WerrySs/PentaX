@@ -17,6 +17,7 @@ use crate::{
 // Inline sealed state avoids a fallible allocation after an earlier effect.
 #[allow(clippy::large_enum_variant)]
 pub enum OrderedStep {
+    Dispatch(crate::compute::Dispatch),
     Array,
     IndirectDraw,
     WaitFlip(crate::WaitFlip),
@@ -30,6 +31,7 @@ pub struct OrderedCommands {
     program: Program,
     plan: CommandPlan,
     state: GraphicsState,
+    compute: crate::compute::ComputeState,
     packet: usize,
     action: usize,
     pending: Option<crate::IndirectRegisters>,
@@ -45,6 +47,21 @@ impl OrderedCommands {
         initial: GraphicsState,
         limits: &CommandLimits,
     ) -> Result<Self, Error> {
+        Self::prepare_with_compute(
+            buffers,
+            roots,
+            initial,
+            crate::compute::ComputeState::empty(),
+            limits,
+        )
+    }
+    pub fn prepare_with_compute(
+        buffers: &[&[u8]],
+        roots: &[CommandRange],
+        initial: GraphicsState,
+        compute: crate::compute::ComputeState,
+        limits: &CommandLimits,
+    ) -> Result<Self, Error> {
         let program = Program::new(
             buffers,
             roots,
@@ -57,12 +74,13 @@ impl OrderedCommands {
             },
         )
         .map_err(convert)?;
-        Self::from_program(program, initial, limits)
+        Self::from_program(program, initial, compute, limits)
     }
 
     pub(super) fn captured(
         capture: &mut super::CapturedCommands,
         initial: GraphicsState,
+        compute: crate::compute::ComputeState,
         limits: &CommandLimits,
     ) -> Result<Self, Error> {
         let program = Program::captured(
@@ -76,7 +94,7 @@ impl OrderedCommands {
             },
         )
         .map_err(convert)?;
-        let mut ordered = Self::from_program(program, initial, limits)
+        let mut ordered = Self::from_program(program, initial, compute, limits)
             .map_err(|error| capture.source_error(error))?;
         let usage = capture.usage();
         ordered
@@ -96,6 +114,7 @@ impl OrderedCommands {
     fn from_program(
         mut program: Program,
         initial: GraphicsState,
+        compute: crate::compute::ComputeState,
         limits: &CommandLimits,
     ) -> Result<Self, Error> {
         program
@@ -105,13 +124,21 @@ impl OrderedCommands {
             )
             .map_err(convert)?;
         let sanitized = program
-            .sanitized(std::mem::size_of::<GraphicsState>())
+            .sanitized(
+                std::mem::size_of::<GraphicsState>()
+                    + std::mem::size_of::<crate::compute::ComputeState>(),
+            )
             .map_err(convert)?;
         let (host, work) = program.remaining();
         let mut static_limits = *limits;
         static_limits.max_host_bytes = host;
         static_limits.max_work = work;
-        let plan = super::commands::plan_ordered_commands(&[&sanitized], initial, &static_limits)?;
+        let plan = super::commands::plan_ordered_commands(
+            &[&sanitized],
+            initial,
+            compute,
+            &static_limits,
+        )?;
         if program
             .array_count()
             .checked_add(plan.actions().len())
@@ -119,6 +146,7 @@ impl OrderedCommands {
                 limits
                     .max_draws
                     .checked_mul(2)
+                    .and_then(|count| count.checked_add(limits.max_dispatches))
                     .is_none_or(|maximum| count > maximum)
             })
         {
@@ -131,6 +159,7 @@ impl OrderedCommands {
             program,
             plan,
             state: initial,
+            compute,
             packet: 0,
             action: 0,
             pending: None,
@@ -184,6 +213,10 @@ impl OrderedCommands {
         }
         Ok(self.state)
     }
+    pub fn final_compute_state(&self) -> Result<crate::compute::ComputeState, Error> {
+        self.final_state()?;
+        Ok(self.compute)
+    }
     pub fn resolve_array(&mut self, memory: &impl Memory) -> Result<(), Error> {
         if self.failed {
             return Err(Error::Unsupported("failed ordered graphics stream"));
@@ -195,7 +228,13 @@ impl OrderedCommands {
             .ok_or(Error::Unsupported("no current graphics register array"))?;
         self.program
             .resolve(array, memory, |space, offset, value| {
-                self.state.write(space, offset, value).map_err(reverse)
+                if space == RegisterSpace::Sh
+                    && crate::compute::ComputeState::admits_shader_register(offset)
+                {
+                    self.compute.write(offset, value)
+                } else {
+                    self.state.write(space, offset, value).map_err(reverse)
+                }
             })
             .map_err(convert)?;
         self.failed = false;
@@ -248,6 +287,9 @@ impl OrderedCommands {
                 let reset = crate::queue_reset::decode(header.raw(), word(1))
                     .map_err(Error::Unsupported)?;
                 self.state.reset(reset);
+                if reset == crate::queue_reset::Reset::Processor {
+                    self.compute.reset();
+                }
                 continue;
             }
             if matches!(header.opcode(), 0x69 | 0x76 | 0x79) && header.raw() != 0xc002_7904 {
@@ -257,12 +299,23 @@ impl OrderedCommands {
                     _ => RegisterSpace::Uconfig,
                 };
                 for index in 2..packet.words {
-                    self.state
-                        .write(space, word(1) + (index - 2) as u32, word(index))?;
+                    let register = word(1) + (index - 2) as u32;
+                    if space == RegisterSpace::Sh
+                        && crate::compute::ComputeState::admits_shader_register(register)
+                    {
+                        self.compute.write(register, word(index)).map_err(convert)?;
+                    } else {
+                        self.state.write(space, register, word(index))?;
+                    }
                 }
                 continue;
             }
             match header.opcode() {
+                0x11 if header.raw() == 0xc002_1102 => {
+                    self.compute
+                        .set_dispatch_base(&[word(0), word(1), word(2), word(3)])
+                        .map_err(convert)?;
+                }
                 0x11 => {
                     self.state.draw_indirect_base =
                         Some(u64::from(word(2) & !7) | (u64::from(word(3) & 0xffff) << 32))
@@ -287,6 +340,23 @@ impl OrderedCommands {
                     })
                 }
                 _ => {}
+            }
+            if matches!(header.opcode(), 0x15 | 0x16) {
+                let Some(Action::Dispatch(_)) = self.plan.actions().get(self.action) else {
+                    return Err(Error::Unsupported("ordered compute action alignment"));
+                };
+                if packet.words > 5 {
+                    return Err(Error::Unsupported("compute dispatch packet"));
+                }
+                let mut words = [0u32; 5];
+                for (index, value) in words[..packet.words].iter_mut().enumerate() {
+                    *value = word(index);
+                }
+                let dispatch =
+                    crate::compute::Dispatch::from_packet(self.compute, &words[..packet.words])
+                        .map_err(convert)?;
+                self.action += 1;
+                return Ok(Some(OrderedStep::Dispatch(dispatch)));
             }
             if header.raw() == crate::lod_stats_request::HEADER {
                 let Some(Action::LodStats(request)) = self.plan.actions().get(self.action) else {
@@ -561,7 +631,8 @@ mod tests {
                 OrderedStep::Flip(_)
                 | OrderedStep::IndirectDraw
                 | OrderedStep::WaitFlip(_)
-                | OrderedStep::LodStats(_) => {
+                | OrderedStep::LodStats(_)
+                | OrderedStep::Dispatch(_) => {
                     panic!("no original flip/indirect draw")
                 }
             }
@@ -638,6 +709,7 @@ mod tests {
             },
             CommandLimits {
                 max_draws: 0,
+                max_dispatches: 0,
                 ..Default::default()
             },
         ] {

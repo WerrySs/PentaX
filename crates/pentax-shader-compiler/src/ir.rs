@@ -87,6 +87,7 @@ ops! {
     Identity: Void();
     Undef: Void();
     GetUserData: U32();
+    GetDispatchThreadExtent: U32();
     GetBuiltin: U32();
     GetScalarRegister: U32();
     SetScalarRegister: Void(U32);

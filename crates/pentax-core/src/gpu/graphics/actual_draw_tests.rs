@@ -692,6 +692,7 @@ fn ordered_array_only_draw_preparation_reads_actual_shaders_targets_and_changed_
                 prepared += 1;
             }
             OrderedStep::Flip(_)
+            | OrderedStep::Dispatch(_)
             | OrderedStep::IndirectDraw
             | OrderedStep::WaitFlip(_)
             | OrderedStep::LodStats(_) => {

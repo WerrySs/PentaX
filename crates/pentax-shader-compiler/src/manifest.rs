@@ -188,6 +188,7 @@ pub struct Manifest {
     pub(crate) vertex_instance_contract: VertexInstanceContract,
     pub(crate) stage: ShaderStage,
     pub(crate) push_data: Option<PushData>,
+    pub(crate) dispatch_thread_extent_dword: Option<u32>,
     pub(crate) shader_data_binding: Option<u32>,
     pub(crate) buffer_binding: Option<u32>,
     pub(crate) buffers: Vec<BufferElement>,
@@ -204,6 +205,11 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Shader-data-relative start of exactly three requested thread extents.
+    /// The caller uploads these only through the declared push/buffer layout.
+    pub fn dispatch_thread_extent_dword(&self) -> Option<u32> {
+        self.dispatch_thread_extent_dword
+    }
     /// Exact per-workgroup Workgroup storage allocation; not guest-memory authority.
     pub fn shared_memory_bytes(&self) -> u32 {
         self.shared_memory_bytes
@@ -306,7 +312,9 @@ impl Manifest {
     pub fn required_subgroup_size(&self) -> Option<u32> {
         self.required_subgroup_size
     }
-    /// Live `OpUndef` register reads (only under `UndefinedRegisterPolicy::Undefined`).
+    /// Unqualified live undefined reads, permitted only by the explicit
+    /// Undefined policy. Under Reject, masked inactive VGPR storage may remain
+    /// OpUndef only after the separate proof that no active use can observe it.
     pub fn undefined_register_reads(&self) -> u32 {
         self.undefined_register_reads
     }

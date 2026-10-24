@@ -12,6 +12,7 @@ pub struct CommandLimits {
     pub max_command_bytes: usize,
     pub max_packets: u64,
     pub max_draws: usize,
+    pub max_dispatches: usize,
     pub max_vertices: u64,
     pub max_host_bytes: usize,
     pub max_work: u64,
@@ -23,6 +24,7 @@ impl Default for CommandLimits {
             max_command_bytes: 256 * 1024,
             max_packets: 65536,
             max_draws: 64,
+            max_dispatches: 128,
             max_vertices: 1024 * 1024,
             max_host_bytes: 4 * 1024 * 1024,
             max_work: 4 * 1024 * 1024,
@@ -34,6 +36,7 @@ pub struct CommandUsage {
     pub command_bytes: usize,
     pub packets: u64,
     pub draw_packets: u64,
+    pub dispatch_packets: u64,
     pub zero_draws: u64,
     pub flips: u64,
     pub vertices: u64,
@@ -67,6 +70,7 @@ impl Flip {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    Dispatch(usize),
     Draw(usize),
     IndirectDraw(super::IndirectDraw),
     LiveDraw,
@@ -111,6 +115,8 @@ impl fmt::Debug for Draw {
     }
 }
 pub struct CommandPlan {
+    dispatches: Vec<crate::compute::Dispatch>,
+    final_compute_state: crate::compute::ComputeState,
     draws: Vec<Draw>,
     actions: Vec<Action>,
     memory: Vec<MemoryAction>,
@@ -172,6 +178,12 @@ impl CommandPlan {
         self.usage.command_bytes = command_bytes;
         self.usage.packets = packets;
     }
+    pub fn dispatches(&self) -> &[crate::compute::Dispatch] {
+        &self.dispatches
+    }
+    pub fn final_compute_state(&self) -> crate::compute::ComputeState {
+        self.final_compute_state
+    }
     pub fn draws(&self) -> &[Draw] {
         &self.draws
     }
@@ -199,28 +211,45 @@ fn work(usage: &mut CommandUsage, limits: &CommandLimits, count: u64) -> Result<
 }
 
 /// Admit all supplied flat streams before shader/resource reads or effects.
-/// Unknown register writes, predicates, IBs, barriers and indirect draws
-/// are explicit refusals. The caller publishes final_state only after execution
+/// Graphics and CS registers retain distinct banks. Unsupported packet and
+/// resource modes remain typed refusals. The caller publishes final states only after execution
 /// of the entire admitted plan succeeds; no partial prefix is returned.
 pub fn plan_commands(
     buffers: &[&[u8]],
     initial: GraphicsState,
     limits: &CommandLimits,
 ) -> Result<CommandPlan, Error> {
-    plan(buffers, initial, limits, false)
+    plan_commands_with_compute(
+        buffers,
+        initial,
+        crate::compute::ComputeState::empty(),
+        limits,
+    )
+}
+
+/// Admit graphics and compute state on one source-ordered processor.
+pub fn plan_commands_with_compute(
+    buffers: &[&[u8]],
+    initial: GraphicsState,
+    compute: crate::compute::ComputeState,
+    limits: &CommandLimits,
+) -> Result<CommandPlan, Error> {
+    plan(buffers, initial, compute, limits, false)
 }
 
 pub(super) fn plan_ordered_commands(
     buffers: &[&[u8]],
     initial: GraphicsState,
+    compute: crate::compute::ComputeState,
     limits: &CommandLimits,
 ) -> Result<CommandPlan, Error> {
-    plan(buffers, initial, limits, true)
+    plan(buffers, initial, compute, limits, true)
 }
 
 fn plan(
     buffers: &[&[u8]],
     initial: GraphicsState,
+    mut compute: crate::compute::ComputeState,
     limits: &CommandLimits,
     ordered: bool,
 ) -> Result<CommandPlan, Error> {
@@ -251,6 +280,7 @@ fn plan(
     let action_count = limits
         .max_draws
         .checked_mul(2)
+        .and_then(|count| count.checked_add(limits.max_dispatches))
         .ok_or(Error::Limit("action storage"))?;
     let action_bytes = action_count
         .checked_mul(size_of::<Action>())
@@ -260,6 +290,7 @@ fn plan(
         .ok_or(Error::Limit("action storage"))?
         .checked_add(size_of::<CommandPlan>())
         .and_then(|n| n.checked_add(size_of::<GraphicsState>()))
+        .and_then(|n| n.checked_add(size_of::<crate::compute::ComputeState>()))
         .filter(|n| *n <= limits.max_host_bytes)
         .ok_or(Error::Limit("command host bytes"))?;
     let storage_work = draw_bytes
@@ -270,6 +301,12 @@ fn plan(
         )
         .ok_or(Error::Limit("command state work"))?;
     work(&mut usage, limits, storage_work as u64)?;
+    work(
+        &mut usage,
+        limits,
+        2 * size_of::<crate::compute::ComputeState>() as u64,
+    )?;
+    let mut dispatches = Vec::new();
     let mut draws = Vec::new();
     draws
         .try_reserve_exact(limits.max_draws)
@@ -337,7 +374,10 @@ fn plan(
             } else if header.raw() == 0xc002_7904 {
                 work(&mut usage, limits, 8)?;
                 crate::compute::tagged_wait_dwords(&bytes[at * 4..]).map_err(memory_error)?
-            } else if header.packet_type() == 3 && header.low_byte() == 0 {
+            } else if header.packet_type() == 3
+                && (header.low_byte() == 0
+                    || (header.low_byte() == 2 && matches!(header.opcode(), 0x11 | 0x15 | 0x76)))
+            {
                 if header.opcode() == 0x10 && header.count() == 0x3fff {
                     1
                 } else {
@@ -385,6 +425,14 @@ fn plan(
                 let reset = crate::queue_reset::decode(header.raw(), word(at + 1)).map_err(fail)?;
                 work(&mut usage, limits, size_of::<GraphicsState>() as u64)?;
                 state.reset(reset);
+                if reset == crate::queue_reset::Reset::Processor {
+                    work(
+                        &mut usage,
+                        limits,
+                        size_of::<crate::compute::ComputeState>() as u64,
+                    )?;
+                    compute.reset();
+                }
                 fresh_draw = false;
                 at = end;
                 continue;
@@ -442,7 +490,18 @@ fn plan(
                 || crate::marker::packet_words(header.raw()).is_some()
                 || matches!(
                     header.opcode(),
-                    0x25 | 0x27 | 0x35 | 0x2d | 0x37 | 0x3c | 0x93 | 0x49 | 0x42 | 0x40 | 0x50
+                    0x15 | 0x16
+                        | 0x25
+                        | 0x27
+                        | 0x35
+                        | 0x2d
+                        | 0x37
+                        | 0x3c
+                        | 0x93
+                        | 0x49
+                        | 0x42
+                        | 0x40
+                        | 0x50
                 )
                 || matches!(header.raw(), 0xc006_1060 | 0xc002_7904))
                 && actions.len() >= action_count
@@ -542,8 +601,66 @@ fn plan(
                     }
                     work(&mut usage, limits, u64::from(count))?;
                     for i in 0..count {
-                        state.write(space, first + i, word(at + 2 + i as usize))?;
+                        let register = first + i;
+                        if space == RegisterSpace::Sh
+                            && crate::compute::ComputeState::admits_shader_register(register)
+                        {
+                            compute
+                                .write(register, word(at + 2 + i as usize))
+                                .map_err(memory_error)?;
+                        } else {
+                            state.write(space, register, word(at + 2 + i as usize))?;
+                        }
                     }
+                }
+                0x15 | 0x16 => {
+                    if dispatches.len() >= limits.max_dispatches {
+                        return Err(Error::Limit("command dispatches"));
+                    }
+                    if length > 5 {
+                        return Err(fail("compute dispatch packet"));
+                    }
+                    let mut words = [0u32; 5];
+                    for (index, value) in words[..length].iter_mut().enumerate() {
+                        *value = word(at + index);
+                    }
+                    let dispatch = crate::compute::Dispatch::from_packet(compute, &words[..length])
+                        .map_err(memory_error)?;
+                    if dispatches.capacity() == 0 {
+                        let bytes = limits
+                            .max_dispatches
+                            .checked_mul(size_of::<crate::compute::Dispatch>())
+                            .ok_or(Error::Limit("dispatch storage"))?;
+                        usage.host_bytes = usage
+                            .host_bytes
+                            .checked_add(bytes)
+                            .filter(|value| *value <= limits.max_host_bytes)
+                            .ok_or(Error::Limit("command host bytes"))?;
+                        work(&mut usage, limits, bytes as u64)?;
+                        dispatches
+                            .try_reserve_exact(limits.max_dispatches)
+                            .map_err(|_| Error::Allocation)?;
+                        let excess = (dispatches.capacity() - limits.max_dispatches)
+                            .checked_mul(size_of::<crate::compute::Dispatch>())
+                            .ok_or(Error::Limit("dispatch storage"))?;
+                        usage.host_bytes = usage
+                            .host_bytes
+                            .checked_add(excess)
+                            .filter(|value| *value <= limits.max_host_bytes)
+                            .ok_or(Error::Limit("command host bytes"))?;
+                    }
+                    usage.dispatch_packets = usage
+                        .dispatch_packets
+                        .checked_add(1)
+                        .ok_or(Error::Limit("command dispatches"))?;
+                    dispatches.push(dispatch);
+                    actions.push(Action::Dispatch(dispatches.len() - 1));
+                    fresh_draw = false;
+                }
+                0x11 if header.raw() == 0xc002_1102 => {
+                    compute
+                        .set_dispatch_base(&[word(at), word(at + 1), word(at + 2), word(at + 3)])
+                        .map_err(memory_error)?;
                 }
                 0x11 if header.raw() == 0xc002_1100 && word(at + 1) == 1 => {
                     state.draw_indirect_base = Some(
@@ -763,6 +880,8 @@ fn plan(
         .filter(|n| *n <= limits.max_host_bytes)
         .ok_or(Error::Limit("transfer staging bytes"))?;
     Ok(CommandPlan {
+        dispatches,
+        final_compute_state: compute,
         draws,
         actions,
         memory,

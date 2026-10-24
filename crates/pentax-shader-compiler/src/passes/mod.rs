@@ -10,6 +10,7 @@
 // validated against the exact caller profile; undefined-register and
 // subgroup policies are explicit checks.
 
+mod active_undefined;
 pub(crate) mod fold;
 mod images;
 pub(crate) use images::{discover_images, track_images};
@@ -130,7 +131,8 @@ fn first_reader(ir: &Ir, budget: &mut Budget, target: InstId) -> Result<u32, Com
 }
 
 /// Undefined-register policy and the exact-subgroup requirement. Returns the
-/// number of live undefined reads (zero under `Reject`).
+/// number of unqualified live undefined reads (zero under `Reject`). Proved
+/// inactive-only VGPR storage does not become an initialized register value.
 pub(crate) fn check_policies(
     ir: &Ir,
     budget: &mut Budget,
@@ -144,6 +146,15 @@ pub(crate) fn check_policies(
             match inst.op {
                 Op::Undef => match profile.common().undefined_registers {
                     UndefinedRegisterPolicy::Reject => {
+                        if profile
+                            .compute()
+                            .is_some_and(|cs| cs.dispatch_thread_dimensions)
+                            && (var::VGPR..var::VGPR + 256).contains(&inst.aux)
+                            && inst.ty == crate::ir::Type::U32
+                            && active_undefined::inactive_only(ir, budget, id)?
+                        {
+                            continue;
+                        }
                         let pc = first_reader(ir, budget, id)?;
                         return Err(CompileError::UndefinedRegister {
                             register: register_of(inst.aux),
@@ -230,6 +241,7 @@ pub(crate) struct Layout {
     pub inputs: Vec<StageInput>,
     pub outputs: Vec<StageOutput>,
     pub user_data_registers: Vec<u8>,
+    pub dispatch_thread_extent_dword: Option<u32>,
     pub memory_offset_dword: u32,
     pub memory_offset_count: u32,
     pub push_data_start: Option<u32>,
@@ -724,6 +736,7 @@ pub(crate) fn allocate_bindings(
     layout: &mut Layout,
 ) -> Result<(), CompileError> {
     let mut registers = [false; 106];
+    let mut dispatch_extents = false;
     for block in 0..ir.blocks.len() as u32 {
         for id in ir.block_insts(block) {
             budget.charge(1)?;
@@ -733,6 +746,16 @@ pub(crate) fn allocate_bindings(
                     .get_mut(inst.aux as usize)
                     .ok_or(CompileError::Internal("user data register"))?;
                 *slot = true;
+            }
+            if inst.op == Op::GetDispatchThreadExtent {
+                if inst.aux >= 3
+                    || !profile
+                        .compute()
+                        .is_some_and(|cs| cs.dispatch_thread_dimensions)
+                {
+                    return Err(CompileError::Internal("dispatch thread extent profile"));
+                }
+                dispatch_extents = true;
             }
         }
     }
@@ -746,7 +769,9 @@ pub(crate) fn allocate_bindings(
             )?;
         }
     }
-    layout.memory_offset_dword = layout.user_data_registers.len() as u32;
+    let user_words = layout.user_data_registers.len() as u32;
+    layout.dispatch_thread_extent_dword = dispatch_extents.then_some(user_words);
+    layout.memory_offset_dword = user_words + if dispatch_extents { 3 } else { 0 };
     layout.memory_offset_count = layout.buffers.len() as u32;
     let size = layout.shader_data_dwords();
     let start = u32::from(profile.common().push_data_start_dword);

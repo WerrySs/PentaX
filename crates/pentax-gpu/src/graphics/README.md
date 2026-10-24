@@ -515,3 +515,51 @@ owned runtime retains the guest pause through GPU fence and whole target
 writeback before making actual counters available to its ordered receiver.
 Original CPU metadata fixtures and ignored hardware fixtures cover different
 boundaries; none is a commercial frame claim.
+
+
+Unified DCB compute state is separate from graphics register snapshots and from
+asynchronous compute queues. `plan_commands_with_compute`, captured
+`plan_with_compute` and `prepare_ordered_with_compute` retain the caller's actual
+CS history; compatibility entrypoints start with detached unknown CS state.
+Dispatch actions capture the CS state at their own source position. Ordered
+register arrays supply current CS values only when their cursor is resolved.
+Both final states can be published only after the complete ordered plan retires.
+`GraphicsState` and its private diagnostic V1 11611-byte layout are unchanged.
+
+The closed CS bank reuses existing compute program/control fields and sixteen
+USER_DATA slots. Direct and indirect dispatch packets use the existing sealed
+compute decoder and resource preparation; unknown registers, control modes,
+resource provenance and GPU permissions are not relaxed. Compute-only streams
+have an independent `max_dispatches` cap (default128, narrowed by the owning
+Driver's remaining session quota). Action, dispatch snapshot, provenance and
+state storage/work share the original aggregate ceilings. The snapshot vector
+is allocated only when a dispatch is present. A dispatch consumes previous
+fresh-draw eligibility; only a subsequent completed draw can supply a flip.
+The runtime must execute each dispatch inline, fence and commit its complete
+same-owner output transaction before continuing the original DCB suffix.
+No command acceptance alone establishes shader support or a rendered frame.
+
+
+USE_THREAD_DIMENSIONS selects original XYZ thread counts, not group counts.
+The adapter rejects zero local dimensions, ceil-rounds each nonzero request and
+checks that the padded axes fit the u32 GlobalInvocationId domain. Invocation
+and backend work quotas include every padded invocation. A zero request axis
+uses the existing no-GPU dispatch result before shader/resource reads; indirect
+XYZ still comes from its current checked 12-byte owner read. Original extents
+are copied only into the opaque manifest's three runtime extent words after
+live USER data and before packed buffer offsets. Different request values can
+use the same compiled mode; group-count mode has a distinct compiler profile.
+The backend verifies ceil geometry and the exact manifest-owned push contents.
+Initial EXEC is compiler-owned, with no permanent tail clip or early return
+across workgroup barriers. Later guest EXEC writes keep their ordinary meaning.
+
+R1 compatibility metadata records only the legacy SGPRS allocation nibble and
+MEM_ORDERED boolean. The former never sets USER_SGPR count or initializes any
+normal scalar register. USER remains bounded to sixteen actual queue words.
+MEM_ORDERED is admitted only in the actual discovered compute domain without
+images, samplers or SAMPLE instructions; a final manifest guard retains that
+boundary. Its completion-order distinction is not replaced by a new host fence
+or workgroup barrier. All other R1 numeric/clamp/IEEE/debug/unknown fields and
+R2/R3/resource-provenance refusals remain exact. Loop-dependent undefined-register
+uses still require the compiler's bounded fail-closed proof; no register is
+silently initialized by this adapter. No commercial frame is implied.

@@ -507,8 +507,16 @@ impl CapturedCommands {
         initial: GraphicsState,
         limits: &CommandLimits,
     ) -> Result<CommandPlan, Error> {
+        self.plan_with_compute(initial, crate::compute::ComputeState::empty(), limits)
+    }
+    pub fn plan_with_compute(
+        &mut self,
+        initial: GraphicsState,
+        compute: crate::compute::ComputeState,
+        limits: &CommandLimits,
+    ) -> Result<CommandPlan, Error> {
         self.check_unconsumed()?;
-        let mut plan = super::plan_commands(&[&self.bytes], initial, limits)
+        let mut plan = super::plan_commands_with_compute(&[&self.bytes], initial, compute, limits)
             .map_err(|error| self.source_error(error))?;
         plan.source_usage(self.usage.command_bytes, self.usage.packets);
         self.transfer_origins(&mut plan)?;
@@ -519,8 +527,16 @@ impl CapturedCommands {
         initial: GraphicsState,
         limits: &CommandLimits,
     ) -> Result<OrderedCommands, Error> {
+        self.prepare_ordered_with_compute(initial, crate::compute::ComputeState::empty(), limits)
+    }
+    pub fn prepare_ordered_with_compute(
+        &mut self,
+        initial: GraphicsState,
+        compute: crate::compute::ComputeState,
+        limits: &CommandLimits,
+    ) -> Result<OrderedCommands, Error> {
         self.check_unconsumed()?;
-        OrderedCommands::captured(self, initial, limits)
+        OrderedCommands::captured(self, initial, compute, limits)
     }
     fn check_unconsumed(&self) -> Result<(), Error> {
         if self.transferred {

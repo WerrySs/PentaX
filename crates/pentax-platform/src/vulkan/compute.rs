@@ -20,6 +20,70 @@ pub(super) fn run(
     let mut budget = Budget::new(limits);
     let shader = prepared.shader();
     check_contract(shader, pentax_shader::ShaderStage::Compute)?;
+    // Runtime extents belong to the same opaque compiler contract as USER data.
+    // They are original thread counts, not ceil-rounded host group dimensions.
+    if let Some(extent) = prepared.thread_extent() {
+        let local = shader
+            .manifest()
+            .workgroup_size()
+            .ok_or(VulkanError::InvalidCompilerContract("compute local size"))?;
+        budget.work(3)?;
+        for axis in 0..3 {
+            if extent[axis] == 0 || local[axis] == 0 {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "compute thread geometry",
+                ));
+            }
+            let groups = extent[axis].div_ceil(local[axis]);
+            if prepared.groups()[axis] != groups || groups.checked_mul(local[axis]).is_none() {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "compute thread geometry",
+                ));
+            }
+        }
+    }
+    if let Some(relative) = shader.manifest().dispatch_thread_extent_dword() {
+        let extent = prepared
+            .thread_extent()
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "compute thread extent mode",
+            ))?;
+        let layout = shader
+            .manifest()
+            .push_data()
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "compute thread extent push",
+            ))?;
+        let start = layout
+            .start_dword
+            .checked_add(relative)
+            .and_then(|value| value.checked_mul(4))
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "compute thread extent push",
+            ))? as usize;
+        let input = prepared
+            .push_data()
+            .get(
+                start
+                    ..start
+                        .checked_add(12)
+                        .ok_or(VulkanError::InvalidCompilerContract(
+                            "compute thread extent push",
+                        ))?,
+            )
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "compute thread extent push",
+            ))?;
+        budget.work(12)?;
+        for (word, value) in input.chunks_exact(4).zip(extent) {
+            if word != value.to_le_bytes().as_slice() {
+                return Err(VulkanError::InvalidCompilerContract(
+                    "compute thread extent push",
+                ));
+            }
+        }
+    }
+
     budget.shader(shader.spirv().len())?;
     budget.work(
         prepared

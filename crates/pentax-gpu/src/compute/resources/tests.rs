@@ -19,6 +19,7 @@ fn description(users: u8) -> ComputeDescription {
         tg_size: false,
         float_mode: 0xc0,
         shared_memory_bytes: 0,
+        dispatch_thread_dimensions: false,
     }
 }
 fn program(words: &[u32]) -> ShaderProgram {

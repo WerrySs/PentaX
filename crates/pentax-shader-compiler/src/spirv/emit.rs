@@ -1050,6 +1050,14 @@ impl Emit<'_, '_> {
                     .ok_or(CompileError::Internal("user data register layout"))?;
                 self.shader_data_dword(index as u32)?
             }
+            Op::GetDispatchThreadExtent => {
+                let start = self
+                    .layout
+                    .dispatch_thread_extent_dword
+                    .filter(|_| inst.aux < 3)
+                    .ok_or(CompileError::Internal("dispatch thread extent layout"))?;
+                self.shader_data_dword(start + inst.aux)?
+            }
             Op::GetBuiltin => {
                 let kind = Builtin::from_code(inst.aux >> 8)
                     .ok_or(CompileError::Internal("builtin kind"))?;

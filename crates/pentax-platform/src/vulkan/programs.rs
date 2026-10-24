@@ -251,6 +251,28 @@ fn check_contract_inner(
     {
         return Err(VulkanError::InvalidCompilerContract("push data"));
     }
+    if let Some(relative) = manifest.dispatch_thread_extent_dword() {
+        let push = manifest
+            .push_data()
+            .ok_or(VulkanError::InvalidCompilerContract(
+                "compute thread extent push",
+            ))?;
+        if stage != ShaderStage::Compute
+            || relative < push.user_sgprs.len() as u32
+            || relative
+                .checked_add(3)
+                .is_none_or(|end| end > push.memory_offset_dword)
+            || push
+                .start_dword
+                .checked_add(relative)
+                .and_then(|value| value.checked_add(3))
+                .is_none_or(|end| end > 32)
+        {
+            return Err(VulkanError::InvalidCompilerContract(
+                "compute thread extent push",
+            ));
+        }
+    }
     let words = shader.spirv();
     if words.len() < 5 || words[0] != 0x0723_0203 || words[1] > 0x0001_0300 {
         return Err(VulkanError::InvalidCompilerContract("SPIR-V header"));
@@ -357,6 +379,7 @@ pub(super) fn prepare(
                     tg_size: false,
                     float_mode: 0xc0,
                     shared_memory_bytes: 0,
+                    dispatch_thread_dimensions: false,
                 }),
                 ShaderStage::Compute,
                 budget,
@@ -498,6 +521,7 @@ mod tests {
                     tg_size: false,
                     float_mode: 0xc0,
                     shared_memory_bytes: 0,
+                    dispatch_thread_dimensions: false,
                 }),
                 ShaderStage::Compute,
                 &mut budget,
@@ -558,6 +582,7 @@ mod tests {
                 tg_size: false,
                 float_mode: 0xc0,
                 shared_memory_bytes: 0,
+                dispatch_thread_dimensions: false,
             }),
             ShaderStage::Compute,
             &mut budget,
@@ -600,6 +625,7 @@ mod tests {
                 tg_size: false,
                 float_mode: 0xc0,
                 shared_memory_bytes: 0,
+                dispatch_thread_dimensions: false,
             }),
             ShaderStage::Compute,
             &mut budget,
@@ -614,6 +640,55 @@ mod tests {
         assert!(check_contract(&barrier, ShaderStage::Vertex).is_err());
         assert!(check_graphics_contract(&barrier, ShaderStage::Pixel).is_err());
         validate_optional("compute-basic-barrier-width-unconstrained", &barrier);
+
+        // An actual live initial EXEC uses runtime XYZ without an exact native64
+        // requirement. The old mode has no extent layout and a distinct product.
+        let mut common = CommonDescription::new(WaveSize::Wave64);
+        common.user_sgpr_count = 4;
+        common.buffers.push(BufferDescription {
+            user_sgpr: 0,
+            stride: 0,
+            swizzle: false,
+            index_stride: 0,
+            access: BufferAccess::WriteOnly,
+        });
+        let words = [binary(0x1a, 0, 130, 0), 0xe070_1000, 128 << 24, 0xbf81_0000];
+        let mut modules = Vec::new();
+        for thread_dimensions in [false, true] {
+            let mut budget = Budget::new(super::super::GpuLimits::default());
+            let product = one(
+                &words,
+                StageDescription::Compute(ComputeDescription {
+                    common: common.clone(),
+                    workgroup_size: [64, 1, 1],
+                    thread_ids: 1,
+                    group_id: [false; 3],
+                    workgroup_register: 4,
+                    tg_size: false,
+                    float_mode: 0xc0,
+                    shared_memory_bytes: 0,
+                    dispatch_thread_dimensions: thread_dimensions,
+                }),
+                ShaderStage::Compute,
+                &mut budget,
+            )
+            .unwrap();
+            assert!(check_contract(&product, ShaderStage::Compute).is_ok());
+            assert!(check_contract(&product, ShaderStage::Pixel).is_err());
+            assert_eq!(product.manifest().required_subgroup_size(), None);
+            assert!(!product.manifest().required_features().subgroup_ballot());
+            if thread_dimensions {
+                let relative = product.manifest().dispatch_thread_extent_dword().unwrap();
+                let push = product.manifest().push_data().unwrap();
+                assert_eq!(relative, push.user_sgprs.len() as u32);
+                assert_eq!(push.memory_offset_dword, relative + 3);
+                validate_optional("compute-runtime-thread-extents-original", &product);
+            } else {
+                assert_eq!(product.manifest().dispatch_thread_extent_dword(), None);
+            }
+            modules.push(product.spirv().to_vec());
+        }
+        assert_ne!(modules[0], modules[1]);
     }
 
     #[test]

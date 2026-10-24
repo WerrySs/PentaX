@@ -106,6 +106,7 @@ fn lod_actions_consume_the_existing_action_and_packet_budgets() {
     let bytes = encoded(&[0xc003_8e00, 2112, 0x4000, 0, 0]);
     let no_actions = CommandLimits {
         max_draws: 0,
+        max_dispatches: 0,
         ..Default::default()
     };
     assert!(matches!(

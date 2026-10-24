@@ -117,8 +117,55 @@ pub struct PreparedCompute {
     buffers: Vec<PreparedBuffer>,
     push: [u8; 128],
     groups: [u32; 3],
+    thread_extent: Option<[u32; 3]>,
+    resource_controls: ResourceControls,
     usage: Usage,
 }
+/// Named raw R1 compatibility metadata; never an initialized SGPR count or authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceControls {
+    legacy_sgprs: u8,
+    mem_ordered: bool,
+}
+impl ResourceControls {
+    pub fn legacy_sgprs(self) -> u8 {
+        self.legacy_sgprs
+    }
+    pub fn mem_ordered(self) -> bool {
+        self.mem_ordered
+    }
+    fn decode(r1: u32) -> Result<Self, Error> {
+        const VGPRS: u32 = 0x3f;
+        const LEGACY_SGPRS: u32 = 0xf << 6;
+        const MEM_ORDERED: u32 = 1 << 30;
+        // Public receiver compatibility for the legacy allocation nibble does
+        // not seed USER registers or increase the compiler's normal SGPR bank.
+        // All remaining numeric, clamp, IEEE, debug and unknown fields stay exact.
+        if r1 & !(VGPRS | LEGACY_SGPRS | MEM_ORDERED) != 0x2c_0000 {
+            return Err(Error::Unsupported("compute resource configuration"));
+        }
+        Ok(Self {
+            legacy_sgprs: ((r1 & LEGACY_SGPRS) >> 6) as u8,
+            mem_ordered: r1 & MEM_ORDERED != 0,
+        })
+    }
+    fn check_memory_domain(self, shader: &CompiledShader) -> Result<(), Error> {
+        // MEM_ORDERED distinguishes load/return-atomic versus SAMPLE completion
+        // classes. Actual discovery already refuses compute images/samplers;
+        // keep that closed domain explicit at this field's acceptance boundary.
+        // Neither a host fence nor an added barrier establishes this contract.
+        let manifest = shader.manifest();
+        if self.mem_ordered
+            && (!manifest.images().is_empty()
+                || !manifest.samplers().is_empty()
+                || manifest.required_features().image_query())
+        {
+            return Err(Error::Unsupported("compute MEM_ORDERED sampled class"));
+        }
+        Ok(())
+    }
+}
+
 /// One actual manifest descriptor-array element and owned preserved input.
 /// Construction is private; addresses never confer guest-memory authority.
 pub struct PreparedBuffer {
@@ -171,6 +218,14 @@ impl PreparedCompute {
     pub fn groups(&self) -> [u32; 3] {
         self.groups
     }
+    /// Original thread counts, distinct from ceil-rounded host workgroup counts.
+    pub fn thread_extent(&self) -> Option<[u32; 3]> {
+        self.thread_extent
+    }
+    pub fn resource_controls(&self) -> ResourceControls {
+        self.resource_controls
+    }
+
     pub fn buffer_address(&self) -> Option<u64> {
         if let [buffer] = self.buffers.as_slice() {
             Some(buffer.address)
@@ -271,7 +326,7 @@ impl ComputeState {
     }
     // Only defaults with an exact public field/register correspondence are
     // restored. Packed raw resource controls remain unknown.
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         *self = Self::for_new_queue();
         for index in [
             3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
@@ -301,7 +356,22 @@ impl ComputeState {
             .and_then(|i| self.values[i])
             .ok_or(Error::MissingRegister(reg))
     }
-    fn write(&mut self, reg: u32, value: u32) -> Result<(), Error> {
+    pub(crate) fn set_dispatch_base(&mut self, words: &[u32]) -> Result<(), Error> {
+        if words.len() != 4 || words[0] != 0xc002_1102 || words[1] & 15 != 1 {
+            return Err(Error::Unsupported("compute indirect base packet"));
+        }
+        let address = u64::from(words[2] & !7) | (u64::from(words[3] & 0xffff) << 32);
+        if address >= 1 << 47 {
+            return Err(Error::Unsupported("indirect base address"));
+        }
+        self.indirect_base = Some(address);
+        Ok(())
+    }
+    /// Shared offset routing; this exposes no register or memory authority.
+    pub(crate) fn admits_shader_register(reg: u32) -> bool {
+        Self::index(reg).is_some()
+    }
+    pub(crate) fn write(&mut self, reg: u32, value: u32) -> Result<(), Error> {
         let index = Self::index(reg).ok_or(Error::Unsupported("compute SH register"))?;
         self.values[index] = Some(value);
         Ok(())
@@ -452,14 +522,50 @@ pub fn prepare(
     prepare_state(regs, groups, mode, memory, budget)
 }
 
-// Exact public CS_W32_EN selects the guest wave width. Other initiator controls
+const USE_THREAD_DIMENSIONS: u32 = 1 << 5;
+
+// Exact public CS_W32_EN selects the guest wave width. The independent thread
+// dimension bit selects checked geometry and runtime initial EXEC. Other controls
 // retain the existing bounded profile; no subgroup width is inferred from host.
 fn dispatch_wave_size(mode: u32) -> Result<WaveSize, Error> {
-    match mode {
+    match mode & !USE_THREAD_DIMENSIONS {
         0x0001 | 0x0005 | 0x0041 => Ok(WaveSize::Wave64),
         0x8001 | 0x8005 | 0x8041 => Ok(WaveSize::Wave32),
         _ => Err(Error::Unsupported("compute dispatch initiator")),
     }
+}
+
+fn dispatch_geometry(
+    dimensions: [u32; 3],
+    local: [u32; 3],
+    thread_dimensions: bool,
+    maximum: u64,
+) -> Result<([u32; 3], u64), Error> {
+    let mut groups = dimensions;
+    if thread_dimensions {
+        for axis in 0..3 {
+            let size = local[axis];
+            if size == 0 {
+                return Err(Error::Limit("dispatch local geometry"));
+            }
+            // div_ceil avoids the overflowing (threads + size - 1) formula.
+            // A nonzero divisor and u32 thread count guarantee its u32 result.
+            groups[axis] = dimensions[axis].div_ceil(size);
+            // GlobalInvocationId is u32. Reject padded axis wrap before any
+            // shader/resource read, even when a caller sets an enormous quota.
+            groups[axis]
+                .checked_mul(size)
+                .ok_or(Error::Limit("dispatch thread extent"))?;
+        }
+    }
+    let mut invocations = 1u64;
+    for value in groups.into_iter().chain(local) {
+        invocations = invocations
+            .checked_mul(u64::from(value))
+            .filter(|value| *value != 0 && *value <= maximum)
+            .ok_or(Error::Limit("dispatch invocations"))?;
+    }
+    Ok((groups, invocations))
 }
 
 /// Compile a private register snapshot derived by complete command admission.
@@ -526,17 +632,15 @@ fn prepare_state(
         }
     }
     let local = [regs.get(0x207)?, regs.get(0x208)?, regs.get(0x209)?];
-    let mut invocations = 1_u64;
-    for value in groups.into_iter().chain(local) {
-        invocations = invocations
-            .checked_mul(u64::from(value))
-            .filter(|n| *n != 0 && *n <= limits.max_invocations)
-            .ok_or(Error::Limit("dispatch invocations"))?;
-    }
+    let thread_dimensions = mode & USE_THREAD_DIMENSIONS != 0;
+    let thread_extent = thread_dimensions.then_some(groups);
+    let (groups, invocations) =
+        dispatch_geometry(groups, local, thread_dimensions, limits.max_invocations)?;
     budget.usage.invocations = invocations;
     let r1 = regs.get(0x212)?;
     let r2 = regs.get(0x213)?;
-    if r1 & !0x3f != 0x2c_0000 || r2 & !(0x1fbe | 0x00ff_8000) != 0 || regs.get(0x228)? != 0 {
+    let resource_controls = ResourceControls::decode(r1)?;
+    if r2 & !(0x1fbe | 0x00ff_8000) != 0 || regs.get(0x228)? != 0 {
         return Err(Error::Unsupported("compute resource configuration"));
     }
     // Public GFX10.3 COMPUTE_PGM_RSRC2.LDS_SIZE is a nine-bit count of
@@ -613,6 +717,7 @@ fn prepare_state(
         tg_size: r2 & 0x400 != 0,
         float_mode: 0xc0,
         shared_memory_bytes,
+        dispatch_thread_dimensions: thread_dimensions,
     };
     let resource_limits = Limits {
         max_host_bytes: limits
@@ -643,6 +748,7 @@ fn prepare_state(
     let (compiled, spans, resource_usage) = discovery.finish().map_err(map_error)?.into_parts();
     budget.host(resource_usage.host_bytes)?;
     budget.work(resource_usage.work)?;
+    resource_controls.check_memory_domain(&compiled)?;
     let manifest = compiled.manifest();
     let preflight =
         memory.preflight_buffers(&spans, limits.max_work.saturating_sub(budget.usage.work))?;
@@ -668,6 +774,35 @@ fn prepare_state(
                 .is_none_or(|end| end > 32)
         {
             return Err(Error::Unsupported("compute buffer offset layout"));
+        }
+    }
+    if let Some(relative) = manifest.dispatch_thread_extent_dword() {
+        let extent = thread_extent.ok_or(Error::Unsupported("compute thread extent mode"))?;
+        let layout = manifest
+            .push_data()
+            .ok_or(Error::Unsupported("compute thread extent layout"))?;
+        let end = relative
+            .checked_add(3)
+            .ok_or(Error::Unsupported("compute thread extent layout"))?;
+        if relative < layout.user_sgprs.len() as u32 || end > layout.memory_offset_dword {
+            return Err(Error::Unsupported("compute thread extent overlap"));
+        }
+        let start = layout
+            .start_dword
+            .checked_add(relative)
+            .and_then(|value| value.checked_mul(4))
+            .ok_or(Error::Unsupported("compute thread extent layout"))?
+            as usize;
+        let output = push
+            .get_mut(
+                start
+                    ..start
+                        .checked_add(12)
+                        .ok_or(Error::Unsupported("compute thread extent layout"))?,
+            )
+            .ok_or(Error::Unsupported("compute thread extent layout"))?;
+        for (word, value) in output.chunks_exact_mut(4).zip(extent) {
+            word.copy_from_slice(&value.to_le_bytes());
         }
     }
     budget.host(
@@ -712,6 +847,8 @@ fn prepare_state(
         buffers,
         push,
         groups,
+        thread_extent,
+        resource_controls,
         usage: budget.usage,
     })
 }
@@ -741,3 +878,7 @@ mod hint_tests;
 #[cfg(test)]
 #[path = "compute/wave_tests.rs"]
 mod wave_tests;
+
+#[cfg(test)]
+#[path = "compute/thread_dimensions_tests.rs"]
+mod thread_dimensions_tests;

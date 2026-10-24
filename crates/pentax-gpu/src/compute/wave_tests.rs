@@ -195,7 +195,7 @@ fn wave64_keeps_register_guards_before_fetch_and_descriptors_before_payload_read
     let dispatch = Dispatch {
         state: original,
         groups: [1, 1, 1],
-        mode: 0x21,
+        mode: 0x29,
         indirect: None,
     };
     assert!(matches!(

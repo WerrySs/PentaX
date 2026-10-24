@@ -61,6 +61,56 @@ pub struct Dispatch {
     pub(super) indirect: Option<u64>,
 }
 impl Dispatch {
+    /// Exact admitted CS snapshot; this grants no memory authority.
+    pub fn diagnostic_state(&self) -> ComputeState {
+        self.state
+    }
+    /// Shared closed packet decoder for the same processor's ordered DCB path.
+    /// This captures state only; shader/resource admission remains prepare_dispatch.
+    pub(crate) fn from_packet(state: ComputeState, words: &[u32]) -> Result<Self, Error> {
+        let Some(&raw) = words.first() else {
+            return Err(Error::Unsupported("compute dispatch packet"));
+        };
+        let header = Header::new(raw);
+        if header.opcode() == 0x15
+            && matches!(header.low_byte(), 0 | 2)
+            && header.packet_type() == 3
+            && header.count() == 3
+            && words.len() == 5
+        {
+            return Ok(Self {
+                state,
+                groups: [words[1], words[2], words[3]],
+                mode: words[4],
+                indirect: None,
+            });
+        }
+        if matches!(raw, 0xc001_1600 | 0xc002_1600)
+            && words.len() == usize::from(header.count()) + 2
+        {
+            let (address, mode) = if words.len() == 4 {
+                (u64::from(words[1]) | (u64::from(words[2]) << 32), words[3])
+            } else {
+                let base = state
+                    .indirect_base
+                    .filter(|value| *value != 0)
+                    .ok_or(Error::Unsupported("missing indirect args base"))?;
+                (
+                    base.checked_add(u64::from(words[1]))
+                        .ok_or(Error::Unsupported("indirect args extent"))?,
+                    words[2],
+                )
+            };
+            extent(address, 12, 4)?;
+            return Ok(Self {
+                state,
+                groups: [0; 3],
+                mode,
+                indirect: Some(address),
+            });
+        }
+        Err(Error::Unsupported("compute dispatch packet"))
+    }
     /// Read only the shader address encoded by the admitted queue snapshot.
     /// This grants no backing access and performs no shader fetch/compilation.
     pub fn shader_address(&self) -> Result<u64, Error> {
@@ -514,41 +564,19 @@ fn plan_commands_for_queue(
                 if dispatches.len() >= limits.max_dispatches {
                     return Err(Error::Limit("command dispatches"));
                 }
-                dispatches.push(Dispatch {
-                    state,
-                    groups: [frame.word(at + 1), frame.word(at + 2), frame.word(at + 3)],
-                    mode: frame.word(at + 4),
-                    indirect: None,
-                });
+                let words = std::array::from_fn::<_, 5, _>(|index| frame.word(at + index));
+                dispatches.push(Dispatch::from_packet(state, &words)?);
                 actions.push(Action::Dispatch(dispatches.len() - 1));
             }
             0x16 if matches!(header.raw(), 0xc001_1600 | 0xc002_1600) => {
                 if dispatches.len() >= limits.max_dispatches {
                     return Err(Error::Limit("command dispatches"));
                 }
-                let (address, mode) = if length == 4 {
-                    (
-                        u64::from(frame.word(at + 1)) | (u64::from(frame.word(at + 2)) << 32),
-                        frame.word(at + 3),
-                    )
-                } else {
-                    let base = state
-                        .indirect_base
-                        .filter(|v| *v != 0)
-                        .ok_or(Error::Unsupported("missing indirect args base"))?;
-                    (
-                        base.checked_add(u64::from(frame.word(at + 1)))
-                            .ok_or(Error::Unsupported("indirect args extent"))?,
-                        frame.word(at + 2),
-                    )
-                };
-                extent(address, 12, 4)?;
-                dispatches.push(Dispatch {
-                    state,
-                    groups: [0; 3],
-                    mode,
-                    indirect: Some(address),
-                });
+                let mut words = [0u32; 4];
+                for (index, value) in words[..length].iter_mut().enumerate() {
+                    *value = frame.word(at + index);
+                }
+                dispatches.push(Dispatch::from_packet(state, &words[..length])?);
                 actions.push(Action::Dispatch(dispatches.len() - 1));
             }
             0x37 if length >= 4 => {

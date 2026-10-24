@@ -544,3 +544,37 @@ feature checks. Unsupported guest cache modes and register fields remain refused
 Original physical fixtures cover cross-invocation storage visibility and implicit
 image sampling with both LOD-query components. Their presence in source does not
 establish a passed GPU run or a rendered commercial game frame.
+
+
+### Compute and graphics on one processor
+
+Graphics submissions carry a separate compute shader register bank alongside
+raster state. Compute SH writes route by their admitted register offsets; header
+shader type alone does not select the bank. Static plans retain a CS snapshot for
+each inline dispatch. Ordered streams resolve register arrays at their actual
+cursor. A queued submission selects completed processor state only when its FIFO
+head activates; graphics and compute banks retire together after full completion.
+Independent asynchronous compute queues retain their own state and tickets.
+
+Inline dispatches use the existing checked compute preparation, resource upload,
+fence and atomic owner-memory writeback. A later draw reads resources at its own
+execution position. Compute consumes a prior fresh-draw receipt, so only a later
+real draw can supply a graphics flip. Dispatch and draw quotas are independent;
+shared action storage, retained bytes, preparation work and invocation limits
+remain checked before allocation and execution.
+
+Thread-dimension dispatches carry requested thread extents separately from the
+rounded workgroup counts. The runtime checks ceiling arithmetic and charges the
+padded workload. Three runtime extent words initialize the logical EXEC mask from
+XYZ bounds. This initial mask is not a permanent output clip: subsequent guest
+SALU writes can change EXEC. Padded invocations still participate in uniform
+workgroup barriers. Values that can reach an active use without initialization
+remain explicit refusals.
+
+Legacy SGPR allocation metadata does not initialize registers, set USER_SGPR
+count or enlarge the supported scalar register namespace. MEM_ORDERED is admitted
+only within the qualified compute profile that excludes image/sampler operations;
+it is not a request for a device-wide fence or permission for new cache modes.
+Other unsupported resource, register and numeric-control fields stay explicit.
+These processor and shader contracts do not by themselves establish commercial
+game rendering, playability or a measured frame rate.

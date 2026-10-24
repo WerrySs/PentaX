@@ -9,6 +9,7 @@ mod logical_wave64;
 mod matrix;
 mod shared_memory;
 mod storage_barrier;
+mod thread_dimensions;
 use super::*;
 use pentax_shader::ShaderStage;
 
@@ -42,6 +43,7 @@ fn profile(stage: ShaderStage) -> Profile {
                 access: BufferAccess::WriteOnly,
             });
             StageDescription::Compute(ComputeDescription {
+                dispatch_thread_dimensions: false,
                 common,
                 workgroup_size: [8, 1, 1],
                 thread_ids: 1,

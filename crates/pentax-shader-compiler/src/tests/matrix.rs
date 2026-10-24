@@ -16,6 +16,7 @@ fn accepted_scalar_vector_and_alias_programs_validate() {
         access: BufferAccess::WriteOnly,
     });
     let profile = Profile::new(StageDescription::Compute(ComputeDescription {
+        dispatch_thread_dimensions: false,
         common: description,
         workgroup_size: [8, 1, 1],
         thread_ids: 1,
