@@ -307,7 +307,24 @@ fn runtime_extent_layout_is_disjoint_and_mode_is_explicit_without_extent_special
     assert!(fallback.manifest().shader_data_binding().is_some());
     assert!(fallback.manifest().dispatch_thread_extent_dword().is_some());
     cs.dispatch_thread_dimensions = false;
+    // Without thread dimensions, observing initial EXEC keeps the legacy
+    // entry ballot live. It still needs an actual exact native subgroup.
+    let limits = Limits::default();
+    let program = ShaderProgram::decode(&words, ShaderStage::Compute, &limits).unwrap();
+    let no_subgroup = Profile::new(StageDescription::Compute(cs.clone())).unwrap();
+    assert!(matches!(
+        compile(&program, &no_subgroup, &limits),
+        Err(CompileError::Unsupported(Unsupported {
+            pc: 0,
+            opcode: None,
+            reason: UnsupportedReason::RequiresExactSubgroup,
+        }))
+    ));
+    cs.common.subgroup = Some(SubgroupProfile { size: 64 });
     let old = module(&words, cs);
+    assert_eq!(old.manifest().required_subgroup_size(), Some(64));
+    assert!(old.manifest().required_features().subgroup_basic());
+    assert!(old.manifest().required_features().subgroup_ballot());
     assert_eq!(old.manifest().dispatch_thread_extent_dword(), None);
     assert_ne!(old.spirv(), compiled.spirv());
 }
