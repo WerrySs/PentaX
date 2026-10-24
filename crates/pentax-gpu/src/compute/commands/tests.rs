@@ -4,6 +4,125 @@ use std::cell::Cell;
 mod builders;
 
 #[test]
+fn tc_l2_writes_preserve_payload_increment_and_shared_graphics_decode() {
+    for destination in [0x100, 0x200, 0x4000_0200] {
+        for cache in 0..4 {
+            for confirm in 0..2 {
+                for same_address in 0..2 {
+                    let control =
+                        destination | (cache << 25) | (confirm << 20) | (same_address << 16);
+                    let words = [0xc005_3700, control, 0x2000, 0, 19, 23, 29];
+                    let memory = source(&[(0x1000, &words)]);
+                    let plan = plan_commands(
+                        &ComputeState::empty(),
+                        root(&words),
+                        &memory,
+                        &Default::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(memory.reads.get(), 1);
+                    let expected: Vec<u8> = if same_address == 0 {
+                        [19u32, 23, 29]
+                            .into_iter()
+                            .flat_map(u32::to_le_bytes)
+                            .collect()
+                    } else {
+                        29u32.to_le_bytes().to_vec()
+                    };
+                    let mut commands = plan.commands();
+                    let Command::Write(write) = commands.next().unwrap() else {
+                        panic!("write action")
+                    };
+                    assert_eq!(write.address(), 0x2000);
+                    assert_eq!(write.bytes(), expected);
+                    assert_eq!(plan.usage().write_bytes, expected.len());
+                    assert!(commands.next().is_none());
+                    let raw: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+                    let (MemoryAction::Write(write), usage) =
+                        memory_packet(&raw, 65536, 65536).unwrap()
+                    else {
+                        panic!("graphics write action")
+                    };
+                    assert_eq!(write.address(), 0x2000);
+                    assert_eq!(write.bytes(), expected);
+                    assert_eq!(usage.write_bytes, expected.len());
+                }
+            }
+        }
+    }
+    let words = [0xc002_3700, 0x10_0200, 0, 0];
+    let memory = source(&[(0x1000, &words)]);
+    let plan = plan_commands(
+        &ComputeState::empty(),
+        root(&words),
+        &memory,
+        &Default::default(),
+    )
+    .unwrap();
+    let Command::Write(write) = plan.commands().next().unwrap() else {
+        panic!("empty write")
+    };
+    assert!(write.bytes().is_empty());
+}
+
+#[test]
+fn tc_l2_writes_keep_destination_reserved_bits_extent_and_budget_refusals() {
+    let check = |control: u32| {
+        let words = [0xc003_3700, control, 0x2000, 0, 19];
+        let memory = source(&[(0x1000, &words)]);
+        assert!(matches!(
+            plan_commands(
+                &ComputeState::empty(),
+                root(&words),
+                &memory,
+                &Default::default()
+            ),
+            Err(Error::Unsupported("write data control"))
+        ));
+        assert_eq!(memory.reads.get(), 1);
+    };
+    for destination in 0..32 {
+        if !matches!(destination, 2 | 4 | 5) {
+            check(((destination & 1) << 30) | ((destination & 0x1e) << 7));
+        }
+    }
+    let allowed = 0x4000_0000 | 0xf00 | 0x10000 | 0x100000 | 0x0600_0000;
+    for bit in 0..32 {
+        if allowed & (1 << bit) == 0 {
+            check(0x10_0200 | (1 << bit));
+        }
+    }
+    let words = [0xc004_3700, 0x10_0200, 0x2000, 0, 19, 23];
+    let memory = source(&[(0x1000, &words)]);
+    for limits in [
+        CommandLimits {
+            max_write_bytes: 7,
+            ..Default::default()
+        },
+        CommandLimits {
+            max_actions: 0,
+            ..Default::default()
+        },
+    ] {
+        assert!(matches!(
+            plan_commands(&ComputeState::empty(), root(&words), &memory, &limits),
+            Err(Error::Limit(_))
+        ));
+    }
+    let unaligned = [0xc003_3700, 0x10_0200, 0x2001, 0, 19];
+    let memory = source(&[(0x1000, &unaligned)]);
+    assert!(
+        plan_commands(
+            &ComputeState::empty(),
+            root(&unaligned),
+            &memory,
+            &Default::default()
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn release_packets_preserve_exact_data_and_interrupt_context_without_early_effects() {
     for header in [0xc006_1060, 0xc006_4900, 0xc006_4902] {
         for data in 0..=3 {

@@ -581,14 +581,22 @@ impl CodeCache {
 
     /// Compare bounded live cache bytes without allocating a second code copy.
     fn matches(&self, offset: usize, expected: &[u8]) -> Result<bool, PlatformError> {
-        let mut scratch = [0; 128];
-        for (index, chunk) in expected.chunks(scratch.len()).enumerate() {
+        for (index, chunk) in expected.chunks(128).enumerate() {
             let at = index
-                .checked_mul(scratch.len())
+                .checked_mul(128)
                 .and_then(|n| offset.checked_add(n))
                 .ok_or(PlatformError::OutOfBounds)?;
-            self.read(at, &mut scratch[..chunk.len()])?;
-            if scratch[..chunk.len()] != *chunk {
+            if at.checked_add(chunk.len()).is_none_or(|end| end > self.len) {
+                return Err(PlatformError::OutOfBounds);
+            }
+            // SAFETY: This nonempty fragment is wholly inside the owned,
+            // committed reservation. The cache cannot be sent or shared across
+            // threads; shared access excludes writes and protection changes.
+            // The immutable slice ends at this comparison and never escapes.
+            let actual = unsafe {
+                std::slice::from_raw_parts(self.base.as_ptr().cast::<u8>().add(at), chunk.len())
+            };
+            if actual != chunk {
                 return Ok(false);
             }
         }

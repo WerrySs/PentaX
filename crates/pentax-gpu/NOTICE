@@ -407,3 +407,27 @@ compute analysis that excludes images/samplers/SAMPLE. Store vscnt ordering
 and peer-visibility barriers remain separately qualified contracts.
 https://github.com/torvalds/linux/blob/v6.12/drivers/gpu/drm/amd/include/asic_reg/gc/gc_10_3_0_sh_mask.h
 https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/llvm/docs/AMDGPUUsage.rst
+
+TC_L2 WRITE_DATA coherent-backing destination
+------------------------------------------
+The public producer's combined destination4 encodes hardware DST_SEL2 with
+engine0. AMD PAL's ME and MEC packet definitions name that hardware selector
+TC_L2. The existing bounded Rust write action now also admits that destination;
+its ordered executor settles earlier work and commits the checked same-owner
+backing write before continuing. Address increment, same-address last payload,
+write confirmation and cache policy retain the existing serialized contract.
+Register, GDS and unknown destination/bit profiles remain unsupported.
+
+Field correspondence: AMD PAL revision
+c5e800072a32f68b6ccc4422936d96167c6e0728, ME_WRITE_DATA and MEC_WRITE_DATA.
+Copyright (c) 2025 Advanced Micro Devices, Inc.; public MIT-licensed definitions.
+No AMD implementation or generated declaration is copied into this Rust code.
+https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/chip/gfx9_plus_merged_f32_me_pm4_packets.h
+https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/chip/gfx9_plus_merged_f32_mec_pm4_packets.h
+
+Public KytyPS5 revision7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3 encodes
+the combined destination in AgcDcbWriteData/AgcAcbWriteData and accepts4 in
+CommandProcessor::WriteData. Existing GPL-2.0-only attribution is retained.
+The new positive/refusal/FIFO consumer fixtures are original synthetic cases.
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp
+https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/libs/agc.cpp

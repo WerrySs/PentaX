@@ -582,7 +582,13 @@ fn plan_commands_for_queue(
             0x37 if length >= 4 => {
                 let control = frame.word(at + 1);
                 let destination = ((control >> 30) & 1) | ((control >> 7) & 0x1e);
-                if !matches!(destination, 2 | 5)
+                // The public producer folds ENGINE_SEL into bit0 of its destination.
+                // ME/MEC DST_SEL=2 with engine0 is TC_L2, public destination4.
+                // Our serialized executor settles earlier GPU work and applies
+                // the checked write to the same owner's coherent backing before
+                // continuing, including WR_CONFIRM. This is not register/GDS access.
+                const TC_L2_DESTINATION: u32 = 4;
+                if !matches!(destination, 2 | TC_L2_DESTINATION | 5)
                     || control & !(0x4000_0000 | 0xf00 | 0x10000 | 0x100000 | 0x0600_0000) != 0
                 {
                     return Err(Error::Unsupported("write data control"));

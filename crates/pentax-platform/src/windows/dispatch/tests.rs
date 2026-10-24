@@ -132,6 +132,59 @@ fn host_supports_baseline_and_refuses_unknown_features() {
 mod windows_only {
     use super::*;
 
+    #[test]
+    fn cache_comparison_covers_unaligned_fragments_and_observes_live_rx_bytes() {
+        let _mapping_guard = vm_lock();
+        let mut cache = CodeCache::reserve_near(BIAS, CACHE_BYTES).unwrap();
+        let expected = [0x5a; 257];
+        let offset = cache.len - expected.len();
+        cache.write(offset, &expected).unwrap();
+        assert!(cache.matches(offset, &expected).unwrap());
+        for changed in [0, 127, 128, 255, 256] {
+            cache.write(offset + changed, &[0xa5]).unwrap();
+            assert!(!cache.matches(offset, &expected).unwrap());
+            cache.write(offset + changed, &[expected[changed]]).unwrap();
+            assert!(cache.matches(offset, &expected).unwrap());
+        }
+        cache.seal_executable().unwrap();
+        assert!(cache.matches(offset, &expected).unwrap());
+        cache.arm_writable().unwrap();
+        cache.write(offset + 128, &[0xa5]).unwrap();
+        cache.seal_executable().unwrap();
+        assert!(!cache.matches(offset, &expected).unwrap());
+    }
+
+    #[test]
+    fn cache_comparison_keeps_empty_and_per_fragment_refusal_order() {
+        let _mapping_guard = vm_lock();
+        let mut cache = CodeCache::reserve_near(BIAS, CACHE_BYTES).unwrap();
+        let offset = cache.len - 128;
+        cache.write(offset, &[0x5a; 128]).unwrap();
+        assert!(cache.matches(offset, &[0x5a; 128]).unwrap());
+        // A mismatching first fragment returns before a later invalid fragment.
+        assert!(!cache.matches(offset, &[0xa5; 129]).unwrap());
+        assert!(matches!(
+            cache.matches(offset, &[0x5a; 129]),
+            Err(PlatformError::OutOfBounds)
+        ));
+        // The whole current fragment is checked before comparing its bytes.
+        assert!(matches!(
+            cache.matches(offset + 1, &[0xa5; 128]),
+            Err(PlatformError::OutOfBounds)
+        ));
+        for outside in [cache.len, cache.len + 1, usize::MAX] {
+            assert!(cache.matches(outside, &[]).unwrap());
+            assert!(matches!(
+                cache.matches(outside, &[0]),
+                Err(PlatformError::OutOfBounds)
+            ));
+        }
+        assert!(matches!(
+            cache.matches(usize::MAX - 63, &[0; 128]),
+            Err(PlatformError::OutOfBounds)
+        ));
+    }
+
     fn staged() -> (
         SymbolicLinkPlan<'static>,
         NativeAddressSpace,

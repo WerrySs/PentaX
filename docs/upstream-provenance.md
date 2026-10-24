@@ -1970,3 +1970,17 @@ and [LLVM AMDGPU field and ordering documentation](https://releases.llvm.org/19.
 Required attribution and scoped field compatibility details are retained in the
 GPU and shader compiler notices. Original fixtures and bounded host transactions
 are project code; no proprietary shader or command data is included.
+
+### TC_L2 command-processor writes
+
+The AMD PAL ME and MEC packet declarations identify WRITE_DATA destination
+selector 2 as TC_L2. The pinned KytyPS5 graphics processor combines the selector
+and engine fields and performs ordered memory writes for that destination.
+PentaX admits the qualified graphics-engine combination through its existing
+checked memory action; it preserves reserved-bit refusals and owner-memory
+transaction rules. This is an original Rust implementation of the packet
+semantics, with original regression fixtures.
+
+Primary sources: [AMD PAL ME packet declarations](https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/chip/gfx9_plus_merged_f32_me_pm4_packets.h),
+[AMD PAL MEC packet declarations](https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/chip/gfx9_plus_merged_f32_mec_pm4_packets.h),
+and [KytyPS5 command execution](https://github.com/KytyPS5/KytyPS5/blob/7b7f9a70c652afd6ec8ea8599884d9b4b3abc9f3/src/graphics/guest_gpu/graphicsRun.cpp).

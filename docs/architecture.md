@@ -578,3 +578,16 @@ it is not a request for a device-wide fence or permission for new cache modes.
 Other unsupported resource, register and numeric-control fields stay explicit.
 These processor and shader contracts do not by themselves establish commercial
 game rendering, playability or a measured frame rate.
+
+WRITE_DATA supports the qualified TC_L2 memory destination on the serialized
+graphics and compute processors. The shared decoder retains sequential and
+fixed-address write behavior, checked output extents and strict reserved-bit
+validation. Execution still checks current-owner permissions, command-buffer
+exclusion and byte quotas; a write that completes before a wait is not replayed
+when that submission resumes.
+
+Native cache attestation compares each checked fragment directly with its live
+owned bytes. Source validation, executable-page state and all publication checks
+remain mandatory. Fragment bounds and incremental refusal order are preserved;
+this avoids a temporary copy without skipping byte comparisons. A reduction in
+copying does not establish a measured improvement in game performance.

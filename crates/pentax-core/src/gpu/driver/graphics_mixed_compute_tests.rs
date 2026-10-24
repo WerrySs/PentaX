@@ -127,6 +127,127 @@ fn seed_acb(driver: &mut Driver, memory: &mut PausedNativeMemory<'_>, base: u64)
 }
 
 #[test]
+fn tc_l2_dcb_writes_are_ordered_live_and_not_replayed_after_a_wait() {
+    let mut space = owner();
+    let base = space.reserved_ranges().next().unwrap().address;
+    let mut memory = space.pause().unwrap();
+    let mut driver = Driver::new(Default::default());
+    let acb = driver.queues;
+    let output = base + 0x30000;
+    let gate = output + 24;
+    memory.write(output, &[0xa5; 48]).unwrap();
+    memory.write(gate, &0u32.to_le_bytes()).unwrap();
+    let mut stream = vec![
+        0xc005_3700,
+        0x10_0200,
+        (output + 4) as u32,
+        ((output + 4) >> 32) as u32,
+        19,
+        23,
+        29,
+    ];
+    wait(&mut stream, gate);
+    copy(&mut stream, output + 4, output + 32);
+    stream.extend([
+        0xc005_3700,
+        0x11_0200,
+        (output + 40) as u32,
+        ((output + 40) >> 32) as u32,
+        31,
+        37,
+        41,
+    ]);
+    let range = put(&mut memory, base + 0x1000, &stream);
+    submit(&mut driver, &mut memory, base + 0x100, range);
+    assert!(
+        driver
+            .pump_direct_graphics(&mut memory, None, None)
+            .unwrap()
+    );
+    assert_eq!(read(&memory, output + 4, 12), bytes(&[19, 23, 29]));
+    assert_eq!(word(&memory, output + 32), 0xa5a5_a5a5);
+    assert_eq!(word(&memory, output + 40), 0xa5a5_a5a5);
+    memory.write(output + 4, &43u32.to_le_bytes()).unwrap();
+    assert!(
+        driver
+            .pump_direct_graphics(&mut memory, None, None)
+            .unwrap()
+    );
+    assert_eq!(word(&memory, output + 4), 43);
+    assert_eq!(driver.usage.memory_written_bytes, 12);
+    memory.write(gate, &7u32.to_le_bytes()).unwrap();
+    pump(&mut driver, &mut memory);
+    assert_eq!(word(&memory, output + 4), 43);
+    assert_eq!(word(&memory, output + 32), 43);
+    assert_eq!(word(&memory, output + 40), 41);
+    for guard in [0, 16, 20, 28, 36, 44] {
+        assert_eq!(word(&memory, output + guard), 0xa5a5_a5a5);
+    }
+    assert_eq!(driver.usage.memory_written_bytes, 20);
+    assert_eq!(driver.usage.dispatches, 0);
+    assert_eq!(driver.usage.draws, 0);
+    assert_eq!(driver.queues, acb);
+    assert_eq!(driver.pending_direct_graphics(), 0);
+    assert!(!driver.poisoned);
+}
+
+#[test]
+fn tc_l2_dcb_writes_preserve_output_permissions_command_exclusion_and_quota() {
+    for scenario in 0..3 {
+        let mut space = owner();
+        let base = space.reserved_ranges().next().unwrap().address;
+        let output = base + 0x30000;
+        let command = base + 0x1000;
+        let destination = if scenario == 1 { command } else { output + 4 };
+        let stream = [
+            0xc005_3700,
+            0x10_0200,
+            destination as u32,
+            (destination >> 32) as u32,
+            19,
+            23,
+            29,
+        ];
+        {
+            let mut memory = space.pause().unwrap();
+            memory.write(output, &[0xa5; 20]).unwrap();
+            put(&mut memory, command, &stream);
+        }
+        if scenario == 0 {
+            space
+                .protect(
+                    output,
+                    0x10000,
+                    NativePermissions::READ_WRITE.with_gpu(true, false),
+                )
+                .unwrap();
+        }
+        let mut memory = space.pause().unwrap();
+        let mut driver = Driver::new(super::super::Limits {
+            max_memory_write_bytes: if scenario == 2 { 8 } else { 1024 },
+            ..Default::default()
+        });
+        let range = NativeRange {
+            address: command,
+            size: (stream.len() * 4) as u64,
+        };
+        submit(&mut driver, &mut memory, base + 0x100, range);
+        assert!(
+            driver
+                .pump_direct_graphics(&mut memory, None, None)
+                .is_err()
+        );
+        assert_eq!(read(&memory, output, 20), [0xa5; 20]);
+        assert_eq!(read(&memory, command, stream.len() * 4), bytes(&stream));
+        assert_eq!(driver.usage.memory_written_bytes, 0);
+        assert_eq!(driver.usage.written_bytes, 0);
+        assert!(driver.poisoned);
+        driver.revoke_graphics_owner(memory.owner_id()).unwrap();
+        assert_eq!(driver.pending_direct_graphics(), 0);
+    }
+}
+
+#[test]
 fn mixed_dcb_zero_dispatches_retire_separate_cs_state_without_touching_any_acb_queue() {
     let mut space = owner();
     let base = space.reserved_ranges().next().unwrap().address;
