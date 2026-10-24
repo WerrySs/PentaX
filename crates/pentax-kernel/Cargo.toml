@@ -10,7 +10,7 @@ description = "Bounded stateful Rust port of pinned Kyty libkernel services"
 [dependencies]
 pentax-config = { path = "../pentax-config" }
 cap-std = "=4.0.3"
-skrifa = { version = "=0.44.0", default-features = false, features = ["std"] }
+skrifa = { version = "=0.48.0", default-features = false, features = ["std"] }
 epaint_default_fonts = { version = "=0.37.0", default-features = false }
 
 [lints]
