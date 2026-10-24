@@ -273,7 +273,11 @@ fn logical_wave64_lds_cross_half_data_and_exec_use_real_workgroup_storage() {
     assert!(
         barriers
             .iter()
-            .all(|(_, a)| constant(a[0], 2) && constant(a[1], 2) && constant(a[2], 0x108))
+            // DS completions order LDS; S_BARRIER also orders storage buffers.
+            .zip([0x108, 0x148, 0x108])
+            .all(|((_, a), semantics)| constant(a[0], 2)
+                && constant(a[1], 2)
+                && constant(a[2], semantics))
     );
     assert!(ops.iter().any(|(op, a)| *op == 176 && constant(a[3], 128)));
 }
