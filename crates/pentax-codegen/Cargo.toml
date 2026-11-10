@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 pentax-linker = { path = "../pentax-linker" }
 pentax-loader.workspace = true
-iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "encoder", "instr_info", "op_code_info"] }
+iced-x86 = { version = "=1.22.0", default-features = false, features = ["std", "decoder", "encoder", "instr_info", "op_code_info"] }
 
 [lints]
 workspace = true
